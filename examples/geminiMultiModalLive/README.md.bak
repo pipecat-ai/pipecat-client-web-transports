@@ -1,0 +1,34 @@
+
+# Pipecat JavaScript Client SDK Example using a Gemini MultiModal Live Transport
+
+## Setup
+
+Build transport dependencies
+
+```
+# from base folder
+$ yarn
+$ yarn workspace @pipecat-ai/realtime-websocket-transport build
+$ yarn workspace @pipecat-ai/gemini-live-websocket-transport
+```
+
+## Install and run locally
+
+```
+npm i
+npm run dev
+
+cp env.example .env
+# update .env with API keys
+```
+
+Open [http://localhost:5173/](http://localhost:5173/)
+
+## Demo code
+
+This is bare-bones LLM voice chat app that sets up an [RTVI Client](https://github.com/pipecat-ai/pipecat-client-web)(Pipecat's client-side JS component) with a [GeminiLiveWebsocketTransport](../../transports/gemini-live-websocket-transport/src/geminiLiveWebSocketTransport.ts) to communicate directly with Google's Multimodal Live API over a websocket connection.
+
+The application code is all in two files:
+
+  - [index.html](./index.html)
+  - [src/app.ts](./src/app.ts)

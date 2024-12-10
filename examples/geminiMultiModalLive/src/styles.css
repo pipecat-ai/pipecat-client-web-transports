@@ -1,0 +1,138 @@
+body {
+  max-width: 800px;
+  margin: 20px 20px;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+#join-div a {
+  color: #2563eb;
+  cursor: pointer;
+}
+
+#connected-div {
+  width: 90vw;
+  margin: 20px 2vw;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+#controls {
+  display: flex;
+  justify-content: left;
+  margin: 10px 0;
+}
+
+#controls div {
+  padding: 5px;
+  margin: 0 5px;
+}
+
+button {
+  padding: 5px;
+  margin: 0 5px;
+  width: 8em;
+  border-radius: 10px;
+  background-color: aliceblue;
+}
+
+button:active {
+  transform: translateY(1px); /* Move the button down slightly */
+  box-shadow: 2px 2px #666; /* Add a shadow to create a pressed effect */
+}
+
+#text-div {
+  display: flex;
+  flex-direction: column;
+  margin: 10px 0;
+}
+
+#text-div label {
+  margin: 5px 0;
+}
+
+#text-div textarea {
+  margin: 5px 0;
+  padding: 5px;
+  width: 50%;
+  border-radius: 10px;
+}
+
+#bubbles {
+  margin: 20px 0px;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: row;
+}
+
+.bubble {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  transition: transform 0.1s ease;
+  margin: 15px;
+}
+
+#user-bubble {
+  background-color: #4caf50;
+}
+
+#bot-bubble {
+  background-color: #2196f3;
+}
+
+#content h2 {
+  padding-left: 20px;
+}
+
+#chat-text {
+  display: flex;
+  flex-direction: column;
+  align-items: left;
+  overflow-y: auto;
+  padding: 20px;
+  flex: 1;
+}
+
+.user-message {
+  display: flex;
+  flex-direction: column;
+  background-color: #f0f0f0;
+  padding: 16px;
+  margin: 12px 6px;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+
+.user-message .interim {
+  color: #707070;
+}
+
+.user-message::before {
+  content: "User\A";
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
+  display: block;
+  padding-bottom: 0.4em;
+}
+
+.assistant-message {
+  display: flex;
+  flex-direction: column;
+  background-color: #ffffff;
+  border: 1px solid #e0e0e0;
+  margin: 12px 6px;
+  padding: 16px;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+
+.assistant-message::before {
+  content: "Assistant";
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
+  display: block;
+  padding-bottom: 0.4em;
+}

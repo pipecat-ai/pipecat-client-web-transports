@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>My Web App</title>
+    <link rel="stylesheet" href="src/styles.css" />
+    <script src="src/app.ts" type="module"></script>
+  </head>
+
+  <body>
+    <div id="connected-div">
+      <div id="status">Transport state: disconnected</div>
+      <div id="controls">
+        <button id="toggleBot">Connect</button>
+        <button id="toggleMute">Mute Mic</button>
+        <div>
+          <label for="microphone">Microphone:</label>
+          <select name="microphone" id="mic-picker"></select>
+        </div>
+      </div>
+      <div id="text-div">
+        <label for="text-input">Enter text:</label>
+        <textarea
+          id="text-input"
+          name="text-input"
+          rows="4"
+          cols="50"
+        ></textarea>
+        <button id="submit-text">Submit</button>
+      </div>
+      <div id="bubbles">
+        <div id="user-bubble" class="bubble"></div>
+        <div id="bot-bubble" class="bubble"></div>
+      </div>
+    </div>
+
+    <div id="audio"></div>
+  </body>
+</html>
