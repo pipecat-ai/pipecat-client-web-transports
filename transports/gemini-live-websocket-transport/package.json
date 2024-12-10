@@ -1,0 +1,41 @@
+{
+  "name": "@pipecat-ai/gemini-live-websocket-transport",
+  "version": "0.2.1",
+  "license": "BSD-2-Clause",
+  "main": "dist/index.js",
+  "module": "dist/index.module.js",
+  "types": "dist/index.d.ts",
+  "source": "src/index.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pipecat-ai/pipecat-client-web-transports.git"
+  },
+  "files": [
+    "dist",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "parcel build --no-cache",
+    "dev": "parcel watch",
+    "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.16.0",
+    "@typescript-eslint/parser": "^7.16.0",
+    "eslint": "9.11.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-simple-import-sort": "^12.1.1",
+    "@types/node": "^22.9.0"
+  },
+  "dependencies": {
+    "@pipecat-ai/realtime-websocket-transport": "*",
+    "realtime-ai": "0.2.1"
+  },
+  "description": "Pipecat Gemini Multimodal Live Transport Package",
+  "author": "Jon Taylor",
+  "bugs": {
+    "url": "https://github.com/pipecat-ai/pipecat-client-web-transports/issues"
+  },
+  "homepage": "https://github.com/pipecat-ai/pipecat-client-web-transports/blob/main/transports/gemini-live-websocket-transport/README.md"
+}
