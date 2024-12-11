@@ -21,6 +21,8 @@
     "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0"
   },
   "devDependencies": {
+    "@pipecat-ai/client-js": "~0.3.0",
+    "@pipecat-ai/realtime-websocket-transport": "*",
     "@typescript-eslint/eslint-plugin": "^7.16.0",
     "@typescript-eslint/parser": "^7.16.0",
     "eslint": "9.11.1",
@@ -28,12 +30,12 @@
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "@types/node": "^22.9.0"
   },
-  "dependencies": {
-    "@pipecat-ai/realtime-websocket-transport": "*",
-    "realtime-ai": "0.2.1"
+  "peerDependencies": {
+    "@pipecat-ai/client-js": "~0.3.0",
+    "@pipecat-ai/realtime-websocket-transport": "~0.3.0"
   },
   "description": "Pipecat Gemini Multimodal Live Transport Package",
-  "author": "Jon Taylor",
+  "author": "Daily.co",
   "bugs": {
     "url": "https://github.com/pipecat-ai/pipecat-client-web-transports/issues"
   },

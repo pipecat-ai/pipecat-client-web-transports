@@ -932,7 +932,7 @@
     "@parcel/utils" "2.13.2"
     nullthrows "^1.1.1"
 
-"@pipecat-ai/client-js@0.3.1":
+"@pipecat-ai/client-js@~0.3.0":
   version "0.3.1"
   resolved "https://registry.yarnpkg.com/@pipecat-ai/client-js/-/client-js-0.3.1.tgz#d2178d78f8db854b2410ebdcf308275a868195ef"
   integrity sha512-qUcZKPXP4rYzEZcNDVtCDj6RhieTYutFgF0hnC/v6Jq1T2KY9XrKrrioXY5wO1MlWRo2CzUvLDFfKw/KOWS9yA==
@@ -2222,17 +2222,6 @@ react-error-overlay@6.0.9:
   version "0.14.2"
   resolved "https://registry.yarnpkg.com/react-refresh/-/react-refresh-0.14.2.tgz#3833da01ce32da470f1f936b9d477da5c7028bf9"
   integrity sha512-jCvmsr+1IUSMUyzOkRcvnVbX3ZYC6g9TDrDbFuFmRDq7PD4yaGbLKNQL6k2jnArV8hjYxh7hVhAZB6s9HDGpZA==
-
-realtime-ai@0.2.1:
-  version "0.2.1"
-  resolved "https://registry.yarnpkg.com/realtime-ai/-/realtime-ai-0.2.1.tgz#65ebe4fb05bb6298a3a5938dc542397e0ab7d8aa"
-  integrity sha512-2zhCO9V9zdoBwusjq6FkiEF3yrwyJryLUo+OMYPU0rkXYh4SVcIP1dx06qbEMRTuaB9U2wEWvqxPaEQnXNzovw==
-  dependencies:
-    "@types/events" "^3.0.3"
-    clone-deep "^4.0.1"
-    events "^3.3.0"
-    typed-emitter "^2.1.0"
-    uuid "^10.0.0"
 
 regenerator-runtime@^0.14.0, regenerator-runtime@^0.14.1:
   version "0.14.1"
