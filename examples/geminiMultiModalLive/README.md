@@ -36,6 +36,10 @@ cp env.example .env
 
 Open [http://localhost:5173/](http://localhost:5173/)
 
+## Documentation Reference
+[RTVI Client Documentation](https://docs.pipecat.ai/client/introduction)
+[Gemini Multimodal Live Documentation](https://ai.google.dev/api/multimodal-live)
+
 ## Usage
 
 ### Initialization
@@ -68,7 +72,7 @@ let RTVIConfig: RTVIClientOptions = {
   transport,
   params: {
     baseUrl: "api",
-    requestData: { llm_service_options },
+    requestData: { },
   },
   enableMic: true,
   enableCam: false,
@@ -89,7 +93,7 @@ const llm_service_options: GeminiLLMServiceOptions = {
 - Gemini integration currently does not support transcripts
 
 ## Contributing
-Feel free to submit issues and pull requests for improvements or bug fixes.
+Feel free to submit issues and pull requests for improvements or bug fixes. Be nice :)
 
 ## License
 BSD-2 Clause

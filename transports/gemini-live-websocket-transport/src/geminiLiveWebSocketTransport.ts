@@ -12,10 +12,8 @@ import {
   TransportStartError,
 } from "@pipecat-ai/client-js";
 
-const HOST = `preprod-generativelanguage.googleapis.com`;
-// const HOST = `generativelanguage.googleapis.com`;
+const HOST = `generativelanguage.googleapis.com`;
 const BIDI_PATH = `google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent`;
-// const MODEL = "models/gemini-2.0-flash-exp-bidi-alt";
 const MODEL = "models/gemini-2.0-flash-exp";
 
 export interface GeminiLLMServiceOptions extends LLMServiceOptions {
