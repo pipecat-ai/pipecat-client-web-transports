@@ -1,6 +1,6 @@
 {
   "name": "@pipecat-ai/realtime-websocket-transport",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "license": "BSD-2-Clause",
   "main": "dist/index.js",
   "module": "dist/index.module.js",
@@ -21,16 +21,14 @@
     "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0"
   },
   "devDependencies": {
-    "@pipecat-ai/client-js": "~0.3.0",
-    "@typescript-eslint/eslint-plugin": "^7.16.0",
-    "@typescript-eslint/parser": "^7.16.0",
+    "@pipecat-ai/client-js": "~0.3.2",
     "eslint": "9.11.1",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "@types/node": "^22.9.0"
   },
   "peerDependencies": {
-    "@pipecat-ai/client-js": "~0.3.0"
+    "@pipecat-ai/client-js": "~0.3.2"
   },
   "dependencies": {
     "@daily-co/daily-js": "^0.73.0"

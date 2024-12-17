@@ -1,16 +1,17 @@
 import {
   DailyMediaManager,
+  LLMServiceOptions,
   MediaManager,
   RealTimeWebsocketTransport,
-  LLMServiceOptions,
 } from "@pipecat-ai/realtime-websocket-transport";
 
-import { ReconnectingWebSocket } from "../../../lib/websocket-utils/reconnectingWebSocket.js";
 import {
+  logger,
   RTVIMessage,
   RTVIMessageType,
   TransportStartError,
 } from "@pipecat-ai/client-js";
+import { ReconnectingWebSocket } from "../../../lib/websocket-utils/reconnectingWebSocket.js";
 
 const HOST = `generativelanguage.googleapis.com`;
 const BIDI_PATH = `google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent`;
@@ -256,6 +257,21 @@ export class GeminiLiveWebsocketTransport extends RealTimeWebsocketTransport {
     } catch (e) {
       console.error("sendMsg error", e);
     }
+  }
+
+  // Not implemented
+  enableScreenShare(enable: boolean): void {
+    logger.error(
+      "startScreenShare not implemented for GeminiLiveWebsocketTransport"
+    );
+    throw new Error("Not implemented");
+  }
+
+  public get isSharingScreen(): boolean {
+    logger.error(
+      "isSharingScreen not implemented for GeminiLiveWebsocketTransport"
+    );
+    return false;
   }
 }
 
