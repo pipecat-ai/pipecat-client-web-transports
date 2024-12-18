@@ -12,7 +12,7 @@
   "license": "BSD-2-Clause",
   "description": "",
   "dependencies": {
-    "@pipecat-ai/realtime-websocket-transport": "file:../../transports/realtime-websocket-transport",
+    "@pipecat-ai/llm-direct-transport": "file:../../transports/llm-direct-transport",
     "@pipecat-ai/gemini-live-websocket-transport": "file:../../transports/gemini-live-websocket-transport",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",

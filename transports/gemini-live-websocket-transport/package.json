@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "@pipecat-ai/client-js": "~0.3.0",
-    "@pipecat-ai/realtime-websocket-transport": "*",
+    "@pipecat-ai/llm-direct-transport": "*",
     "@typescript-eslint/eslint-plugin": "^7.16.0",
     "@typescript-eslint/parser": "^7.16.0",
     "eslint": "9.11.1",
@@ -32,7 +32,7 @@
   },
   "peerDependencies": {
     "@pipecat-ai/client-js": "~0.3.0",
-    "@pipecat-ai/realtime-websocket-transport": "~0.3.3"
+    "@pipecat-ai/llm-direct-transport": "~0.3.3"
   },
   "description": "Pipecat Gemini Multimodal Live Transport Package",
   "author": "Daily.co",

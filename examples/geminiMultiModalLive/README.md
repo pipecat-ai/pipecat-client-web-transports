@@ -20,7 +20,7 @@ This application demonstrates a real-time voice interaction system using the RTV
 ```
 # from base folder
 $ yarn
-$ yarn workspace @pipecat-ai/realtime-websocket-transport build
+$ yarn workspace @pipecat-ai/llm-direct-transport build
 $ yarn workspace @pipecat-ai/gemini-live-websocket-transport
 ```
 

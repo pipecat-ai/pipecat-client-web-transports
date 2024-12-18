@@ -1,5 +1,5 @@
 {
-  "name": "@pipecat-ai/realtime-websocket-transport",
+  "name": "@pipecat-ai/llm-direct-transport",
   "version": "0.3.3",
   "license": "BSD-2-Clause",
   "main": "dist/index.js",
@@ -40,5 +40,5 @@
   "bugs": {
     "url": "https://github.com/pipecat-ai/pipecat-client-web-transports/issues"
   },
-  "homepage": "https://github.com/pipecat-ai/pipecat-client-web-transports/blob/main/transports/realtime-websocket-transport/README.md"
+  "homepage": "https://github.com/pipecat-ai/pipecat-client-web-transports/blob/main/transports/llm-direct-transport/README.md"
 }

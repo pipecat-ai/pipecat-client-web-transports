@@ -52,7 +52,7 @@ Typical media flow using a DailyTransport:
 [![Demo](https://img.shields.io/badge/Demo-forestgreen)](examples/geminiMultiModalLive/README.md)
 ![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/gemini-live-websocket-transport)
 
-This Transport extends the [RealTimeWebSocketTransport](transports/realtime-websocket-transport/README) and connects directly to Gemini over a WebSocket connection using the Multimodal Live API. This type of transport is great for testing different services out without the need to build a server component. Just be aware that it is insecure since you will need to have access to your Gemini API Key client-side so not probably something you want to use in your production app.
+This Transport extends the [LLMDirectTransport](transports/llm-direct-transport/README) and connects directly to Gemini over a WebSocket connection using the Multimodal Live API. This type of transport is great for testing different services out without the need to build a server component. Just be aware that it is insecure since you will need to have access to your Gemini API Key client-side so not probably something you want to use in your production app.
 
 Media flow using a GeminiLiveWebSocketTransport:
 ```
@@ -75,7 +75,7 @@ Media flow using a GeminiLiveWebSocketTransport:
 ```bash
 $ yarn
 $ yarn workspace @pipecat-ai/daily-transport build
-$ yarn workspace @pipecat-ai/realtime-websocket-transport build
+$ yarn workspace @pipecat-ai/llm-direct-transport build
 $ yarn workspace @pipecat-ai/gemini-live-websocket-transport build
 ```
 

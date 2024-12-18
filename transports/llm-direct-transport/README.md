@@ -2,7 +2,7 @@
 
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/reference/js/transports/realtime)
 [![Demo](https://img.shields.io/badge/Demo-forestgreen)](examples/geminiMultiModalLive/README.md)
-![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/realtime-websocket-transport)
+![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/llm-direct-transport)
 
 A flexible abstract transport class for implementing connections to directly communicate with LLMs that support voice-to-voice modalities.
 
@@ -16,7 +16,7 @@ npm install \
 
 ## Overview
 
-The `RealTimeWebsocketTransport` class provides a foundation for building transports for direct voice-to-voice communication:
+The `LLMDirectTransport` class provides a foundation for building transports for direct voice-to-voice communication:
 
 - Audio/video device management
 - Bi-directional audio streaming
@@ -30,10 +30,10 @@ This Transport type is primarily intended for dev-only and testing purposes. Sin
 
 ## Usage
 
-To use this package, create a new Transport by extending the `RealTimeWebsocketTransport` class and implement the following abstract functions:
+To use this package, create a new Transport by extending the `LLMDirectTransport` class and implement the following abstract functions:
 
 ```typescript
-import { RealTimeWebsocketTransport } from '@pipecat-ai/real-time-websocket-transport';
+import { LLMDirectTransport } from '@pipecat-ai/real-time-websocket-transport';
 
 export interface MyLLMOptions extends LLMServiceOptions {
     api_key: string,
@@ -41,7 +41,7 @@ export interface MyLLMOptions extends LLMServiceOptions {
     // LLM service may want to support during setup/connection
 }
 
-class MyLLMServiceTransport extends RealTimeWebsocketTransport {
+class MyLLMServiceTransport extends LLMDirectTransport {
   constructor(service_options: GeminiLLMServiceOptions, manager?: MediaManager) {
     super(service_options, manager);
     // Initialize class variables

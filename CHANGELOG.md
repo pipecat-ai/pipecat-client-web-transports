@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.2] - 2024-12-11
 
-- Added new abstract `RealtimeWebsocketTransport` class for direct voice-to-voice transports
+- Added new abstract `LLMDirectTransport` class for direct voice-to-voice transports
 - Added new `GeminiLiveWebsocketTransport`
 - Added [basic example](./examples/geminiMultiModalLive) for using `GeminiLiveWebsocketTransport`
 

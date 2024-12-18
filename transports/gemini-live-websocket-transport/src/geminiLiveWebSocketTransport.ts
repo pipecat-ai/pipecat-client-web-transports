@@ -1,9 +1,9 @@
 import {
   DailyMediaManager,
   MediaManager,
-  RealTimeWebsocketTransport,
+  LLMDirectTransport,
   LLMServiceOptions,
-} from "@pipecat-ai/realtime-websocket-transport";
+} from "@pipecat-ai/llm-direct-transport";
 
 import { ReconnectingWebSocket } from "../../../lib/websocket-utils/reconnectingWebSocket.js";
 import {
@@ -39,7 +39,7 @@ export interface GeminiLLMServiceOptions extends LLMServiceOptions {
   };
 }
 
-export class GeminiLiveWebsocketTransport extends RealTimeWebsocketTransport {
+export class GeminiLiveWebsocketTransport extends LLMDirectTransport {
   private declare _ws: ReconnectingWebSocket | null;
   private declare _botResponseID: number;
   private declare _botIsReadyResolve:
