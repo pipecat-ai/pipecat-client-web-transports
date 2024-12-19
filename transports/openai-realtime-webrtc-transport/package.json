@@ -1,0 +1,45 @@
+{
+  "name": "@pipecat-ai/openai-realtime-webrtc-transport",
+  "version": "0.3.3",
+  "license": "BSD-2-Clause",
+  "main": "dist/index.js",
+  "module": "dist/index.module.js",
+  "types": "dist/index.d.ts",
+  "source": "src/index.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pipecat-ai/pipecat-client-web-transports.git"
+  },
+  "files": [
+    "dist",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "parcel build --no-cache",
+    "dev": "parcel watch",
+    "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0"
+  },
+  "dependencies": {
+    "@daily-co/daily-js": "^0.73.0"
+  },
+  "devDependencies": {
+    "@pipecat-ai/client-js": "~0.3.0",
+    "@typescript-eslint/eslint-plugin": "^7.16.0",
+    "@typescript-eslint/parser": "^7.16.0",
+    "eslint": "9.11.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-simple-import-sort": "^12.1.1",
+    "@types/node": "^22.9.0"
+  },
+  "peerDependencies": {
+    "@pipecat-ai/client-js": "~0.3.0",
+    "@pipecat-ai/llm-direct-transport": "~0.3.3"
+  },
+  "description": "Pipecat OpenAI RealTime Transport Package",
+  "author": "Daily.co",
+  "bugs": {
+    "url": "https://github.com/pipecat-ai/pipecat-client-web-transports/issues"
+  },
+  "homepage": "https://github.com/pipecat-ai/pipecat-client-web-transports/blob/main/transports/openai-llm-direct-transport/README.md"
+}
