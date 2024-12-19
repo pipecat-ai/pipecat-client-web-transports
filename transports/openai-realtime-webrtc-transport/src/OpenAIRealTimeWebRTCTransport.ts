@@ -517,8 +517,24 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     this._callbacks.onLocalAudioLevel?.(ev.audioLevel);
   }
 
+  private _sendTextInput(text: string, role: string) {
+    if (!this._openai_channel) return;
+    const event = {
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role,
+        content: [{ type: "input_text", text }],
+      },
+    };
+    this._openai_channel.send(JSON.stringify(event));
+    this._openai_channel.send(JSON.stringify({ type: "response.create" }));
+  }
+
   sendMessage(message: RTVIMessage): void {
-    console.log("TODO: implement sendMessage");
+    if (message?.type === "send-text") {
+      this._sendTextInput(message.data as string, "user");
+    }
   }
 }
 
