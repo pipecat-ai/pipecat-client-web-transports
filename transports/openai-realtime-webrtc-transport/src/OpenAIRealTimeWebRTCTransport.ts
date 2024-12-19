@@ -441,6 +441,11 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
   private async _handleOpenAIMessage(msg: Record<string, any>) {
     const type = msg.type;
     switch (type) {
+      case "error":
+        console.warn("openai error", msg);
+        // todo: most openai errors are recoverable. For non-recoverable ones
+        // we should throw an RTVIError and disconnect.
+        break;
       case "session.created":
         this.state = "ready";
         if (this._botIsReadyResolve) {
