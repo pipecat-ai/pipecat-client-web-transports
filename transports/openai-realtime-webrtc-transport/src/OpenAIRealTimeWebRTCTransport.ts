@@ -27,7 +27,25 @@ const MODEL = "gpt-4o-realtime-preview-2024-12-17";
 export interface OpenAIServiceOptions {
   api_key: string;
   model?: string;
-  initial_message?: Array<unknown>;
+  initial_messages?: Array<{ content: string; role: string }>;
+  session_config?: {
+    modailities?: string;
+    instructions?: string;
+    voice?:
+      | "alloy"
+      | "ash"
+      | "ballad"
+      | "coral"
+      | "echo"
+      | "sage"
+      | "shimmer"
+      | "verse";
+    input_audio_transcription?: {
+      model: "whisper-1";
+    };
+    temperature?: number;
+    max_tokens?: number | "inf";
+  };
 }
 
 export class OpenAIRealTimeWebRTCTransport extends Transport {
@@ -246,7 +264,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
       if (data.action === "append_to_messages" && data.arguments) {
         for (const a of data.arguments) {
           if (a.name === "messages") {
-            const value = a.value as [{ role: string; content: string }];
+            const value = a.value as Array<{ content: string; role: string }>;
             this._sendTextInput(value);
           }
         }
@@ -395,19 +413,6 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
       this.state = "error";
       throw new TransportStartError(msg);
     }
-
-    // let config = { setup: { model, generation_config } };
-    // await this._sendMsg(config);
-
-    // For this bare-bones prototype, let's just see if we have any initial_messages in the params
-    // we were constructed with.
-    // if (service_options?.initial_messages) {
-    //   service_options.initial_messages.forEach(
-    //     (msg: { content: string; role: string }) => {
-    //       this._sendTextInput(msg.content, msg.role);
-    //     }
-    //   );
-    // }
   }
 
   private _cleanup() {
@@ -419,6 +424,20 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     this._botTracks = {};
   }
 
+  private _updateSession() {
+    const service_options = this._service_options as OpenAIServiceOptions;
+    const session_config = service_options?.session_config ?? {};
+    session_config.input_audio_transcription =
+      session_config.input_audio_transcription ?? { model: "whisper-1" };
+    console.log("updating session", session_config);
+    this._openai_channel!.send(
+      JSON.stringify({ type: "session.update", session: session_config })
+    );
+    if (service_options?.initial_messages) {
+      this._sendTextInput(service_options.initial_messages);
+    }
+  }
+
   private async _handleOpenAIMessage(msg: Record<string, any>) {
     const type = msg.type;
     switch (type) {
@@ -428,6 +447,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
           this._botIsReadyResolve();
           this._botIsReadyResolve = null;
         }
+        this._updateSession();
         break;
       case "input_audio_buffer.speech_started":
         this._callbacks.onUserStartedSpeaking?.();
@@ -527,7 +547,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     this._callbacks.onLocalAudioLevel?.(ev.audioLevel);
   }
 
-  private _sendTextInput(messages: [{ content: string; role: string }]) {
+  private _sendTextInput(messages: Array<{ content: string; role: string }>) {
     if (!this._openai_channel) return;
     messages.forEach((m) => {
       const event = {
