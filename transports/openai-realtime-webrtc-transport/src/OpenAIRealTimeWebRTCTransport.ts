@@ -1,5 +1,6 @@
 import {
   Participant,
+  RTVIActionRequestData,
   RTVIClientOptions,
   RTVIError,
   RTVIMessage,
@@ -125,7 +126,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
 
     this.state = "connecting";
 
-    await this.connectLLM();
+    await this._connectLLM();
 
     this.state = "connected";
     this._callbacks.onConnected?.();
@@ -133,7 +134,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
 
   async disconnect(): Promise<void> {
     this.state = "disconnecting";
-    await this.disconnectLLM();
+    await this._disconnectLLM();
     this.state = "disconnected";
     this._callbacks.onDisconnected?.();
   }
@@ -224,6 +225,68 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     return tracks;
   }
 
+  async sendReadyMessage(): Promise<void> {
+    const p = new Promise<void>((resolve) => {
+      if (this.state === "ready") {
+        resolve();
+      } else {
+        this._botIsReadyResolve = resolve;
+      }
+    });
+    await p;
+    this._onMessage({
+      type: RTVIMessageType.BOT_READY,
+      data: {},
+    } as RTVIMessage);
+  }
+
+  sendMessage(message: RTVIMessage): void {
+    if (message.type === "action") {
+      const data = message.data as RTVIActionRequestData;
+      if (data.action === "append_to_messages" && data.arguments) {
+        for (const a of data.arguments) {
+          if (a.name === "messages") {
+            const value = a.value as [{ role: string; content: string }];
+            this._sendTextInput(value);
+          }
+        }
+      }
+    }
+  }
+
+  async _connectLLM(): Promise<void> {
+    const audioSender = this._senders["audio"];
+    if (!audioSender) {
+      console.error("No audio sender found");
+      let micTrack =
+        this._daily.participants()?.local?.tracks?.audio?.persistentTrack;
+      if (!micTrack) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+          });
+          micTrack = stream.getAudioTracks()[0];
+        } catch (e) {
+          console.error(
+            "Failed to get mic track. OpenAI requires audio on initial connection.",
+            e
+          );
+          throw new RTVIError(
+            "Failed to get mic track. OpenAI requires audio on initial connection."
+          );
+        }
+      }
+      this._senders["audio"] = this._openai_cxn!.addTrack(micTrack);
+    }
+
+    await this._negotiateConnection();
+  }
+
+  async _disconnectLLM(): Promise<void> {
+    this._cleanup();
+    // await this._daily.leave();
+  }
+
   private _attachDeviceListeners(): void {
     this._daily.on("track-started", this._handleTrackStarted.bind(this));
     this._daily.on("track-stopped", this._handleTrackStopped.bind(this));
@@ -296,35 +359,6 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     // });
   }
 
-  async connectLLM(): Promise<void> {
-    const audioSender = this._senders["audio"];
-    if (!audioSender) {
-      console.error("No audio sender found");
-      let micTrack =
-        this._daily.participants()?.local?.tracks?.audio?.persistentTrack;
-      if (!micTrack) {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-          });
-          micTrack = stream.getAudioTracks()[0];
-        } catch (e) {
-          console.error(
-            "Failed to get mic track. OpenAI requires audio on initial connection.",
-            e
-          );
-          throw new RTVIError(
-            "Failed to get mic track. OpenAI requires audio on initial connection."
-          );
-        }
-      }
-      console.log("addTrack on connection");
-      this._senders["audio"] = this._openai_cxn!.addTrack(micTrack);
-    }
-
-    await this._negotiateConnection();
-  }
-
   async _negotiateConnection(): Promise<void> {
     const cxn = this._openai_cxn!;
     const service_options = this._service_options as OpenAIServiceOptions;
@@ -338,8 +372,6 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
       // Start the session using the Session Description Protocol (SDP)
       const offer = await cxn.createOffer();
       await cxn.setLocalDescription(offer);
-
-      console.log("sending offer to LLM", offer);
 
       const model = service_options?.model ?? MODEL;
 
@@ -378,11 +410,6 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     // }
   }
 
-  async disconnectLLM(): Promise<void> {
-    this._cleanup();
-    // await this._daily.leave();
-  }
-
   private _cleanup() {
     this._openai_channel?.close();
     this._openai_channel = null;
@@ -390,21 +417,6 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     this._openai_cxn = null;
     this._senders = {};
     this._botTracks = {};
-  }
-
-  async sendReadyMessage(): Promise<void> {
-    const p = new Promise<void>((resolve) => {
-      if (this.state === "ready") {
-        resolve();
-      } else {
-        this._botIsReadyResolve = resolve;
-      }
-    });
-    await p;
-    this._onMessage({
-      type: RTVIMessageType.BOT_READY,
-      data: {},
-    } as RTVIMessage);
   }
 
   private async _handleOpenAIMessage(msg: Record<string, any>) {
@@ -461,11 +473,9 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     const sender = this._senders[ev.track.kind];
     if (sender) {
       if (sender.track?.id !== ev.track.id) {
-        console.log("Replace track on sender");
         sender.replaceTrack(ev.track);
       }
     } else {
-      console.log("Add track to sender");
       this._senders[ev.track.kind] = this._openai_cxn!.addTrack(ev.track);
     }
     this._callbacks.onTrackStarted?.(
@@ -517,24 +527,20 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     this._callbacks.onLocalAudioLevel?.(ev.audioLevel);
   }
 
-  private _sendTextInput(text: string, role: string) {
+  private _sendTextInput(messages: [{ content: string; role: string }]) {
     if (!this._openai_channel) return;
-    const event = {
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role,
-        content: [{ type: "input_text", text }],
-      },
-    };
-    this._openai_channel.send(JSON.stringify(event));
+    messages.forEach((m) => {
+      const event = {
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: m.role,
+          content: [{ type: "input_text", text: m.content }],
+        },
+      };
+      this._openai_channel!.send(JSON.stringify(event));
+    });
     this._openai_channel.send(JSON.stringify({ type: "response.create" }));
-  }
-
-  sendMessage(message: RTVIMessage): void {
-    if (message?.type === "send-text") {
-      this._sendTextInput(message.data as string, "user");
-    }
   }
 }
 
