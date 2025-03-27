@@ -578,8 +578,20 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
       case "input_audio_buffer.speech_stopped":
         this._callbacks.onUserStoppedSpeaking?.();
         break;
+      // TODO: uncomment when we have a way to align user transcripts with audio
+      //       currently, these come in like a firehose after the user finishes
+      //       their turn, immediately followed by the completed transcription,
+      //       making them not particularly useful.
+      // case "conversation.item.input_audio_transcription.delta":
+      //   this._callbacks.onUserTranscript?.({
+      //     text: msg.delta,
+      //     final: false,
+      //     timestamp: // missing from openai messages
+      //     user_id: "user",
+      //   });
+      //   break;
       case "conversation.item.input_audio_transcription.completed":
-        // User transcripts usually arrive after the bot has started speaking again
+        // Final user transcripts usually arrive after the bot has started speaking again
         this._callbacks.onUserTranscript?.({
           text: msg.transcript,
           final: true,
@@ -596,12 +608,14 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
       case "output_audio_buffer.stopped":
         this._callbacks.onBotStoppedSpeaking?.();
         break;
-      case "response.audio_transcript.delta":
-        // There does not seem to be a way to align bot text output with audio. Text
-        // streams faster than audio and all events, and all events are streamed at
-        // LLM output speed.
-        this._callbacks.onBotTtsText?.({ text: msg.delta });
-        break;
+      // TODO: uncomment when we have a way to align bot transcripts with audio
+      //       currently, they do not include timestamps and they come in like a
+      //       firehose right as the bot begins speaking. They are immediately
+      //       followed by the completed transcription and completing long
+      //       before the bot finishes speaking.
+      // case "response.audio_transcript.delta":
+      //   this._callbacks.onBotTtsText?.({ text: msg.delta });
+      //   break;
       case "response.audio_transcript.done":
         this._callbacks.onBotTranscript?.({ text: msg.transcript });
         break;
@@ -620,7 +634,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
         break;
       case "response.function_call_arguments.delta":
       default:
-        logger.debug("ignoring openai message", msg);
+        logger.debug(`ignoring openai message: ${msg.type}`, msg);
     }
   }
 
