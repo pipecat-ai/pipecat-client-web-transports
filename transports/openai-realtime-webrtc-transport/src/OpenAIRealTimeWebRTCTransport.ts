@@ -143,6 +143,8 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
       this._attachDeviceListeners();
     }
 
+    this.initDevices();
+
     this._attachLLMListeners();
 
     this.state = "initialized";
