@@ -34,7 +34,7 @@ export abstract class RealTimeWebsocketTransport extends Transport {
     this._service_options = service_options;
     this._mediaManager = manager;
     this._mediaManager.setUserAudioCallback(
-      this.handleUserAudioStream.bind(this)
+      this.handleUserAudioStream.bind(this),
     );
   }
 
@@ -71,7 +71,7 @@ export abstract class RealTimeWebsocketTransport extends Transport {
   // client and call super() on this method
   initialize(
     options: RTVIClientOptions,
-    messageHandler: (ev: RTVIMessage) => void
+    messageHandler: (ev: RTVIMessage) => void,
   ): void {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
@@ -79,23 +79,23 @@ export abstract class RealTimeWebsocketTransport extends Transport {
 
     this._mediaManager.setRTVIOptions(options);
 
-    this.state = "initializing";
-
     this.initializeLLM();
 
     this.attachDeviceListeners();
     this.attachLLMListeners();
 
-    this.state = "initialized";
+    this.state = "disconnected";
   }
 
   async initDevices(): Promise<void> {
+    this.state = "initializing";
     await this._mediaManager.initialize();
+    this.state = "initialized";
   }
 
   async connect(
     authBundle: unknown,
-    abortController: AbortController
+    abortController: AbortController,
   ): Promise<void> {
     this.state = "connecting";
 
