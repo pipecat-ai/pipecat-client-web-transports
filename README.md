@@ -3,13 +3,50 @@
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/transport)
 [![Discord](https://img.shields.io/discord/1239284677165056021)](https://discord.gg/pipecat)
 
-A mono-repo to house the various supported Transport options to be used with the pipecat-client-web library. Currently, there are two transports: `daily-transport` and `gemini-live-websocket-transport`.
+A mono-repo to house the various supported Transport options to be used with the pipecat-client-web library. Currently, there are four transports: `small-webrtc-transport`, `daily-transport`, `gemini-live-websocket-transport`, and `openai-realtime-webrtc-transport`.
 
 ## Documentation
 
 Pipecat Transports are intended to be used in conjunction with a Pipecat web client. Please refer to the full Pipecat client documentation [here](https://docs.pipecat.ai/client/introduction) and an overview of the [Transport API here](https://docs.pipecat.ai/client/js/transports/transport)
 
 ## Current Transports
+
+### [SmallWebRTCTransport](/transports/small-webrtc-transport/README.md)
+
+[![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/small-webrtc)
+[![README](https://img.shields.io/badge/README-goldenrod)](/transports/small-webrtc-transport/README.md)
+[![Demo](https://img.shields.io/badge/Demo-forestgreen)](https://github.com/pipecat-ai/pipecat/tree/main/examples/p2p-webrtc)
+![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/small-webrtc-transport)
+
+This Transport creates a peer-to-peer WebRTC connection between the client and the bot process. This Transport is the client-side counterpart to the Pipecat [SmallWebRTCTransport component](https://docs.pipecat.ai/server/services/transport/small-webrtc).
+
+This is the simplest low-latency audio/video transport for Pipecat. This transport is recommended for local development and demos. Things to be aware of:
+  - This transport is a direct connection between the client and the bot process. If you need multiple clients to connect to the same bot, you will need to use a different transport.
+  - For production usage at scale, a distributed WebRTC network that can do edge/mesh routing, has session-level observability and metrics, and can offload recording and other auxiliary services is often useful.
+
+Typical media flow using a SmallWebRTCTransport:
+```
+                                            ┌──────────────────────────────────────────────────┐ 
+                                            │                                                  │ 
+ ┌─────────────────────────┐                │                       Server       ┌─────────┐   │ 
+ │                         │                │                                    │Pipecat  │   │ 
+ │            Client       │  RTVI Messages │                                    │Pipeline │   │ 
+ │                         │       &        │                                              │   │ 
+ │ ┌────────────────────┐  │  WebRTC Media  │  ┌────────────────────┐    media   │ ┌─────┐ │   │ 
+ │ │SmallWebRTCTransport│◄─┼────────────────┼─►│SmallWebRTCTransport┼────────────┼─► STT │ │   │ 
+ │ └────────────────────┘  │                │  └───────▲────────────┘     in     │ └──┬──┘ │   │ 
+ │                         │                │          │                         │    │    │   │ 
+ └─────────────────────────┘                │          │                         │ ┌──▼──┐ │   │ 
+                                            │          │                         │ │ LLM │ │   │ 
+                                            │          │                         │ └──┬──┘ │   │ 
+                                            │          │                         │    │    │   │ 
+                                            │          │                         │ ┌──▼──┐ │   │ 
+                                            │          │           media         │ │ TTS │ │   │ 
+                                            │          └─────────────────────────┼─┴─────┘ │   │ 
+                                            │                       out          └─────────┘   │ 
+                                            │                                                  │ 
+                                            └──────────────────────────────────────────────────┘ 
+```
 
 ### [DailyTransport](/transports/daily/README.md)
 
