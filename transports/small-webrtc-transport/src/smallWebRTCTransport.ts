@@ -9,17 +9,37 @@ import {
 import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
 
-const SIGNALLING_TYPE = "signalling";
-
-enum SignallingMessage {
-  RENEGOTIATE = "renegotiate",
+class TrackStatusMessage {
+  type = "trackStatus";
+  receiver_index: number;
+  enabled: boolean;
+  constructor(receiver_index: number, enabled: boolean) {
+    this.receiver_index = receiver_index;
+    this.enabled = enabled;
+  }
 }
+
+const RENEGOTIATE_TYPE = "renegotiate" as const;
+type RenegotiateMessage = {
+  type: typeof RENEGOTIATE_TYPE;
+};
+
+type OutboundSignallingMessage = TrackStatusMessage;
+
+type InboundSignallingMessage = RenegotiateMessage;
 
 // Interface for the structure of the signalling message
-interface SignallingMessageObject {
-  type: string;
-  message: SignallingMessage;
+const SIGNALLING_TYPE = "signalling";
+class SignallingMessageObject {
+  type: typeof SIGNALLING_TYPE = SIGNALLING_TYPE;
+  message: InboundSignallingMessage | OutboundSignallingMessage;
+  constructor(message: InboundSignallingMessage | OutboundSignallingMessage) {
+    this.message = message;
+  }
 }
+
+const AUDIO_TRANSCEIVER_INDEX = 0;
+const VIDEO_TRANSCEIVER_INDEX = 1;
 
 /**
  * SmallWebRTCTransport is a class that provides a client-side
@@ -149,6 +169,15 @@ export class SmallWebRTCTransport extends Transport {
       return;
     }
     this.dc?.send(JSON.stringify(message));
+  }
+
+  private sendSignallingMessage(message: OutboundSignallingMessage) {
+    if (!this.dc || this.dc.readyState !== "open") {
+      logger.warn(`Datachannel is not ready. Message not sent: ${message}`);
+      return;
+    }
+    const signallingMessage = new SignallingMessageObject(message);
+    this.dc?.send(JSON.stringify(signallingMessage));
   }
 
   async disconnect(): Promise<void> {
@@ -336,13 +365,13 @@ export class SmallWebRTCTransport extends Transport {
   private getAudioTransceiver() {
     // Transceivers always appear in creation-order for both peers
     // Look at addInitialTransceivers
-    return this.pc!.getTransceivers()[0];
+    return this.pc!.getTransceivers()[AUDIO_TRANSCEIVER_INDEX];
   }
 
   private getVideoTransceiver() {
     // Transceivers always appear in creation-order for both peers
     // Look at addInitialTransceivers
-    return this.pc!.getTransceivers()[1];
+    return this.pc!.getTransceivers()[VIDEO_TRANSCEIVER_INDEX];
   }
 
   private async startNewPeerConnection(
@@ -405,8 +434,8 @@ export class SmallWebRTCTransport extends Transport {
     const signallingMessage = messageObj as SignallingMessageObject;
 
     // Handle different signalling message types
-    switch (signallingMessage.message) {
-      case SignallingMessage.RENEGOTIATE:
+    switch (signallingMessage.message.type) {
+      case RENEGOTIATE_TYPE:
         void this.attemptReconnection(false);
         break;
 
@@ -533,9 +562,15 @@ export class SmallWebRTCTransport extends Transport {
 
   enableMic(enable: boolean): void {
     this.mediaManager.enableMic(enable);
+    this.sendSignallingMessage(
+      new TrackStatusMessage(AUDIO_TRANSCEIVER_INDEX, enable),
+    );
   }
   enableCam(enable: boolean): void {
     this.mediaManager.enableCam(enable);
+    this.sendSignallingMessage(
+      new TrackStatusMessage(VIDEO_TRANSCEIVER_INDEX, enable),
+    );
   }
 
   get isCamEnabled(): boolean {
