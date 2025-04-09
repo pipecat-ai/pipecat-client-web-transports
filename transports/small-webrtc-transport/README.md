@@ -2,7 +2,7 @@
 
 [![Docs](https://img.shields.io/badge/documentation-blue)](https://docs.pipecat.ai/client/js/transports/small-webrtc)
 ![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/small-webrtc-transport)
-[![Demo](https://img.shields.io/badge/Demo-coral)](https://github.com/pipecat-ai/pipecat/tree/main/examples/aiortc/video-transform)
+[![Demo](https://img.shields.io/badge/Demo-forestgreen)](https://github.com/pipecat-ai/pipecat/tree/main/examples/p2p-webrtc)
 
 Small WebRTC transport package for use with `@pipecat-ai/client-js`.
 
