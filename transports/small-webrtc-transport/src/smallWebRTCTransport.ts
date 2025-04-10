@@ -19,10 +19,10 @@ class TrackStatusMessage {
   }
 }
 
-const RENEGOTIATE_TYPE = "renegotiate" as const;
-type RenegotiateMessage = {
-  type: typeof RENEGOTIATE_TYPE;
-};
+const RENEGOTIATE_TYPE = "renegotiate";
+class RenegotiateMessage {
+  type = RENEGOTIATE_TYPE;
+}
 
 type OutboundSignallingMessage = TrackStatusMessage;
 
