@@ -157,6 +157,22 @@ export class SmallWebRTCTransport extends Transport {
     this._callbacks.onConnected?.();
   }
 
+  private syncTrackStatus() {
+    // Sending the current status from the tracks to Pipecat
+    this.sendSignallingMessage(
+      new TrackStatusMessage(
+        AUDIO_TRANSCEIVER_INDEX,
+        this.mediaManager.isMicEnabled,
+      ),
+    );
+    this.sendSignallingMessage(
+      new TrackStatusMessage(
+        VIDEO_TRANSCEIVER_INDEX,
+        this.mediaManager.isCamEnabled,
+      ),
+    );
+  }
+
   sendReadyMessage() {
     // Sending message that the client is ready, just for testing
     //this.dc?.send(JSON.stringify({id: 'clientReady', label: 'rtvi-ai', type:'client-ready'}))
@@ -461,6 +477,7 @@ export class SmallWebRTCTransport extends Transport {
     dc.addEventListener("open", () => {
       logger.debug("datachannel opened");
       if (this._connectResolved) {
+        this.syncTrackStatus();
         this._connectResolved();
         this._connectResolved = null;
         this._connectFailed = null;
