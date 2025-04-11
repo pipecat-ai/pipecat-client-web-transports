@@ -24,9 +24,14 @@ class RenegotiateMessage {
   type = RENEGOTIATE_TYPE;
 }
 
+const PEER_LEFT_TYPE = "peerLeft";
+class PeerLeftMessageMessage {
+  type = PEER_LEFT_TYPE;
+}
+
 type OutboundSignallingMessage = TrackStatusMessage;
 
-type InboundSignallingMessage = RenegotiateMessage;
+type InboundSignallingMessage = RenegotiateMessage | PeerLeftMessageMessage;
 
 // Interface for the structure of the signalling message
 const SIGNALLING_TYPE = "signalling";
@@ -454,7 +459,9 @@ export class SmallWebRTCTransport extends Transport {
       case RENEGOTIATE_TYPE:
         void this.attemptReconnection(false);
         break;
-
+      case PEER_LEFT_TYPE:
+        void this.disconnect();
+        break;
       default:
         console.warn("Unknown signalling message:", signallingMessage.message);
     }
