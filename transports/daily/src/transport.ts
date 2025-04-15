@@ -28,6 +28,8 @@ import {
 
 import { MediaStreamRecorder } from "../../../lib/wavtools";
 
+import packageJson from "../package.json";
+
 export interface DailyTransportAuthBundle {
   room_url: string;
   token: string;
@@ -210,7 +212,7 @@ export class DailyTransport extends Transport {
 
     this.state = "disconnected";
 
-    logger.debug("[RTVI Transport] Initialized");
+    logger.debug("[RTVI Transport] Initialized", packageJson.version);
   }
 
   get dailyCallClient(): DailyCall {
