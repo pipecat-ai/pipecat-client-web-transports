@@ -429,19 +429,45 @@ export class DailyTransport extends Transport {
 
   async sendReadyMessage(): Promise<void> {
     return new Promise<void>((resolve) => {
-      (async () => {
-        const readyHandler = (ev: DailyEventObjectTrack) => {
-          if (!ev.participant?.local) {
-            this.state = "ready";
-            this.flushAudioQueue();
-            this.sendMessage(RTVIMessage.clientReady());
-            this.stopRecording();
-            this._daily.off("track-started", readyHandler);
-            resolve();
+      // Detect iOS devices
+      const isIOS = (): boolean => {
+        const userAgent = navigator.userAgent;
+        return (
+          /iPad|iPhone|iPod/.test(userAgent) ||
+          (/Macintosh/.test(userAgent) && "ontouchend" in document)
+        );
+      };
+
+      const sendReadyMessage = () => {
+        this.state = "ready";
+        this.flushAudioQueue();
+        this.sendMessage(RTVIMessage.clientReady());
+        this.stopRecording();
+        resolve();
+      };
+
+      const readyHandler = (ev: DailyEventObjectTrack) => {
+        if (!ev.participant?.local) {
+          this._daily.off("track-started", readyHandler);
+
+          // Check if it's an iOS device
+          if (isIOS()) {
+            logger.debug(
+              "[RTVI Transport] iOS device detected, adding 0.5 second delay before sending ready message",
+            );
+
+            // Add 500ms delay for iOS devices:
+            // This is a workaround for iOS devices clipping a portion
+            // of the audio after the track becomes playable.
+            setTimeout(sendReadyMessage, 500);
+          } else {
+            // Non-iOS device, send ready message immediately
+            sendReadyMessage();
           }
-        };
-        this._daily.on("track-started", readyHandler);
-      })();
+        }
+      };
+
+      this._daily.on("track-started", readyHandler);
     });
   }
 
