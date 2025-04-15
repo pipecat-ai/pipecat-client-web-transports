@@ -1,6 +1,6 @@
 {
   "name": "@pipecat-ai/daily-transport",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "license": "BSD-2-Clause",
   "main": "dist/index.js",
   "module": "dist/index.module.js",
