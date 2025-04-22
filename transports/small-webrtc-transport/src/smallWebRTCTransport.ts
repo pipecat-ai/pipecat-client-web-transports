@@ -72,7 +72,7 @@ export class SmallWebRTCTransport extends Transport {
   private isReconnecting = false;
   private keepAliveInterval: number | null = null;
 
-  private _iceServers: string[] = ["stun:stun.l.google.com:19302"];
+  private _iceServers: RTCIceServer[] = [];
 
   constructor() {
     super();
@@ -209,7 +209,7 @@ export class SmallWebRTCTransport extends Transport {
 
   private createPeerConnection(): RTCPeerConnection {
     const config: RTCConfiguration = {
-      iceServers: [{ urls: this._iceServers }],
+      iceServers: this._iceServers,
     };
 
     let pc = new RTCPeerConnection(config);
