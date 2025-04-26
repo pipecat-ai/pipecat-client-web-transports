@@ -20,6 +20,7 @@ class TrackStatusMessage {
 }
 
 export interface SmallWebRTCTransportConstructorOptions {
+  iceServers?: RTCIceServer[];
   waitForICEGathering?: boolean;
 }
 
@@ -80,9 +81,11 @@ export class SmallWebRTCTransport extends Transport {
   private readonly _waitForICEGathering: boolean
 
   constructor({
+    iceServers = [],
     waitForICEGathering = false
   }: SmallWebRTCTransportConstructorOptions = {}) {
     super();
+    this._iceServers = iceServers;
     this._waitForICEGathering = waitForICEGathering;
     this.mediaManager = new DailyMediaManager(
       false,
