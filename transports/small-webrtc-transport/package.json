@@ -1,6 +1,6 @@
 {
   "name": "@pipecat-ai/small-webrtc-transport",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "license": "BSD-2-Clause",
   "main": "dist/index.js",
   "module": "dist/index.module.js",
@@ -18,7 +18,8 @@
   "scripts": {
     "build": "parcel build --no-cache",
     "dev": "parcel watch",
-    "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0",
+    "prepare": "npm run build"
   },
   "devDependencies": {
     "@pipecat-ai/client-js": "^0.3.5",

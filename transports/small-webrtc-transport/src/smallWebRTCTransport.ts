@@ -78,11 +78,11 @@ export class SmallWebRTCTransport extends Transport {
   private keepAliveInterval: number | null = null;
 
   private _iceServers: RTCIceServer[] = [];
-  private readonly _waitForICEGathering: boolean
+  private readonly _waitForICEGathering: boolean;
 
   constructor({
     iceServers = [],
-    waitForICEGathering = false
+    waitForICEGathering = false,
   }: SmallWebRTCTransportConstructorOptions = {}) {
     super();
     this._iceServers = iceServers;
@@ -319,16 +319,19 @@ export class SmallWebRTCTransport extends Transport {
       // Wait for ICE gathering to complete
       if (this._waitForICEGathering) {
         await new Promise<void>((resolve) => {
-          if (this.pc!.iceGatheringState === 'complete') {
+          if (this.pc!.iceGatheringState === "complete") {
             resolve();
           } else {
             const checkState = () => {
-              if (this.pc!.iceGatheringState === 'complete') {
-                this.pc!.removeEventListener('icegatheringstatechange', checkState);
+              if (this.pc!.iceGatheringState === "complete") {
+                this.pc!.removeEventListener(
+                  "icegatheringstatechange",
+                  checkState,
+                );
                 resolve();
               }
             };
-            this.pc!.addEventListener('icegatheringstatechange', checkState);
+            this.pc!.addEventListener("icegatheringstatechange", checkState);
           }
         });
       }
