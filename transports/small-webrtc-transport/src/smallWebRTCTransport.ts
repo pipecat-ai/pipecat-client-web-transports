@@ -19,6 +19,11 @@ class TrackStatusMessage {
   }
 }
 
+export interface SmallWebRTCTransportConstructorOptions {
+  iceServers?: RTCIceServer[];
+  waitForICEGathering?: boolean;
+}
+
 const RENEGOTIATE_TYPE = "renegotiate";
 class RenegotiateMessage {
   type = RENEGOTIATE_TYPE;
@@ -72,10 +77,16 @@ export class SmallWebRTCTransport extends Transport {
   private isReconnecting = false;
   private keepAliveInterval: number | null = null;
 
-  private _iceServers: string[] = ["stun:stun.l.google.com:19302"];
+  private _iceServers: RTCIceServer[] = [];
+  private readonly _waitForICEGathering: boolean
 
-  constructor() {
+  constructor({
+    iceServers = [],
+    waitForICEGathering = false
+  }: SmallWebRTCTransportConstructorOptions = {}) {
     super();
+    this._iceServers = iceServers;
+    this._waitForICEGathering = waitForICEGathering;
     this.mediaManager = new DailyMediaManager(
       false,
       false,
@@ -209,7 +220,7 @@ export class SmallWebRTCTransport extends Transport {
 
   private createPeerConnection(): RTCPeerConnection {
     const config: RTCConfiguration = {
-      iceServers: [{ urls: this._iceServers }],
+      iceServers: this._iceServers,
     };
 
     let pc = new RTCPeerConnection(config);
@@ -306,19 +317,21 @@ export class SmallWebRTCTransport extends Transport {
       await this.pc.setLocalDescription(offer);
 
       // Wait for ICE gathering to complete
-      /*await new Promise<void>((resolve) => {
-                if (this.pc!.iceGatheringState === 'complete') {
-                    resolve();
-                } else {
-                    const checkState = () => {
-                        if (this.pc!.iceGatheringState === 'complete') {
-                            this.pc!.removeEventListener('icegatheringstatechange', checkState);
-                            resolve();
-                        }
-                    };
-                    this.pc!.addEventListener('icegatheringstatechange', checkState);
-                }
-            });*/
+      if (this._waitForICEGathering) {
+        await new Promise<void>((resolve) => {
+          if (this.pc!.iceGatheringState === 'complete') {
+            resolve();
+          } else {
+            const checkState = () => {
+              if (this.pc!.iceGatheringState === 'complete') {
+                this.pc!.removeEventListener('icegatheringstatechange', checkState);
+                resolve();
+              }
+            };
+            this.pc!.addEventListener('icegatheringstatechange', checkState);
+          }
+        });
+      }
 
       let offerSdp = this.pc!.localDescription!;
       // Filter audio codec
@@ -576,7 +589,7 @@ export class SmallWebRTCTransport extends Transport {
     return this.mediaManager.selectedSpeaker;
   }
 
-  set iceServers(iceServers: string[]) {
+  set iceServers(iceServers: RTCIceServer[]) {
     this._iceServers = iceServers;
   }
 
