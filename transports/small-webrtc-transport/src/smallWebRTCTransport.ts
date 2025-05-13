@@ -190,6 +190,7 @@ export class SmallWebRTCTransport extends Transport {
   }
 
   sendReadyMessage() {
+    this.state = "ready";
     // Sending message that the client is ready, just for testing
     //this.dc?.send(JSON.stringify({id: 'clientReady', label: 'rtvi-ai', type:'client-ready'}))
     this.sendMessage(RTVIMessage.clientReady());
