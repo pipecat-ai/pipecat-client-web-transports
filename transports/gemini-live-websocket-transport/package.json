@@ -20,17 +20,18 @@
     "dev": "parcel watch",
     "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0"
   },
+  "dependencies": {
+    "@daily-co/daily-js": "^0.79.0"
+  },
   "devDependencies": {
     "@pipecat-ai/client-js": "^0.3.5",
-    "@pipecat-ai/realtime-websocket-transport": "~0.3.5",
     "@types/node": "^22.9.0",
     "eslint": "9.11.1",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-simple-import-sort": "^12.1.1"
   },
   "peerDependencies": {
-    "@pipecat-ai/client-js": "~0.3.5",
-    "@pipecat-ai/realtime-websocket-transport": "~0.3.5"
+    "@pipecat-ai/client-js": "~0.3.5"
   },
   "description": "Pipecat Gemini Multimodal Live Transport Package",
   "author": "Daily.co",

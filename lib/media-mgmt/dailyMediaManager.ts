@@ -31,11 +31,15 @@ export class DailyMediaManager extends MediaManager {
   private onTrackStartedCallback?: (event: DailyEventObjectTrack) => void;
   private onTrackStoppedCallback?: (event: DailyEventObjectTrack) => void;
 
+  private _recorderChunkSize: number | undefined = undefined;
+
   constructor(
     enablePlayer: boolean = true,
     enableRecording: boolean = true,
     onTrackStartedCallback?: (event: DailyEventObjectTrack) => void,
     onTrackStoppedCallback?: (event: DailyEventObjectTrack) => void,
+    recorderChunkSize: number | undefined = undefined,
+    recorderSampleRate: number = 24000,
   ) {
     super();
     this._initialized = false;
@@ -44,12 +48,13 @@ export class DailyMediaManager extends MediaManager {
     this._connectResolve = null;
     this.onTrackStartedCallback = onTrackStartedCallback;
     this.onTrackStoppedCallback = onTrackStoppedCallback;
+    this._recorderChunkSize = recorderChunkSize;
 
     this._daily = Daily.getCallInstance() ?? Daily.createCallObject();
 
     if (enableRecording) {
       this._mediaStreamRecorder = new MediaStreamRecorder({
-        sampleRate: 24000,
+        sampleRate: recorderSampleRate,
       });
     }
     if (enablePlayer) {
@@ -260,7 +265,7 @@ export class DailyMediaManager extends MediaManager {
     try {
       this._mediaStreamRecorder.record((data) => {
         this._userAudioCallback(data.mono);
-      });
+      }, this._recorderChunkSize);
     } catch (e) {
       const err = e as Error;
       if (!err.message.includes("Already recording")) {

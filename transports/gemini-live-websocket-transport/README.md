@@ -17,7 +17,7 @@ npm install \
 
 ## Overview
 
-The `GeminiLiveWebsocketTransport` class extends the `RealTimeWebsocketTransport` to implement a fully functional [RTVI `Transport`](https://docs.pipecat.ai/client/js/transports/transport). It provides a framework for implementing real-time communication directly with the [Gemini Multimodal Live](https://ai.google.dev/api/multimodal-live) voice-to-voice service. It handles media device management, audio/video streams, and state management for the connection.
+The `GeminiLiveWebsocketTransport` class extends the `DirectToLLMBaseWebSocketTransport` to implement a fully functional [RTVI `Transport`](https://docs.pipecat.ai/client/js/transports/transport). It provides a framework for implementing real-time communication directly with the [Gemini Multimodal Live](https://ai.google.dev/api/multimodal-live) voice-to-voice service. It handles media device management, audio/video streams, and state management for the connection.
 
 ## Features
 
