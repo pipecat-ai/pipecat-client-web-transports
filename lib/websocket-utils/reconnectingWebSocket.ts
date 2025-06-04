@@ -38,7 +38,7 @@ class rWebSocket {
 
   addEventListener(
     type: string,
-    listener: (this: WebSocket, ev: Event) => any
+    listener: (this: WebSocket, ev: Event) => any,
   ) {
     this._ws.addEventListener(type, listener);
   }
@@ -60,6 +60,10 @@ class rWebSocket {
   get readyState() {
     return this._ws.readyState;
   }
+}
+
+interface WebSocketOptions {
+  parseBlobToJson?: boolean;
 }
 
 /**
@@ -134,23 +138,28 @@ export class ReconnectingWebSocket extends EventEmitter {
   _url: string;
   _protocols: string | string[] | undefined;
 
-  private declare _keepAliveTimeout: number;
-  private declare _keepAliveInterval: number;
-  private declare _lastMsgRecvTime: number;
-  private declare _lastMsgSendTime: number;
-  private declare _disconnected: boolean;
-  private declare _keepIntervalID: NodeJS.Timeout | null;
-  private declare _connectionTimeout: number;
-  private declare _connectionTimeoutID: NodeJS.Timeout | undefined;
-  private declare _reconnectTimeoutID: NodeJS.Timeout | undefined;
-  private declare _shouldRetryFn: (() => boolean) | null;
-  private declare _reconnectAttempts: number;
-  private declare _allowedReconnectAttempts: number;
-  private declare _reconnectInterval: number;
-  private declare _maxReconnectInterval: number;
-  private declare _reconnectDecay: number;
+  declare private _keepAliveTimeout: number;
+  declare private _keepAliveInterval: number;
+  declare private _lastMsgRecvTime: number;
+  declare private _lastMsgSendTime: number;
+  declare private _disconnected: boolean;
+  declare private _keepIntervalID: NodeJS.Timeout | null;
+  declare private _connectionTimeout: number;
+  declare private _connectionTimeoutID: NodeJS.Timeout | undefined;
+  declare private _reconnectTimeoutID: NodeJS.Timeout | undefined;
+  declare private _shouldRetryFn: (() => boolean) | null;
+  declare private _reconnectAttempts: number;
+  declare private _allowedReconnectAttempts: number;
+  declare private _reconnectInterval: number;
+  declare private _maxReconnectInterval: number;
+  declare private _reconnectDecay: number;
+  declare private _parseBlobToJson: boolean;
 
-  constructor(address: string, protocols?: string | string[]) {
+  constructor(
+    address: string,
+    protocols?: string | string[],
+    options: WebSocketOptions = {},
+  ) {
     super();
 
     if (!address) {
@@ -161,6 +170,7 @@ export class ReconnectingWebSocket extends EventEmitter {
 
     this._url = address;
     this._protocols = protocols;
+    this._parseBlobToJson = options?.parseBlobToJson ?? true;
 
     this.init();
   }
@@ -198,7 +208,7 @@ export class ReconnectingWebSocket extends EventEmitter {
           console.warn(
             `signaling socket closed unexpectedly: ${code}${
               reason ? " " + reason : ""
-            }`
+            }`,
           );
           this._closeSocket();
           this.emit("close", code, reason);
@@ -209,12 +219,12 @@ export class ReconnectingWebSocket extends EventEmitter {
           console.warn(
             `signaling socket closed on error: ${code}${
               reason ? " " + reason : ""
-            }`
+            }`,
           );
           if (!ws._rejected) {
             ws._rejected = true;
             const err = new Error(
-              `WebSocket connection error (${code}): ${reason}`
+              `WebSocket connection error (${code}): ${reason}`,
             );
             err.name = WEBSOCKET_ERROR;
             reject(err);
@@ -234,7 +244,7 @@ export class ReconnectingWebSocket extends EventEmitter {
           ws._rejected = true;
           ws.close();
           let err = Error(
-            "wss connection interrupted by disconnect or newer connection"
+            "wss connection interrupted by disconnect or newer connection",
           );
           err.name = SIG_CONNECTION_CANCELED;
           reject(err);
@@ -245,7 +255,7 @@ export class ReconnectingWebSocket extends EventEmitter {
         if (this._keepAliveInterval) {
           this._keepIntervalID = setInterval(
             () => this.checkSocketHealthAndSendKeepAlive(),
-            this._keepAliveInterval
+            this._keepAliveInterval,
           );
         }
         this._ws = ws;
@@ -515,6 +525,10 @@ export class ReconnectingWebSocket extends EventEmitter {
         resolve(new Uint8Array(arrayBuffer));
         // Process the Uint8Array as needed
       } else if (data instanceof Blob) {
+        if (!this._parseBlobToJson) {
+          resolve(data);
+          return;
+        }
         // Handle Blob message
         const blob = data;
         // Convert Blob to ArrayBuffer
