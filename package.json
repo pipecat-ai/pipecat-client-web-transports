@@ -17,8 +17,5 @@
     "parcel": "^2.13.2",
     "prettier": "^3.5.3",
     "typescript": "^5.5.4"
-  },
-  "peerDependencies": {
-    "@daily-co/daily-js": "^0.77.0"
   }
 }

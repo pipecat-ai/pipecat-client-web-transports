@@ -1,6 +1,3 @@
-import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
-import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
-
 import {
   logger,
   RTVIActionRequestData,
@@ -8,15 +5,18 @@ import {
   RTVIMessageType,
   TransportStartError,
 } from "@pipecat-ai/client-js";
-import { ReconnectingWebSocket } from "../../../lib/websocket-utils/reconnectingWebSocket";
-import {
-  DirectToLLMBaseWebSocketTransport,
-  LLMServiceOptions,
-} from "./directToLLMBaseWebSocketTransport";
 
 const HOST = `generativelanguage.googleapis.com`;
 const BIDI_PATH = `google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent`;
 const MODEL = "models/gemini-2.0-flash-exp";
+
+import {
+  DirectToLLMBaseWebSocketTransport,
+  LLMServiceOptions,
+  ReconnectingWebSocket,
+  MediaManager,
+  DailyMediaManager,
+} from "@pipecat-ai/web-transports-lib";
 
 export interface GeminiLLMServiceOptions extends LLMServiceOptions {
   initial_messages?: Array<{ content: string; role: string }>;

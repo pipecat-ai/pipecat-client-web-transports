@@ -8,11 +8,13 @@ import {
   TransportState,
 } from "@pipecat-ai/client-js";
 
-import { ReconnectingWebSocket } from "../../../lib/websocket-utils/reconnectingWebSocket";
-import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
+import {
+  ReconnectingWebSocket,
+  DailyMediaManager,
+  MediaManager,
+} from "@pipecat-ai/web-transports-lib";
 
 import { Frame } from "./generated/proto/frames";
-import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 
 export class WebSocketTransport extends Transport {
   declare private _ws: ReconnectingWebSocket | null;

@@ -26,7 +26,8 @@ export class DailyMediaManager extends MediaManager {
   private _selectedMic: MediaDeviceInfo | Record<string, never> = {};
   private _selectedSpeaker: MediaDeviceInfo | Record<string, never> = {};
 
-  private _remoteAudioLevelInterval: NodeJS.Timeout | null = null;
+  private _remoteAudioLevelInterval: ReturnType<typeof setInterval> | null =
+    null;
 
   private onTrackStartedCallback?: (event: DailyEventObjectTrack) => void;
   private onTrackStoppedCallback?: (event: DailyEventObjectTrack) => void;

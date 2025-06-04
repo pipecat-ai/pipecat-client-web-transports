@@ -143,10 +143,14 @@ export class ReconnectingWebSocket extends EventEmitter {
   declare private _lastMsgRecvTime: number;
   declare private _lastMsgSendTime: number;
   declare private _disconnected: boolean;
-  declare private _keepIntervalID: NodeJS.Timeout | null;
+  declare private _keepIntervalID: ReturnType<typeof setTimeout> | null;
   declare private _connectionTimeout: number;
-  declare private _connectionTimeoutID: NodeJS.Timeout | undefined;
-  declare private _reconnectTimeoutID: NodeJS.Timeout | undefined;
+  declare private _connectionTimeoutID:
+    | ReturnType<typeof setTimeout>
+    | undefined;
+  declare private _reconnectTimeoutID:
+    | ReturnType<typeof setTimeout>
+    | undefined;
   declare private _shouldRetryFn: (() => boolean) | null;
   declare private _reconnectAttempts: number;
   declare private _allowedReconnectAttempts: number;

@@ -21,7 +21,8 @@
     "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
-    "@daily-co/daily-js": "^0.79.0"
+    "@daily-co/daily-js": "^0.79.0",
+    "@pipecat-ai/web-transports-lib": "file:../../lib/"
   },
   "devDependencies": {
     "@pipecat-ai/client-js": "^0.3.5",
