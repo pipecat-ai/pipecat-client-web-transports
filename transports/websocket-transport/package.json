@@ -1,6 +1,6 @@
 {
-  "name": "@pipecat-ai/realtime-websocket-transport",
-  "version": "0.3.6",
+  "name": "@pipecat-ai/websocket-transport",
+  "version": "0.3.5",
   "license": "BSD-2-Clause",
   "main": "dist/index.js",
   "module": "dist/index.module.js",

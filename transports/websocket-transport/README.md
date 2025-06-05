@@ -2,7 +2,7 @@
 
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/realtime)
 [![Demo](https://img.shields.io/badge/Demo-forestgreen)](examples/directToLLMTransports/README.md)
-![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/realtime-websocket-transport)
+![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/websocket-transport)
 
 A flexible abstract transport class for implementing connections to directly communicate with LLMs that support voice-to-voice modalities.
 
