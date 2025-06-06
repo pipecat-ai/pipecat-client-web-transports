@@ -1,117 +1,77 @@
-# Real-Time Websocket Transport
+# Websocket Transport
 
-[![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/realtime)
-[![Demo](https://img.shields.io/badge/Demo-forestgreen)](examples/directToLLMTransports/README.md)
+[![Demo](https://img.shields.io/badge/Demo-forestgreen)](https://github.com/pipecat-ai/pipecat/tree/main/examples/websocket/README.md)
 ![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/websocket-transport)
 
-A flexible abstract transport class for implementing connections to directly communicate with LLMs that support voice-to-voice modalities.
+Websocket transport package for use with `@pipecat-ai/client-js`.
 
 ## Installation
 
 ```bash copy
 npm install \
 @pipecat-ai/client-js \
-@pipecat-ai/real-time-websocket-transport
+@pipecat-ai/websocket-transport
 ```
 
 ## Overview
 
-The `RealTimeWebsocketTransport` class provides a foundation for building transports for direct voice-to-voice communication:
+The WebSocketTransport class provides a Websocket transport layer establishing a connection with Pipecat WebSocketTransport. It handles audio device management and real-time communication between client and bot.
 
-- Audio/video device management
-- Bi-directional audio streaming
-- Device selection and control
-- State management
-- Event handling
+## Features
 
-## Disclaimer
-
-This Transport type is primarily intended for dev-only and testing purposes. Since this transport talks directly with the LLM, there is no way to obscure API Keys necessary for doing so. Developers will need to eventually build a server component with a server-friendly transport (See the [daily-transport](https://docs.pipecat.ai/client/js/transports/daily) as an example.)
+- 🎤 Microphone input handling
+- 🤖 Bot participant tracking
+- 💬 Real-time messaging
 
 ## Usage
 
-To use this package, create a new Transport by extending the `RealTimeWebsocketTransport` class and implement the following abstract functions:
+### Basic Setup
 
-```typescript
-import { RealTimeWebsocketTransport } from '@pipecat-ai/real-time-websocket-transport';
+```javascript
+import { RTVIClient } from "@pipecat-ai/client-js";
+import { WebSocketTransport } from "@pipecat-ai/small-webrtc-transport";
 
-export interface MyLLMOptions extends LLMServiceOptions {
-    api_key: string,
-    // define types for all the various options your
-    // LLM service may want to support during setup/connection
-}
+const transport = new WebSocketTransport();
 
-class MyLLMServiceTransport extends RealTimeWebsocketTransport {
-  constructor(service_options: GeminiLLMServiceOptions, manager?: MediaManager) {
-    super(service_options, manager);
-    // Initialize class variables
-  }
+const rtviClient = new RTVIClient({
+    transport,
+    enableMic: true,   // Default microphone on
+    callbacks: {
+      // Event handlers
+    },
+    params: {
+      baseUrl,
+      endpoints
+    }
+    // ...
+});
 
-async initializeLLM(): void {
-    // Initialize your LLM service client
-  }
-
-  async attachLLMListeners(): void {
-    // Set up event listeners to handle message from your LLM service
-  }
-
-  async connectLLM(): Promise<void> {
-    // Implement connection logic for the LLM
-  }
-
-  async disconnectLLM(): Promise<void> {
-    // Disconnect from the LLM
-  }
-
-  handleUserAudioStream(data: ArrayBuffer): void {
-    // Pass the data provided to the LLM
-  }
-
-  async sendReadyMessage(): Promise<void> {
-    // call this._onMessage() with a BOT_READY message once the
-    // LLM is connected and ready to receive data
-  }
-
-  sendMessage(message: RTVIMessage): void {
-    // Implement sending other LLM-specific messages to the LLM
-    // This is how the user can call things like rtviClient.sendMessage(...)
-    // and communicate in other ways with the LLM
-  }
-}
+await rtviClient.connect();
 ```
 
 ## API Reference
 
-### Constructor
-```typescript
-constructor(service_options: LLMServiceOptions, manager: MediaManager)
-```
+### States
 
-### Abstract Methods
-- `initializeLLM(): void`
-- `attachLLMListeners(): void`
-- `connectLLM(): Promise<void>`
-- `disconnectLLM(): Promise<void>`
-- `handleUserAudioStream(data: ArrayBuffer): void`
-- `sendReadyMessage()`
-- `sendMessage(message: RTVIMessage)`
-
-### Device Management Methods
-- `getAllMics(): Promise<MediaDeviceInfo[]>`
-- `getAllCams(): Promise<MediaDeviceInfo[]>`
-- `getAllSpeakers(): Promise<MediaDeviceInfo[]>`
-- `updateMic(micId: string): Promise<void>`
-- `updateCam(camId: string): void`
-- `updateSpeaker(speakerId: string): void`
-
-### State Properties
-- `get state(): TransportState`
-- `get isCamEnabled(): boolean`
-- `get isMicEnabled(): boolean`
+The transport can be in one of these states:
+- "initializing"
+- "initialized"
+- "connecting"
+- "connected"
+- "ready"
+- "disconnecting"
+- "error"
 
 ## Events
-The transport supports emitting the events defined by the [RTVI Specification](https://docs.pipecat.ai/client/js/api-reference/callbacks)
+
+The transport implements the various [RTVI event handlers](https://docs.pipecat.ai/client/js/api-reference/callbacks). Check out the docs or samples for more info.
+
+## Error Handling
+
+The transport includes error handling for:
+- Connection failures
+- Device errors
 
 ## License
-
 BSD-2 Clause
+
