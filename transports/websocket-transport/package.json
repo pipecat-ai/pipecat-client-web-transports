@@ -1,5 +1,5 @@
 {
-  "name": "@pipecat-ai/realtime-websocket-transport",
+  "name": "@pipecat-ai/websocket-transport",
   "version": "0.4.0",
   "license": "BSD-2-Clause",
   "main": "dist/index.js",
@@ -16,22 +16,25 @@
     "README.md"
   ],
   "scripts": {
+    "build_proto": "bash ./proto/generate_typescript.sh",
     "build": "parcel build --no-cache",
     "dev": "parcel watch",
     "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0"
   },
   "devDependencies": {
-    "@pipecat-ai/client-js": "^0.4.0",
+    "@pipecat-ai/client-js": "^0.3.5",
     "@types/node": "^22.9.0",
     "eslint": "9.11.1",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-simple-import-sort": "^12.1.1"
   },
   "peerDependencies": {
-    "@pipecat-ai/client-js": "~0.4.0"
+    "@pipecat-ai/client-js": "~0.3.5"
   },
   "dependencies": {
-    "@daily-co/daily-js": "^0.77.0"
+    "@daily-co/daily-js": "^0.79.0",
+    "@protobuf-ts/plugin": "^2.11.0",
+    "@protobuf-ts/runtime": "^2.11.0"
   },
   "description": "Pipecat Base Transport for RealTime WebSocket APIs Package",
   "author": "Daily.co",
