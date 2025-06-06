@@ -80,6 +80,9 @@ export class SmallWebRTCTransport extends Transport {
   private _iceServers: RTCIceServer[] = [];
   private readonly _waitForICEGathering: boolean;
 
+  private screenTrack: MediaStreamTrack | null = null;
+  private _isSharingScreen: boolean = false;
+
   constructor({
     iceServers = [],
     waitForICEGathering = false,
@@ -561,6 +564,12 @@ export class SmallWebRTCTransport extends Transport {
     }
     this._connectFailed = null;
     this._connectResolved = null;
+
+    if (this.screenTrack) {
+      this.screenTrack.stop();
+      this.screenTrack = null;
+    }
+    this._isSharingScreen = false;
   }
 
   getAllMics(): Promise<MediaDeviceInfo[]> {
@@ -640,15 +649,62 @@ export class SmallWebRTCTransport extends Transport {
     return this.mediaManager.tracks();
   }
 
-  // Not implemented
-  enableScreenShare(enable: boolean): void {
-    logger.error("startScreenShare not implemented for SmallWebRTCTransport");
-    throw new Error("Not implemented");
+  async enableScreenShare(enable: boolean): Promise<void> {
+    this.sendSignallingMessage(
+      new TrackStatusMessage(VIDEO_TRANSCEIVER_INDEX, enable),
+    );
+    if (enable === this._isSharingScreen) {
+      return;
+    }
+
+    if (enable) {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            displaySurface: "monitor"
+          }
+        });
+
+        const [screenTrack] = stream.getVideoTracks();
+        this.screenTrack = screenTrack;
+
+        // Handle track ending (user stops sharing via browser UI)
+        screenTrack.onended = () => {
+          void this.enableScreenShare(false);
+        };
+
+        // Store the current video track to restore it later
+        // const currentVideoTrack = this.getVideoTransceiver().sender.track;
+        
+        // Replace the video transceiver's track with screen track
+        await this.getVideoTransceiver().sender.replaceTrack(screenTrack);
+        this._isSharingScreen = true;
+        this._callbacks.onTrackStarted?.(screenTrack, {
+          id: "ScreenShare",
+          name: "ScreenShare",
+          local: true
+        });
+
+      } catch (error) {
+        logger.error("Failed to start screen sharing:", error);
+        throw error;
+      }
+    } else {
+      // Stop the screen track
+      if (this.screenTrack) {
+        this.screenTrack.stop();
+        this.screenTrack = null;
+      }
+
+      // Restore the original video track
+      const originalVideoTrack = this.tracks().local.video;
+      await this.getVideoTransceiver().sender.replaceTrack(originalVideoTrack || null);
+      this._isSharingScreen = false;
+    }
   }
 
   public get isSharingScreen(): boolean {
-    logger.error("isSharingScreen not implemented for SmallWebRTCTransport");
-    return false;
+    return this._isSharingScreen;
   }
 
   private sdpFilterCodec(kind: string, codec: string, realSdp: string): string {
