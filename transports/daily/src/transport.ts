@@ -470,6 +470,16 @@ export class DailyTransport extends Transport {
         resolve();
       };
 
+      for (const id in this._daily.participants()) {
+        const p = this._daily.participants()[id];
+        if (!p.local && p.tracks?.audio?.persistentTrack) {
+          // If we already have a remote audio track, we can send the ready message immediately
+          sendReadyMessage();
+          resolve();
+          return;
+        }
+      }
+
       const readyHandler = (ev: DailyEventObjectTrack) => {
         if (!ev.participant?.local) {
           this._daily.off("track-started", readyHandler);

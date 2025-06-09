@@ -11,7 +11,7 @@ import {
 import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 
 export interface LLMServiceOptions {
-  api_key?: string;
+  api_key: string;
   initial_messages?: Array<unknown>;
   model?: string;
   settings?: Record<string, unknown>;

@@ -32,7 +32,6 @@
   },
   "dependencies": {
     "@daily-co/daily-js": "^0.77.0",
-    "@pipecat-ai/rtvi-protocol": "file:../../../pipecat-client-web/rtvi",
     "dequal": "^2.0.3"
   },
   "description": "Pipecat Small WebRTC Transport Package",
