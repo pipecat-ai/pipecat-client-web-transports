@@ -3,6 +3,7 @@ import { WebSocketSerializer } from "./websocketSerializer.ts";
 import { RTVIMessage } from "@pipecat-ai/client-js";
 
 export class ProtobufFrameSerializer implements WebSocketSerializer {
+  serialize(data: any): any {}
   serializeAudio(
     data: ArrayBuffer,
     sampleRate: number,
@@ -23,7 +24,6 @@ export class ProtobufFrameSerializer implements WebSocketSerializer {
     });
     return new Uint8Array(Frame.toBinary(frame));
   }
-
   serializeMessage(msg: RTVIMessage): Uint8Array {
     const frame = Frame.create({
       frame: {
@@ -35,7 +35,6 @@ export class ProtobufFrameSerializer implements WebSocketSerializer {
     });
     return new Uint8Array(Frame.toBinary(frame));
   }
-
   async deserialize(
     data: any,
   ): Promise<

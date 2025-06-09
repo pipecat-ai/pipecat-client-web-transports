@@ -204,6 +204,12 @@ export class WebSocketTransport extends Transport {
     }
   }
 
+  sendRawMessage(message: any): void {
+    logger.debug("Received raw message to send to Web Socket", message);
+    const encoded = this._serializer.serialize(message);
+    void this._sendMsg(encoded);
+  }
+
   sendMessage(message: RTVIMessage): void {
     logger.debug("Received message to send to Web Socket", message);
     const encoded = this._serializer.serializeMessage(message);
@@ -223,7 +229,7 @@ export class WebSocketTransport extends Transport {
     }
   }
 
-  async _sendMsg(msg: Uint8Array): Promise<void> {
+  async _sendMsg(msg: any): Promise<void> {
     if (!this._ws) {
       logger.error("sendMsg called but WS is null");
       return;
