@@ -10,17 +10,18 @@ import {
 
 import { ReconnectingWebSocket } from "../../../lib/websocket-utils/reconnectingWebSocket";
 import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
-
-import { Frame } from "./generated/proto/frames";
 import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
+import { WebSocketSerializer } from "./serializers/websocketSerializer.ts";
+import { ProtobufFrameSerializer } from "./serializers/protobufSerializer.ts";
 
 export class WebSocketTransport extends Transport {
   declare private _ws: ReconnectingWebSocket | null;
   private static RECORDER_SAMPLE_RATE = 16_000;
   private audioQueue: ArrayBuffer[] = [];
   private _mediaManager: MediaManager;
+  private _serializer: WebSocketSerializer;
 
-  constructor() {
+  constructor(serializer: WebSocketSerializer = new ProtobufFrameSerializer()) {
     super();
     this._mediaManager = new DailyMediaManager(
       true,
@@ -34,6 +35,7 @@ export class WebSocketTransport extends Transport {
       this.handleUserAudioStream.bind(this),
     );
     this._ws = null;
+    this._serializer = serializer;
   }
 
   initialize(
@@ -134,6 +136,7 @@ export class WebSocketTransport extends Transport {
   }
 
   initializeWebsocket(authBundle: any): ReconnectingWebSocket {
+    console.log("Initializing websocket", authBundle);
     const ws = new ReconnectingWebSocket(`${authBundle.ws_url}`, undefined, {
       parseBlobToJson: false,
     });
@@ -143,25 +146,18 @@ export class WebSocketTransport extends Transport {
       logger.debug("Websocket connection opened");
     });
     ws.on("message", async (data: Blob) => {
-      let arrayBuffer: ArrayBuffer = await data.arrayBuffer();
-      const parsedFrame = Frame.fromBinary(new Uint8Array(arrayBuffer)).frame;
-      if (parsedFrame.oneofKind === "audio") {
-        // We should be able to use parsedFrame.audio.audio.buffer but for
-        // some reason that contains all the bytes from the protobuf message.
-        const audioVector = Array.from(parsedFrame.audio.audio);
-        const uint8Array = new Uint8Array(audioVector);
-        const int16Array = new Int16Array(uint8Array.buffer);
-        this._mediaManager.bufferBotAudio(int16Array);
-      } else if (parsedFrame.oneofKind === "message") {
-        let jsonText = parsedFrame.message.data;
-        try {
-          let jsonMessage = JSON.parse(jsonText);
-          if (jsonMessage.label === "rtvi-ai") {
-            this._onMessage(jsonMessage as RTVIMessage);
+      const arrayBuffer = await data.arrayBuffer();
+      try {
+        const parsed = this._serializer.deserialize(arrayBuffer);
+        if (parsed.type === "audio") {
+          this._mediaManager.bufferBotAudio(parsed.audio);
+        } else if (parsed.type === "message") {
+          if (parsed.message.label === "rtvi-ai") {
+            this._onMessage(parsed.message);
           }
-        } catch {
-          logger.warn("Failed to parse message", jsonText);
         }
+      } catch (e) {
+        logger.error("Failed to deserialize incoming message", e);
       }
     });
     ws.on("error", (error: Error) => {
@@ -211,35 +207,24 @@ export class WebSocketTransport extends Transport {
 
   sendMessage(message: RTVIMessage): void {
     logger.debug("Received message to send to Web Socket", message);
-    const frame = Frame.create({
-      frame: {
-        oneofKind: "message",
-        message: {
-          data: JSON.stringify(message),
-        },
-      },
-    });
-    void this._sendMsg(frame);
+    const encoded = this._serializer.serializeMessage(message);
+    void this._sendMsg(encoded);
   }
 
   async _sendAudioInput(data: ArrayBuffer): Promise<void> {
-    const pcmByteArray = new Uint8Array(data);
-    const frame = Frame.create({
-      frame: {
-        oneofKind: "audio",
-        audio: {
-          id: 0n,
-          name: "audio",
-          audio: pcmByteArray,
-          sampleRate: WebSocketTransport.RECORDER_SAMPLE_RATE,
-          numChannels: 1,
-        },
-      },
-    });
-    await this._sendMsg(frame);
+    try {
+      const encoded = this._serializer.serializeAudio(
+        data,
+        WebSocketTransport.RECORDER_SAMPLE_RATE,
+        1,
+      );
+      await this._sendMsg(encoded);
+    } catch (e) {
+      logger.error("Error sending audio frame", e);
+    }
   }
 
-  async _sendMsg(msg: Frame): Promise<void> {
+  async _sendMsg(msg: Uint8Array): Promise<void> {
     if (!this._ws) {
       logger.error("sendMsg called but WS is null");
       return;
@@ -253,8 +238,7 @@ export class WebSocketTransport extends Transport {
       return;
     }
     try {
-      const encodedFrame = new Uint8Array(Frame.toBinary(msg));
-      await this._ws.send(encodedFrame);
+      await this._ws.send(msg);
     } catch (e) {
       logger.error("sendMsg error", e);
     }
