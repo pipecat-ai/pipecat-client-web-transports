@@ -145,10 +145,9 @@ export class WebSocketTransport extends Transport {
     ws.on("open", () => {
       logger.debug("Websocket connection opened");
     });
-    ws.on("message", async (data: Blob) => {
-      const arrayBuffer = await data.arrayBuffer();
+    ws.on("message", async (data: any) => {
       try {
-        const parsed = this._serializer.deserialize(arrayBuffer);
+        const parsed = await this._serializer.deserialize(data);
         if (parsed.type === "audio") {
           this._mediaManager.bufferBotAudio(parsed.audio);
         } else if (parsed.type === "message") {

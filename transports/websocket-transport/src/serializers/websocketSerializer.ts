@@ -8,8 +8,9 @@ export interface WebSocketSerializer {
   ): Uint8Array;
   serializeMessage(msg: RTVIMessage): Uint8Array;
   deserialize(
-    raw: ArrayBuffer,
-  ):
+    data: any,
+  ): Promise<
     | { type: "audio"; audio: Int16Array }
-    | { type: "message"; message: RTVIMessage };
+    | { type: "message"; message: RTVIMessage }
+  >;
 }

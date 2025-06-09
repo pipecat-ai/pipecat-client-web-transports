@@ -36,12 +36,17 @@ export class ProtobufFrameSerializer implements WebSocketSerializer {
     return new Uint8Array(Frame.toBinary(frame));
   }
 
-  deserialize(
-    raw: ArrayBuffer,
-  ):
+  async deserialize(
+    data: any,
+  ): Promise<
     | { type: "audio"; audio: Int16Array }
-    | { type: "message"; message: RTVIMessage } {
-    const parsed = Frame.fromBinary(new Uint8Array(raw)).frame;
+    | { type: "message"; message: RTVIMessage }
+  > {
+    if (!(data instanceof Blob)) {
+      throw new Error("Unknown data type");
+    }
+    const arrayBuffer = await data.arrayBuffer();
+    const parsed = Frame.fromBinary(new Uint8Array(arrayBuffer)).frame;
     if (parsed.oneofKind === "audio") {
       const audioVector = Array.from(parsed.audio.audio);
       const uint8Array = new Uint8Array(audioVector);
