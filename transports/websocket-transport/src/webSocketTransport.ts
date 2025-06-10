@@ -21,7 +21,15 @@ export class WebSocketTransport extends Transport {
   private _mediaManager: MediaManager;
   private _serializer: WebSocketSerializer;
 
-  constructor(serializer: WebSocketSerializer = new ProtobufFrameSerializer()) {
+  constructor(
+    {
+      serializer,
+      sampleRate,
+    }: { serializer: WebSocketSerializer; sampleRate?: number } = {
+      serializer: new ProtobufFrameSerializer(),
+      sampleRate: WebSocketTransport.RECORDER_SAMPLE_RATE,
+    },
+  ) {
     super();
     this._mediaManager = new DailyMediaManager(
       true,
@@ -29,7 +37,7 @@ export class WebSocketTransport extends Transport {
       undefined,
       undefined,
       512,
-      WebSocketTransport.RECORDER_SAMPLE_RATE,
+      sampleRate,
     );
     this._mediaManager.setUserAudioCallback(
       this.handleUserAudioStream.bind(this),
@@ -239,7 +247,6 @@ export class WebSocketTransport extends Transport {
       return;
     }
     if (!msg) {
-      logger.error("need a msg to send a msg");
       return;
     }
     try {

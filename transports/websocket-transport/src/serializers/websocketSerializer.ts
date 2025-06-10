@@ -6,12 +6,11 @@ export interface WebSocketSerializer {
     data: ArrayBuffer,
     sampleRate: number,
     numChannels: number,
-  ): Uint8Array;
+  ): any;
   serializeMessage(msg: RTVIMessage): any;
-  deserialize(
-    data: any,
-  ): Promise<
+  deserialize(data: any): Promise<
     | { type: "audio"; audio: Int16Array }
     | { type: "message"; message: RTVIMessage }
+    | { type: "raw"; message: any } // Including any other message that we are not aware of
   >;
 }
