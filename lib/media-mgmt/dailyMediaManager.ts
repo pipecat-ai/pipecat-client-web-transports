@@ -40,6 +40,7 @@ export class DailyMediaManager extends MediaManager {
     onTrackStoppedCallback?: (event: DailyEventObjectTrack) => void,
     recorderChunkSize: number | undefined = undefined,
     recorderSampleRate: number = 24000,
+    playerSampleRate: number = 24000,
   ) {
     super();
     this._initialized = false;
@@ -58,7 +59,9 @@ export class DailyMediaManager extends MediaManager {
       });
     }
     if (enablePlayer) {
-      this._wavStreamPlayer = new WavStreamPlayer({ sampleRate: 24000 });
+      this._wavStreamPlayer = new WavStreamPlayer({
+        sampleRate: playerSampleRate,
+      });
     }
 
     this._daily.on("track-started", this.handleTrackStarted.bind(this));

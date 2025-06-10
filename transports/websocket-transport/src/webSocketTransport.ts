@@ -17,6 +17,7 @@ import { ProtobufFrameSerializer } from "./serializers/protobufSerializer.ts";
 export class WebSocketTransport extends Transport {
   declare private _ws: ReconnectingWebSocket | null;
   private static RECORDER_SAMPLE_RATE = 16_000;
+  private static PLAYER_SAMPLE_RATE = 24_000;
   private audioQueue: ArrayBuffer[] = [];
   private _mediaManager: MediaManager;
   private _serializer: WebSocketSerializer;
@@ -24,10 +25,16 @@ export class WebSocketTransport extends Transport {
   constructor(
     {
       serializer,
-      sampleRate,
-    }: { serializer: WebSocketSerializer; sampleRate?: number } = {
+      recorderSampleRate,
+      playerSampleRate,
+    }: {
+      serializer: WebSocketSerializer;
+      recorderSampleRate?: number;
+      playerSampleRate?: number;
+    } = {
       serializer: new ProtobufFrameSerializer(),
-      sampleRate: WebSocketTransport.RECORDER_SAMPLE_RATE,
+      recorderSampleRate: WebSocketTransport.RECORDER_SAMPLE_RATE,
+      playerSampleRate: WebSocketTransport.PLAYER_SAMPLE_RATE,
     },
   ) {
     super();
@@ -37,7 +44,8 @@ export class WebSocketTransport extends Transport {
       undefined,
       undefined,
       512,
-      sampleRate,
+      recorderSampleRate,
+      playerSampleRate,
     );
     this._mediaManager.setUserAudioCallback(
       this.handleUserAudioStream.bind(this),
