@@ -80,14 +80,19 @@ export class WebSocketTransport extends Transport {
     if (typeof connectParams !== "object") {
       throw new RTVIError("Invalid connection parameters");
     }
+    const tmpParams = {} as WebSocketTransportOptions;
     for (const [key, val] of Object.entries(connectParams)) {
-      if (key !== "connectionUrl") {
+      // acept ws_url for backwards compatibility
+      if (key === "ws_url" || key === "connectionUrl") {
+        if (typeof val !== "string") {
+          throw new RTVIError(
+            `Invalid type for connectionUrl: expected string, got ${typeof val}`,
+          );
+        }
+        tmpParams.ws_url = val;
+      } else {
         throw new RTVIError(
           `Unrecognized connection parameter: ${key}. Only 'connectionUrl' is allowed.`,
-        );
-      } else if (typeof val !== "string") {
-        throw new RTVIError(
-          `Invalid type for connectionUrl: expected string, got ${typeof val}`,
         );
       }
     }
