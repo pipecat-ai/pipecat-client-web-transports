@@ -21,6 +21,7 @@ export class WebSocketTransport extends Transport {
   private audioQueue: ArrayBuffer[] = [];
   private _mediaManager: MediaManager;
   private _serializer: WebSocketSerializer;
+  private _recorderSampleRate: number;
 
   constructor(
     {
@@ -29,8 +30,8 @@ export class WebSocketTransport extends Transport {
       playerSampleRate,
     }: {
       serializer: WebSocketSerializer;
-      recorderSampleRate?: number;
-      playerSampleRate?: number;
+      recorderSampleRate: number;
+      playerSampleRate: number;
     } = {
       serializer: new ProtobufFrameSerializer(),
       recorderSampleRate: WebSocketTransport.RECORDER_SAMPLE_RATE,
@@ -38,6 +39,7 @@ export class WebSocketTransport extends Transport {
     },
   ) {
     super();
+    this._recorderSampleRate = recorderSampleRate;
     this._mediaManager = new DailyMediaManager(
       true,
       true,
@@ -152,7 +154,6 @@ export class WebSocketTransport extends Transport {
   }
 
   initializeWebsocket(authBundle: any): ReconnectingWebSocket {
-    console.log("Initializing websocket", authBundle);
     const ws = new ReconnectingWebSocket(`${authBundle.ws_url}`, undefined, {
       parseBlobToJson: false,
     });
@@ -221,13 +222,11 @@ export class WebSocketTransport extends Transport {
   }
 
   sendRawMessage(message: any): void {
-    logger.debug("Received raw message to send to Web Socket", message);
     const encoded = this._serializer.serialize(message);
     void this._sendMsg(encoded);
   }
 
   sendMessage(message: RTVIMessage): void {
-    logger.debug("Received message to send to Web Socket", message);
     const encoded = this._serializer.serializeMessage(message);
     void this._sendMsg(encoded);
   }
@@ -236,7 +235,7 @@ export class WebSocketTransport extends Transport {
     try {
       const encoded = this._serializer.serializeAudio(
         data,
-        WebSocketTransport.RECORDER_SAMPLE_RATE,
+        this._recorderSampleRate,
         1,
       );
       await this._sendMsg(encoded);
