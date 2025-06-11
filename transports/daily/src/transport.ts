@@ -47,6 +47,12 @@ export enum DailyRTVIMessageType {
   AUDIO_BUFFERING_STOPPED = "audio-buffering-stopped",
 }
 
+export type DailyEventCallbacks = RTVIEventCallbacks &
+  Partial<{
+    onAudioBufferingStarted: () => void;
+    onAudioBufferingStopped: () => void;
+  }>;
+
 class DailyCallWrapper {
   private _daily: DailyCall;
   private _proxy: DailyCall;
@@ -98,6 +104,9 @@ class DailyCallWrapper {
 }
 
 export class DailyTransport extends Transport {
+  // override type of _callbacks to include Daily specific callbacks
+  declare protected _callbacks: DailyEventCallbacks;
+
   declare private _dailyWrapper: DailyCallWrapper;
   declare private _daily: DailyCall;
   private _dailyFactoryOptions: DailyFactoryOptions;
@@ -117,7 +126,7 @@ export class DailyTransport extends Transport {
   constructor(opts: DailyTransportConstructorOptions = {}) {
     super();
 
-    this._callbacks = {} as RTVIEventCallbacks;
+    this._callbacks = {} as DailyEventCallbacks;
 
     const { bufferLocalAudioUntilBotReady, ...dailyOpts } = opts;
     this._dailyFactoryOptions = dailyOpts;
@@ -192,7 +201,7 @@ export class DailyTransport extends Transport {
       this.setupRecorder();
     }
 
-    this._callbacks = options.callbacks ?? {};
+    this._callbacks = (options.callbacks ?? {}) as DailyEventCallbacks;
     this._onMessage = messageHandler;
 
     if (
@@ -344,10 +353,7 @@ export class DailyTransport extends Transport {
       await this._mediaStreamRecorder.record((data) => {
         this.handleUserAudioStream(data.mono);
       }, DailyTransport.RECORDER_CHUNK_SIZE);
-      this._onMessage({
-        type: DailyRTVIMessageType.AUDIO_BUFFERING_STARTED,
-        data: {},
-      } as RTVIMessage);
+      this._callbacks.onAudioBufferingStarted?.();
       logger.info("[Daily Transport] Recording Initialized");
     } catch (e) {
       const err = e as Error;
@@ -508,10 +514,7 @@ export class DailyTransport extends Transport {
     ) {
       // disconnecting, we don't need to record anymore
       void this._mediaStreamRecorder.end();
-      this._onMessage({
-        type: DailyRTVIMessageType.AUDIO_BUFFERING_STOPPED,
-        data: {},
-      } as RTVIMessage);
+      this._callbacks.onAudioBufferingStopped?.();
     }
   }
 
