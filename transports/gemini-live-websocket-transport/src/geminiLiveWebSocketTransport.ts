@@ -1,9 +1,5 @@
-import {
-  DailyMediaManager,
-  LLMServiceOptions,
-  MediaManager,
-  RealTimeWebsocketTransport,
-} from "@pipecat-ai/realtime-websocket-transport";
+import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
+import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
 
 import {
   logger,
@@ -12,7 +8,11 @@ import {
   RTVIMessageType,
   TransportStartError,
 } from "@pipecat-ai/client-js";
-import { ReconnectingWebSocket } from "../../../lib/websocket-utils/reconnectingWebSocket.js";
+import { ReconnectingWebSocket } from "../../../lib/websocket-utils/reconnectingWebSocket";
+import {
+  DirectToLLMBaseWebSocketTransport,
+  LLMServiceOptions,
+} from "./directToLLMBaseWebSocketTransport";
 
 const HOST = `generativelanguage.googleapis.com`;
 const BIDI_PATH = `google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent`;
@@ -41,16 +41,16 @@ export interface GeminiLLMServiceOptions extends LLMServiceOptions {
   };
 }
 
-export class GeminiLiveWebsocketTransport extends RealTimeWebsocketTransport {
-  private declare _ws: ReconnectingWebSocket | null;
-  private declare _botResponseID: number;
-  private declare _botIsReadyResolve:
+export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransport {
+  declare private _ws: ReconnectingWebSocket | null;
+  declare private _botResponseID: number;
+  declare private _botIsReadyResolve:
     | ((value: void | PromiseLike<void>) => void)
     | null;
 
   constructor(
     service_options: GeminiLLMServiceOptions,
-    manager?: MediaManager
+    manager?: MediaManager,
   ) {
     if (!manager) {
       manager = new DailyMediaManager();
@@ -79,7 +79,7 @@ export class GeminiLiveWebsocketTransport extends RealTimeWebsocketTransport {
   attachLLMListeners(): void {
     if (!this._ws) {
       console.error(
-        "attachLLMListeners called before the websocket is initialized. Be sure to call initializeLLM() first."
+        "attachLLMListeners called before the websocket is initialized. Be sure to call initializeLLM() first.",
       );
       return;
     }
@@ -141,7 +141,7 @@ export class GeminiLiveWebsocketTransport extends RealTimeWebsocketTransport {
   async connectLLM(): Promise<void> {
     if (!this._ws) {
       console.error(
-        "connectLLM called before the websocket is initialized. Be sure to call initializeLLM() first."
+        "connectLLM called before the websocket is initialized. Be sure to call initializeLLM() first.",
       );
       return;
     }
@@ -166,7 +166,7 @@ export class GeminiLiveWebsocketTransport extends RealTimeWebsocketTransport {
       service_options.initial_messages.forEach(
         (msg: { content: string; role: string }) => {
           this._sendTextInput(msg.content, msg.role);
-        }
+        },
       );
     }
   }
@@ -288,14 +288,14 @@ export class GeminiLiveWebsocketTransport extends RealTimeWebsocketTransport {
   // Not implemented
   enableScreenShare(enable: boolean): void {
     logger.error(
-      "startScreenShare not implemented for GeminiLiveWebsocketTransport"
+      "startScreenShare not implemented for GeminiLiveWebsocketTransport",
     );
     throw new Error("Not implemented");
   }
 
   public get isSharingScreen(): boolean {
     logger.error(
-      "isSharingScreen not implemented for GeminiLiveWebsocketTransport"
+      "isSharingScreen not implemented for GeminiLiveWebsocketTransport",
     );
     return false;
   }
@@ -322,10 +322,10 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 
 function mergeBuffers(
   leftBuffer: ArrayBuffer,
-  rightBuffer: ArrayBuffer
+  rightBuffer: ArrayBuffer,
 ): ArrayBuffer {
   const tmpArray = new Uint8Array(
-    leftBuffer.byteLength + rightBuffer.byteLength
+    leftBuffer.byteLength + rightBuffer.byteLength,
   );
   tmpArray.set(new Uint8Array(leftBuffer), 0);
   tmpArray.set(new Uint8Array(rightBuffer), leftBuffer.byteLength);

@@ -11,18 +11,18 @@ import {
 import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 
 export interface LLMServiceOptions {
-  api_key: string;
+  api_key?: string;
   initial_messages?: Array<unknown>;
   model?: string;
   settings?: Record<string, unknown>;
 }
 
 /**
- * RealTimeWebsocketTransport is an abstract class that provides a client-side
+ * DirectToLLMBaseWebSocketTransport is an abstract class that provides a client-side
  * interface for connecting to a real-time AI service. It is intended to
  * connect directly to the service. (No Pipecat server is involved.)
  */
-export abstract class RealTimeWebsocketTransport extends Transport {
+export abstract class DirectToLLMBaseWebSocketTransport extends Transport {
   // Utilities for audio.
   private _mediaManager;
   protected _service_options: LLMServiceOptions;
