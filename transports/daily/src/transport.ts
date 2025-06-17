@@ -241,6 +241,10 @@ export class DailyTransport extends Transport {
     this._callbacks.onTransportStateChanged?.(state);
   }
 
+  getSessionInfo() {
+    return this._daily.meetingSessionSummary();
+  }
+
   async getAllCams() {
     const { devices } = await this._daily.enumerateDevices();
     return devices.filter((d) => d.kind === "videoinput");
