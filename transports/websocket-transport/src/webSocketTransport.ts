@@ -17,7 +17,7 @@ import { WebSocketSerializer } from "./serializers/websocketSerializer.ts";
 import { ProtobufFrameSerializer } from "./serializers/protobufSerializer.ts";
 
 export type WebSocketTransportOptions = {
-  ws_url?: string; // TODO: make connectionUrl to match smallwebrtc options?
+  ws_url?: string;
   serializer?: WebSocketSerializer;
   recorderSampleRate?: number;
   playerSampleRate?: number;
@@ -80,7 +80,7 @@ export class WebSocketTransport extends Transport {
     if (typeof connectParams !== "object") {
       throw new RTVIError("Invalid connection parameters");
     }
-    const tmpParams = {} as WebSocketTransportOptions;
+    const fixedParams = {} as WebSocketTransportOptions;
     for (const [key, val] of Object.entries(connectParams)) {
       // acept ws_url for backwards compatibility
       if (key === "ws_url" || key === "connectionUrl") {
@@ -89,14 +89,14 @@ export class WebSocketTransport extends Transport {
             `Invalid type for connectionUrl: expected string, got ${typeof val}`,
           );
         }
-        tmpParams.ws_url = val;
+        fixedParams.ws_url = val;
       } else {
         throw new RTVIError(
           `Unrecognized connection parameter: ${key}. Only 'connectionUrl' is allowed.`,
         );
       }
     }
-    return connectParams as WebSocketTransportOptions;
+    return fixedParams as WebSocketTransportOptions;
   }
 
   async _connect(connectParams?: WebSocketTransportOptions): Promise<void> {
@@ -303,13 +303,12 @@ export class WebSocketTransport extends Transport {
 
   // Not implemented
   enableScreenShare(enable: boolean): void {
-    logger.error("startScreenShare not implemented for WebSocketTransport");
+    logger.error("enableScreenShare not implemented for WebSocketTransport");
     throw new UnsupportedFeatureError(
-      "Screen sharing",
+      "enableScreenShare",
       "webSocketTransport",
       "This feature has not been implemented",
     );
-    throw new Error("Not implemented");
   }
 
   public get isSharingScreen(): boolean {
@@ -319,7 +318,11 @@ export class WebSocketTransport extends Transport {
 
   enableCam(enable: boolean) {
     logger.error("enableCam not implemented for WebSocketTransport");
-    throw new Error("Not implemented");
+    throw new UnsupportedFeatureError(
+      "enableCam",
+      "webSocketTransport",
+      "This feature has not been implemented",
+    );
   }
 
   get isCamEnabled(): boolean {
@@ -329,6 +332,10 @@ export class WebSocketTransport extends Transport {
 
   get selectedCam(): MediaDeviceInfo | Record<string, never> {
     logger.error("selectedCam not implemented for WebSocketTransport");
-    throw new Error("Not implemented");
+    throw new UnsupportedFeatureError(
+      "selectedCam",
+      "webSocketTransport",
+      "This feature has not been implemented",
+    );
   }
 }

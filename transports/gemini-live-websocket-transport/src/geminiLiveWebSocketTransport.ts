@@ -238,14 +238,16 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
         if (typeof data.content !== "string") {
           throw new Error("GeminiLive requires context content to be a string");
         }
-        // TODO: Handle sendImmediately
-        this._sendTextInput(data.content, data.role);
+        this._sendTextInput(data.content, data.role, data.run_immediately);
       } catch (error) {
         console.error(error);
         throw error;
       }
     } else {
-      throw new UnsupportedFeatureError(`Custom Messaging`, `GeminiLive`);
+      throw new UnsupportedFeatureError(
+        message.type,
+        `GeminiLiveWebSocketTransport`,
+      );
     }
   }
 
@@ -269,7 +271,11 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
     }
   }
 
-  async _sendTextInput(text: string, role: string): Promise<void> {
+  async _sendTextInput(
+    text: string,
+    role: string,
+    turnComplete: boolean | undefined = undefined,
+  ): Promise<void> {
     const msg = {
       clientContent: {
         turns: [
@@ -278,7 +284,12 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
             parts: [{ text }],
           },
         ],
-        turnComplete: role === "user" ? true : false,
+        turnComplete:
+          turnComplete !== undefined
+            ? turnComplete
+            : role === "user"
+              ? true
+              : false,
       },
     };
     try {

@@ -360,7 +360,11 @@ export async function setupEventHandlers() {
 // Send user message to bot.
 function sendUserMessage() {
   const textInput = document.getElementById("text-input")! as HTMLInputElement;
-  pcClient.appendToUserContext(textInput.value, true);
+  pcClient.appendToContext({
+    role: "user",
+    content: textInput.value,
+    run_immediately: true,
+  });
   textInput.value = "";
 }
 
