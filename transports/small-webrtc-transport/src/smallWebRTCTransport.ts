@@ -420,9 +420,13 @@ export class SmallWebRTCTransport extends Transport {
           type: offerSdp.type,
           pc_id: this.pc_id,
           restart_pc: recreatePeerConnection,
+          ...this._options.params.requestData,
         }),
         headers: {
           "Content-Type": "application/json",
+          ...Object.fromEntries(
+            (this._options.params.headers ?? new Headers()).entries()
+          ),
         },
         method: "POST",
       });
