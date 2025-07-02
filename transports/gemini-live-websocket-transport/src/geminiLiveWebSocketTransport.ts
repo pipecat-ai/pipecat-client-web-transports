@@ -214,7 +214,7 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
     await p;
     this._onMessage({
       type: RTVIMessageType.BOT_READY,
-      data: {},
+      data: { version: "1.0.0" },
     } as RTVIMessage);
   }
 

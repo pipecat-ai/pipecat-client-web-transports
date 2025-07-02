@@ -360,7 +360,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
       await p;
       this._onMessage({
         type: RTVIMessageType.BOT_READY,
-        data: {},
+        data: { version: "1.0.0" },
       } as RTVIMessage);
     } catch (e) {
       logger.error("Failed to start bot");
