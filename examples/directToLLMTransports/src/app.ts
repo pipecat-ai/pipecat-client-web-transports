@@ -11,16 +11,14 @@ import {
 
 // Import core Pipecat RTVI Client and types
 import {
-  LLMHelper,
   FunctionCallParams,
-  Transport,
-  RTVIClient,
+  PipecatClient,
+  PipecatClientOptions,
   RTVIEvent,
   RTVIMessage,
   Participant,
   TranscriptData,
   BotTTSTextData,
-  RTVIClientOptions,
 } from "@pipecat-ai/client-js";
 
 // Global variables for DOM elements and client state
@@ -28,8 +26,7 @@ let statusDiv: HTMLElement;
 let audioDiv: HTMLDivElement;
 let toggleBotButton: HTMLButtonElement;
 let submitBtn: HTMLButtonElement;
-let rtviClient: RTVIClient;
-let llmHelper: LLMHelper;
+let pcClient: PipecatClient;
 let botRunning = false;
 
 // Initialize the application when DOM is fully loaded
@@ -42,14 +39,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("mic-picker")!.onchange = (e) => {
     const target = e.target as HTMLSelectElement;
     console.log("user changed device", target, target.value);
-    rtviClient.updateMic(target.value);
+    pcClient.updateMic(target.value);
   };
 
   // Set up mute button functionality
   const muteBtn = document.getElementById("toggleMute")!;
   muteBtn.addEventListener("click", () => {
-    muteBtn.textContent = rtviClient.isMicEnabled ? "Unmute Mic" : "Mute Mic";
-    rtviClient.enableMic(!rtviClient.isMicEnabled);
+    muteBtn.textContent = pcClient.isMicEnabled ? "Unmute Mic" : "Mute Mic";
+    pcClient.enableMic(!pcClient.isMicEnabled);
   });
 
   // Set up text submission button
@@ -80,40 +77,31 @@ async function toggleBot() {
 async function initBot() {
   const urlParams = new URLSearchParams(window.location.search);
   const service = urlParams.get("service") || "gemini";
-  const { transport, service_options } =
-    service === "gemini" ? initGeminiTransport() : initOpenAITransport();
 
   // Configure RTVI client options
-  let RTVIConfig: RTVIClientOptions = {
-    transport,
-    params: {
-      baseUrl: "api",
-      requestData: { service_options },
-    },
+  let pcConfig: PipecatClientOptions = {
+    transport:
+      service === "gemini"
+        ? new GeminiLiveWebsocketTransport(geminiServiceOptions())
+        : new OpenAIRealTimeWebRTCTransport(openAIServiceOptions()),
     enableMic: true,
     enableCam: false,
-    timeout: 30 * 1000,
   };
-  RTVIConfig.customConnectHandler = () => Promise.resolve();
 
-  // Create new RTVI client instance
-  rtviClient = new RTVIClient(RTVIConfig);
-  llmHelper = new LLMHelper({});
-  llmHelper.handleFunctionCall(async (fn: FunctionCallParams) => {
-    return await handleFunctionCall(fn.functionName, fn.arguments);
-  });
-  rtviClient.registerHelper(service, llmHelper);
+  // Create new Pipecat client instance
+  pcClient = new PipecatClient(pcConfig);
+  registerFunctionCallHandlers();
 
   // Make RTVI client and transport available globally for debugging
-  (window as any).client = rtviClient;
+  (window as any).client = pcClient;
 
   // Set up RTVI event handlers and initialize devices
-  setupEventHandlers(rtviClient);
+  setupEventHandlers();
   await setupDevices();
 }
 
 // Initialize the Gemini LLM and its service options
-function initGeminiTransport() {
+function geminiServiceOptions() {
   // Configure Gemini LLM service options
   const llm_service_options: GeminiLLMServiceOptions = {
     api_key: import.meta.env.VITE_DANGEROUS_GEMINI_API_KEY,
@@ -140,15 +128,10 @@ function initGeminiTransport() {
     },
   };
 
-  // Initialize transport
-  let transport: Transport = new GeminiLiveWebsocketTransport(
-    llm_service_options
-  );
-
-  return { transport, service_options: llm_service_options };
+  return llm_service_options;
 }
 
-function initOpenAITransport() {
+function openAIServiceOptions() {
   // Configure OpenAI LLM service options
   const llm_service_options: OpenAIServiceOptions = {
     api_key: import.meta.env.VITE_DANGEROUS_OPENAI_API_KEY,
@@ -191,18 +174,13 @@ function initOpenAITransport() {
     initial_messages: [{ role: "user", content: "Hello" }],
   };
 
-  // Initialize transport
-  let transport: Transport = new OpenAIRealTimeWebRTCTransport(
-    llm_service_options
-  );
-
-  return { transport, service_options: llm_service_options };
+  return llm_service_options;
 }
 
 // Initialize and update available audio devices
 async function setupDevices() {
-  await rtviClient.initDevices();
-  const mics = await rtviClient.getAllMics();
+  await pcClient.initDevices();
+  const mics = await pcClient.getAllMics();
   updateMicList(mics);
 }
 
@@ -210,7 +188,7 @@ async function setupDevices() {
 function updateMicList(mics: MediaDeviceInfo[]) {
   const micPicker = document.getElementById("mic-picker")!;
   micPicker.replaceChildren();
-  const curMic = rtviClient.selectedMic?.deviceId;
+  const curMic = pcClient.selectedMic?.deviceId;
   mics.forEach((mic) => {
     let el = document.createElement("option");
     el.textContent = mic.label;
@@ -226,7 +204,7 @@ function updateMicList(mics: MediaDeviceInfo[]) {
 async function connectBot() {
   statusDiv.textContent = "Joining...";
   try {
-    await rtviClient.connect();
+    await pcClient.connect();
     console.log("READY! Let's GO!");
   } catch (e) {
     console.error("Error connecting", e);
@@ -241,7 +219,7 @@ async function connectBot() {
 // Disconnect client from Gemini Multimodal Live bot
 async function disconnectBot() {
   try {
-    await rtviClient.disconnect();
+    await pcClient.disconnect();
   } catch (e) {
     console.error("Error disconnecting", e);
   }
@@ -252,10 +230,10 @@ async function disconnectBot() {
 
 // Set up event handlers for RTVI client
 // https://docs.pipecat.ai/client/js/api-reference/callbacks#2-event-listeners
-export async function setupEventHandlers(rtviClient: RTVIClient) {
+export async function setupEventHandlers() {
   audioDiv = document.getElementById("audio") as HTMLDivElement;
 
-  rtviClient.on(RTVIEvent.TransportStateChanged, (state: string) => {
+  pcClient.on(RTVIEvent.TransportStateChanged, (state: string) => {
     console.log(`-- transport state change: ${state} --`);
     statusDiv.textContent = `Transport state: ${state}`;
     if (state === "disconnected") {
@@ -264,29 +242,29 @@ export async function setupEventHandlers(rtviClient: RTVIClient) {
     }
   });
 
-  rtviClient.on(RTVIEvent.Connected, () => {
+  pcClient.on(RTVIEvent.Connected, () => {
     console.log("-- user connected --");
   });
 
-  rtviClient.on(RTVIEvent.Disconnected, () => {
+  pcClient.on(RTVIEvent.Disconnected, () => {
     console.log("-- user disconnected --");
   });
 
-  rtviClient.on(RTVIEvent.BotConnected, () => {
+  pcClient.on(RTVIEvent.BotConnected, () => {
     console.log("-- bot connected --");
   });
 
-  rtviClient.on(RTVIEvent.BotDisconnected, () => {
+  pcClient.on(RTVIEvent.BotDisconnected, () => {
     console.log("--bot disconnected --");
   });
 
-  rtviClient.on(RTVIEvent.BotReady, () => {
+  pcClient.on(RTVIEvent.BotReady, () => {
     console.log("-- bot ready to chat! --");
   });
 
   // For realtime v2v transports, this event will only fire for the
   // local participant.
-  rtviClient.on(
+  pcClient.on(
     RTVIEvent.TrackStarted,
     (track: MediaStreamTrack, participant?: Participant) => {
       console.log(" --> track started", participant, track);
@@ -297,59 +275,59 @@ export async function setupEventHandlers(rtviClient: RTVIClient) {
       audio.srcObject = new MediaStream([track]);
       audio.autoplay = true;
       audioDiv.appendChild(audio);
-    }
+    },
   );
 
   // For realtime v2v transports, this event will only fire for the
   // local participant.
-  rtviClient.on(
+  pcClient.on(
     RTVIEvent.TrackStopped,
     (track: MediaStreamTrack, participant?: Participant) => {
       console.log(" --> track stopped", participant, track);
-    }
+    },
   );
 
-  rtviClient.on(RTVIEvent.UserStartedSpeaking, () => {
+  pcClient.on(RTVIEvent.UserStartedSpeaking, () => {
     console.log("-- user started speaking -- ");
   });
 
-  rtviClient.on(RTVIEvent.UserStoppedSpeaking, () => {
+  pcClient.on(RTVIEvent.UserStoppedSpeaking, () => {
     console.log("-- user stopped speaking -- ");
   });
 
-  rtviClient.on(RTVIEvent.BotStartedSpeaking, () => {
+  pcClient.on(RTVIEvent.BotStartedSpeaking, () => {
     console.log("-- bot started speaking -- ");
   });
 
-  rtviClient.on(RTVIEvent.BotStoppedSpeaking, () => {
+  pcClient.on(RTVIEvent.BotStoppedSpeaking, () => {
     console.log("-- bot stopped speaking -- ");
   });
 
   // multimodal live does not currently provide transcripts so this will not fire
-  rtviClient.on(RTVIEvent.UserTranscript, (transcript: TranscriptData) => {
+  pcClient.on(RTVIEvent.UserTranscript, (transcript: TranscriptData) => {
     console.log("[EVENT] UserTranscript", transcript);
   });
 
   // multimodal live does not currently provide transcripts so this will not fire
-  rtviClient.on(RTVIEvent.BotTtsText, (data: BotTTSTextData) => {
+  pcClient.on(RTVIEvent.BotTtsText, (data: BotTTSTextData) => {
     console.log("[EVENT] BotTtsText", data);
   });
 
   // multimodal live does not currently provide transcripts so this will not fire
-  rtviClient.on(RTVIEvent.BotTranscript, (data: BotTTSTextData) => {
+  pcClient.on(RTVIEvent.BotTranscript, (data: BotTTSTextData) => {
     console.log("[EVENT] BotTranscript", data);
   });
 
-  rtviClient.on(RTVIEvent.Error, (message: RTVIMessage) => {
+  pcClient.on(RTVIEvent.Error, (message: RTVIMessage) => {
     console.log("[EVENT] RTVI Error!", message);
   });
 
-  rtviClient.on(RTVIEvent.MessageError, (message: RTVIMessage) => {
+  pcClient.on(RTVIEvent.MessageError, (message: RTVIMessage) => {
     console.log("[EVENT] RTVI ErrorMessage error!", message);
   });
 
   // multimodal live does not currently provide metrics so this will not fire
-  rtviClient.on(RTVIEvent.Metrics, (data) => {
+  pcClient.on(RTVIEvent.Metrics, (data) => {
     // let's only print out ttfb for now
     if (!data.ttfb) {
       return;
@@ -359,7 +337,7 @@ export async function setupEventHandlers(rtviClient: RTVIClient) {
     });
   });
 
-  rtviClient.on(RTVIEvent.MicUpdated, (mic: MediaDeviceInfo) => {
+  pcClient.on(RTVIEvent.MicUpdated, (mic: MediaDeviceInfo) => {
     const micPicker = document.getElementById("mic-picker")!;
     for (let i = 0; i < micPicker.children.length; i++) {
       let el = micPicker.children[i] as HTMLOptionElement;
@@ -367,14 +345,14 @@ export async function setupEventHandlers(rtviClient: RTVIClient) {
     }
   });
 
-  rtviClient.on(RTVIEvent.AvailableMicsUpdated, (mics: MediaDeviceInfo[]) => {
+  pcClient.on(RTVIEvent.AvailableMicsUpdated, (mics: MediaDeviceInfo[]) => {
     updateMicList(mics);
   });
 
-  rtviClient.on(RTVIEvent.LocalAudioLevel, (level: number) => {
+  pcClient.on(RTVIEvent.LocalAudioLevel, (level: number) => {
     updateSpeakerBubble(level, "user");
   });
-  rtviClient.on(RTVIEvent.RemoteAudioLevel, (level: number) => {
+  pcClient.on(RTVIEvent.RemoteAudioLevel, (level: number) => {
     updateSpeakerBubble(level, "bot");
   });
 }
@@ -382,7 +360,7 @@ export async function setupEventHandlers(rtviClient: RTVIClient) {
 // Send user message to bot.
 function sendUserMessage() {
   const textInput = document.getElementById("text-input")! as HTMLInputElement;
-  llmHelper.appendToMessages({ role: "user", content: textInput.value }, true);
+  pcClient.appendToUserContext(textInput.value, true);
   textInput.value = "";
 }
 
@@ -390,7 +368,7 @@ function sendUserMessage() {
 function updateSpeakerBubble(level: number, whom: string) {
   const volume = level * 100;
   const userBubble = document.getElementById(
-    whom === "user" ? "user-bubble" : "bot-bubble"
+    whom === "user" ? "user-bubble" : "bot-bubble",
   )!;
   // Scale the bubble size based on the volume value
   const scale = 1 + volume / 50; // Adjust the divisor to control the scaling effect
@@ -413,15 +391,22 @@ function _generateRandomWeather() {
   };
 }
 
-async function handleFunctionCall(functionName: string, args: unknown) {
-  console.log("[EVENT] LLMFunctionCall", functionName);
-  const toolFunctions: { [key: string]: any } = {
-    changeBackgroundColor: ({ color }: { [key: string]: string }) => {
+async function registerFunctionCallHandlers() {
+  pcClient.registerFunctionCallHandler(
+    "changeBackgroundColor",
+    (params: FunctionCallParams) => {
+      console.log("[EVENT] LLMFunctionCall: changeBackgroundColor");
+      const color = params.arguments.color as string;
       console.log("changing background color to", color);
       document.body.style.backgroundColor = color;
-      return { success: true, color };
+      return Promise.resolve({ success: true, color });
     },
-    getWeather: async ({ location }: { [key: string]: string }) => {
+  );
+  pcClient.registerFunctionCallHandler(
+    "getWeather",
+    async (params: FunctionCallParams) => {
+      console.log("[EVENT] LLMFunctionCall: getWeather");
+      const location = params.arguments.location as string;
       console.log("getting weather for", location);
       const key = import.meta.env.VITE_DANGEROUS_OPENWEATHER_API_KEY;
       if (!key) {
@@ -430,22 +415,16 @@ async function handleFunctionCall(functionName: string, args: unknown) {
         return ret;
       }
       const locationReq = await fetch(
-        `http://api.openweathermap.org/geo/1.0/direct?q=${location}&limit=1&appid=${key}`
+        `http://api.openweathermap.org/geo/1.0/direct?q=${location}&limit=1&appid=${key}`,
       );
       const locJson = await locationReq.json();
       const loc = { lat: locJson[0].lat, lon: locJson[0].lon };
       const exclude = ["minutely", "hourly", "daily"].join(",");
       const weatherRec = await fetch(
-        `https://api.openweathermap.org/data/3.0/onecall?lat=${loc.lat}&lon=${loc.lon}&exclude=${exclude}&appid=${key}`
+        `https://api.openweathermap.org/data/3.0/onecall?lat=${loc.lat}&lon=${loc.lon}&exclude=${exclude}&appid=${key}`,
       );
       const weather = await weatherRec.json();
       return { success: true, weather: weather.current };
     },
-  };
-  const toolFunction = toolFunctions[functionName];
-  if (toolFunction) {
-    let result = await toolFunction(args);
-    console.debug("returning result", result);
-    return result;
-  }
+  );
 }

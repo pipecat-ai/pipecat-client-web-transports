@@ -1,11 +1,13 @@
 import {
   logger,
-  RTVIClientOptions,
+  PipecatClientOptions,
+  RTVIError,
   RTVIMessage,
   Tracks,
   Transport,
   TransportStartError,
   TransportState,
+  UnsupportedFeatureError,
 } from "@pipecat-ai/client-js";
 
 import { ReconnectingWebSocket } from "../../../lib/websocket-utils/reconnectingWebSocket";
@@ -14,8 +16,16 @@ import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 import { WebSocketSerializer } from "./serializers/websocketSerializer.ts";
 import { ProtobufFrameSerializer } from "./serializers/protobufSerializer.ts";
 
+export type WebSocketTransportOptions = {
+  ws_url?: string; // TODO: make connectionUrl to match smallwebrtc options?
+  serializer?: WebSocketSerializer;
+  recorderSampleRate?: number;
+  playerSampleRate?: number;
+};
+
 export class WebSocketTransport extends Transport {
   declare private _ws: ReconnectingWebSocket | null;
+  private _wsUrl: string | null = null;
   private static RECORDER_SAMPLE_RATE = 16_000;
   private static PLAYER_SAMPLE_RATE = 24_000;
   private audioQueue: ArrayBuffer[] = [];
@@ -23,47 +33,35 @@ export class WebSocketTransport extends Transport {
   private _serializer: WebSocketSerializer;
   private _recorderSampleRate: number;
 
-  constructor(
-    {
-      serializer,
-      recorderSampleRate,
-      playerSampleRate,
-    }: {
-      serializer: WebSocketSerializer;
-      recorderSampleRate: number;
-      playerSampleRate: number;
-    } = {
-      serializer: new ProtobufFrameSerializer(),
-      recorderSampleRate: WebSocketTransport.RECORDER_SAMPLE_RATE,
-      playerSampleRate: WebSocketTransport.PLAYER_SAMPLE_RATE,
-    },
-  ) {
+  constructor(opts: WebSocketTransportOptions = {}) {
     super();
-    this._recorderSampleRate = recorderSampleRate;
+    this._wsUrl = opts.ws_url || null;
+    this._recorderSampleRate =
+      opts.recorderSampleRate || WebSocketTransport.RECORDER_SAMPLE_RATE;
     this._mediaManager = new DailyMediaManager(
       true,
       true,
       undefined,
       undefined,
       512,
-      recorderSampleRate,
-      playerSampleRate,
+      this._recorderSampleRate,
+      opts.playerSampleRate || WebSocketTransport.PLAYER_SAMPLE_RATE,
     );
     this._mediaManager.setUserAudioCallback(
       this.handleUserAudioStream.bind(this),
     );
     this._ws = null;
-    this._serializer = serializer;
+    this._serializer = opts.serializer || new ProtobufFrameSerializer();
   }
 
   initialize(
-    options: RTVIClientOptions,
+    options: PipecatClientOptions,
     messageHandler: (ev: RTVIMessage) => void,
   ): void {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
     this._onMessage = messageHandler;
-    this._mediaManager.setRTVIOptions(options);
+    this._mediaManager.setClientOptions(options);
     this.state = "disconnected";
   }
 
@@ -73,15 +71,48 @@ export class WebSocketTransport extends Transport {
     this.state = "initialized";
   }
 
-  async connect(
-    authBundle: unknown,
-    abortController: AbortController,
-  ): Promise<void> {
+  _validateConnectionParams(
+    connectParams: unknown,
+  ): WebSocketTransportOptions | undefined {
+    if (connectParams === undefined || connectParams === null) {
+      return undefined;
+    }
+    if (typeof connectParams !== "object") {
+      throw new RTVIError("Invalid connection parameters");
+    }
+    for (const [key, val] of Object.entries(connectParams)) {
+      if (key !== "connectionUrl") {
+        throw new RTVIError(
+          `Unrecognized connection parameter: ${key}. Only 'connectionUrl' is allowed.`,
+        );
+      } else if (typeof val !== "string") {
+        throw new RTVIError(
+          `Invalid type for connectionUrl: expected string, got ${typeof val}`,
+        );
+      }
+    }
+    return connectParams as WebSocketTransportOptions;
+  }
+
+  async _connect(connectParams?: WebSocketTransportOptions): Promise<void> {
+    if (this._abortController?.signal.aborted) return;
+
     this.state = "connecting";
+
+    this._wsUrl = connectParams?.ws_url || this._wsUrl;
+    if (!this._wsUrl) {
+      logger.error("No url provided for connection");
+      this.state = "error";
+      throw new TransportStartError();
+    }
     try {
-      this._ws = this.initializeWebsocket(authBundle);
+      this._ws = this.initializeWebsocket();
+
       await this._ws.connect();
       await this._mediaManager.connect();
+
+      if (this._abortController?.signal.aborted) return;
+
       this.state = "connected";
       this._callbacks.onConnected?.();
     } catch (error) {
@@ -92,7 +123,7 @@ export class WebSocketTransport extends Transport {
     }
   }
 
-  async disconnect(): Promise<void> {
+  async _disconnect(): Promise<void> {
     this.state = "disconnecting";
     await this._mediaManager.disconnect();
     await this._ws?.close();
@@ -145,16 +176,12 @@ export class WebSocketTransport extends Transport {
     this._callbacks.onTransportStateChanged?.(state);
   }
 
-  get expiry(): number | undefined {
-    return this._expiry;
-  }
-
   tracks(): Tracks {
     return this._mediaManager.tracks();
   }
 
-  initializeWebsocket(authBundle: any): ReconnectingWebSocket {
-    const ws = new ReconnectingWebSocket(`${authBundle.ws_url}`, undefined, {
+  initializeWebsocket(): ReconnectingWebSocket {
+    const ws = new ReconnectingWebSocket(this._wsUrl!, undefined, {
       parseBlobToJson: false,
     });
     // disabling the keep alive, there is no API for it inside Pipecat
@@ -272,6 +299,11 @@ export class WebSocketTransport extends Transport {
   // Not implemented
   enableScreenShare(enable: boolean): void {
     logger.error("startScreenShare not implemented for WebSocketTransport");
+    throw new UnsupportedFeatureError(
+      "Screen sharing",
+      "webSocketTransport",
+      "This feature has not been implemented",
+    );
     throw new Error("Not implemented");
   }
 

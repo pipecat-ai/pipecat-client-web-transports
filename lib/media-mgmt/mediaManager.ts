@@ -1,14 +1,14 @@
 import { WavRecorder, WavStreamPlayer } from "../wavtools";
 
 import {
-  RTVIClientOptions,
+  PipecatClientOptions,
   RTVIEventCallbacks,
   Tracks,
 } from "@pipecat-ai/client-js";
 
 export abstract class MediaManager {
   declare protected _userAudioCallback: (data: ArrayBuffer) => void;
-  declare protected _options: RTVIClientOptions;
+  declare protected _options: PipecatClientOptions;
   protected _callbacks: RTVIEventCallbacks = {};
 
   protected _micEnabled: boolean;
@@ -22,7 +22,7 @@ export abstract class MediaManager {
   setUserAudioCallback(userAudioCallback: (data: ArrayBuffer) => void) {
     this._userAudioCallback = userAudioCallback;
   }
-  setRTVIOptions(options: RTVIClientOptions, override: boolean = false) {
+  setClientOptions(options: PipecatClientOptions, override: boolean = false) {
     if (this._options && !override) return;
     this._options = options;
     this._callbacks = options.callbacks ?? {};

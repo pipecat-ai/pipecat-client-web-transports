@@ -2,11 +2,13 @@ import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
 
 import {
+  LLMContextMessage,
   logger,
-  RTVIActionRequestData,
+  RTVIError,
   RTVIMessage,
   RTVIMessageType,
   TransportStartError,
+  UnsupportedFeatureError,
 } from "@pipecat-ai/client-js";
 import { ReconnectingWebSocket } from "../../../lib/websocket-utils/reconnectingWebSocket";
 import {
@@ -138,6 +140,18 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
     });
   }
 
+  _validateConnectionParams(
+    connectParams: unknown,
+  ): undefined | GeminiLLMServiceOptions {
+    if (connectParams === undefined || connectParams === null) {
+      return undefined;
+    }
+    if (typeof connectParams !== "object") {
+      throw new RTVIError("Invalid connection parameters");
+    }
+    return connectParams as GeminiLLMServiceOptions;
+  }
+
   async connectLLM(): Promise<void> {
     if (!this._ws) {
       console.error(
@@ -158,14 +172,28 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
     const model = service_options?.model ?? MODEL;
     const generation_config = service_options?.settings ?? {};
     let config = { setup: { model, generation_config } };
-    await this._sendMsg(config);
+    try {
+      await this._sendMsg(config);
+    } catch (error) {
+      const msg = `Failed to send configuration to LLM: ${error}`;
+      console.error(msg);
+      this.state = "error";
+      throw new TransportStartError(msg);
+    }
 
     // For this bare-bones prototype, let's just see if we have any initial_messages in the params
     // we were constructed with.
     if (service_options?.initial_messages) {
       service_options.initial_messages.forEach(
         (msg: { content: string; role: string }) => {
-          this._sendTextInput(msg.content, msg.role);
+          try {
+            this._sendTextInput(msg.content, msg.role);
+          } catch (error) {
+            const msg = `Failed to send initial message to LLM`;
+            console.error(msg);
+            this.state = "error";
+            throw new TransportStartError(msg);
+          }
         },
       );
     }
@@ -204,33 +232,20 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
   }
 
   sendMessage(message: RTVIMessage): void {
-    switch (message.type) {
-      case "action":
-        {
-          const data = message.data as RTVIActionRequestData;
-          switch (data.action) {
-            case "append_to_messages":
-              if (data.arguments) {
-                for (const a of data.arguments) {
-                  if (a.name === "messages") {
-                    const value = a.value as Array<{
-                      content: string;
-                      role: string;
-                    }>;
-                    for (const m of value) {
-                      this._sendTextInput(m.content, m.role);
-                    }
-                  }
-                }
-              }
-              break;
-            case "get_context":
-            case "set_context":
-              console.warn("get_context and set_context are not implemented");
-              break;
-          }
+    if (message.type === RTVIMessageType.APPEND_TO_CONTEXT) {
+      const data = message.data as LLMContextMessage;
+      try {
+        if (typeof data.content !== "string") {
+          throw new Error("GeminiLive requires context content to be a string");
         }
-        break;
+        // TODO: Handle sendImmediately
+        this._sendTextInput(data.content, data.role);
+      } catch (error) {
+        console.error(error);
+        throw error;
+      }
+    } else {
+      throw new UnsupportedFeatureError(`Custom Messaging`, `GeminiLive`);
     }
   }
 
@@ -247,7 +262,11 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
         ],
       },
     };
-    await this._sendMsg(msg);
+    try {
+      await this._sendMsg(msg);
+    } catch (error) {
+      console.log("Error sending audio input", error);
+    }
   }
 
   async _sendTextInput(text: string, role: string): Promise<void> {
@@ -262,27 +281,25 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
         turnComplete: role === "user" ? true : false,
       },
     };
-    await this._sendMsg(msg);
+    try {
+      await this._sendMsg(msg);
+    } catch (error) {
+      console.log("Error sending text input", error);
+      throw error;
+    }
   }
 
   async _sendMsg(msg: unknown): Promise<void> {
     if (!this._ws) {
-      console.error("sendMsg called but WS is null");
-      return;
+      throw new Error("sendMsg called but WS is null");
     }
     if (this._ws.readyState !== WebSocket.OPEN) {
-      console.error("attempt to send to closed socket");
-      return;
+      throw new Error("attempt to send to closed socket");
     }
     if (!msg) {
-      console.error("need a msg to send a msg");
-      return;
+      throw new Error("need a msg to send a msg");
     }
-    try {
-      await this._ws.send(JSON.stringify(msg));
-    } catch (e) {
-      console.error("sendMsg error", e);
-    }
+    await this._ws.send(JSON.stringify(msg));
   }
 
   // Not implemented
@@ -290,7 +307,11 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
     logger.error(
       "startScreenShare not implemented for GeminiLiveWebsocketTransport",
     );
-    throw new Error("Not implemented");
+    throw new UnsupportedFeatureError(
+      "Screen sharing",
+      "GeminiLiveWebsocketTransport",
+      "This feature has not been implemented",
+    );
   }
 
   public get isSharingScreen(): boolean {

@@ -1,6 +1,6 @@
 import {
   BotTTSTextData,
-  RTVIClientOptions,
+  PipecatClientOptions,
   RTVIMessage,
   Tracks,
   TranscriptData,
@@ -11,7 +11,7 @@ import {
 import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 
 export interface LLMServiceOptions {
-  api_key?: string;
+  api_key: string;
   initial_messages?: Array<unknown>;
   model?: string;
   settings?: Record<string, unknown>;
@@ -70,14 +70,14 @@ export abstract class DirectToLLMBaseWebSocketTransport extends Transport {
   // subclasses should implement this method to initialize the LLM
   // client and call super() on this method
   initialize(
-    options: RTVIClientOptions,
+    options: PipecatClientOptions,
     messageHandler: (ev: RTVIMessage) => void,
   ): void {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
     this._onMessage = messageHandler;
 
-    this._mediaManager.setRTVIOptions(options);
+    this._mediaManager.setClientOptions(options);
 
     this.initializeLLM();
 
@@ -93,11 +93,15 @@ export abstract class DirectToLLMBaseWebSocketTransport extends Transport {
     this.state = "initialized";
   }
 
-  async connect(
-    authBundle: unknown,
-    abortController: AbortController,
-  ): Promise<void> {
+  async _connect(connectParams?: LLMServiceOptions): Promise<void> {
     this.state = "connecting";
+
+    if (connectParams) {
+      this._service_options = {
+        ...this._service_options,
+        ...connectParams,
+      };
+    }
 
     await this.connectLLM();
 
@@ -107,7 +111,7 @@ export abstract class DirectToLLMBaseWebSocketTransport extends Transport {
     this._callbacks.onConnected?.();
   }
 
-  async disconnect(): Promise<void> {
+  async _disconnect(): Promise<void> {
     this.state = "disconnecting";
     await this._mediaManager.disconnect();
     await this.disconnectLLM();
@@ -168,10 +172,6 @@ export abstract class DirectToLLMBaseWebSocketTransport extends Transport {
 
     this._state = state;
     this._callbacks.onTransportStateChanged?.(state);
-  }
-
-  get expiry(): number | undefined {
-    return this._expiry;
   }
 
   tracks(): Tracks {
