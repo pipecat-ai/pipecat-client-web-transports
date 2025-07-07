@@ -1,10 +1,9 @@
 import {
   LLMContextMessage,
   LLMFunctionCallData,
-  LLMMessageType,
+  LLMFunctionCallResultResponse,
   Participant,
-  RTVIActionRequestData,
-  RTVIClientOptions,
+  PipecatClientOptions,
   RTVIError,
   RTVIMessage,
   RTVIMessageType,
@@ -119,7 +118,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
   // subclasses should implement this method to initialize the LLM
   // client and call super() on this method
   initialize(
-    options: RTVIClientOptions,
+    options: PipecatClientOptions,
     messageHandler: (ev: RTVIMessage) => void,
   ): void {
     this._options = options;
@@ -180,10 +179,19 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
 
   /**********************************/
   /** Call Lifecycle functionality */
-  async connect(
-    authBundle: unknown,
-    abortController: AbortController,
-  ): Promise<void> {
+  _validateConnectionParams(
+    connectParams: unknown,
+  ): undefined | OpenAIServiceOptions {
+    if (connectParams === undefined || connectParams === null) {
+      return undefined;
+    }
+    if (typeof connectParams !== "object") {
+      throw new RTVIError("Invalid connection parameters");
+    }
+    return connectParams as OpenAIServiceOptions;
+  }
+
+  async _connect(): Promise<void> {
     if (!this._openai_cxn) {
       logger.error(
         "connectLLM called before the webrtc connection is initialized. Be sure to call initializeLLM() first.",
@@ -191,19 +199,19 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
       return;
     }
 
-    if (abortController.signal.aborted) return;
+    if (this._abortController?.signal.aborted) return;
 
     this.state = "connecting";
 
     await this._connectLLM();
 
-    if (abortController.signal.aborted) return;
+    if (this._abortController?.signal.aborted) return;
 
     this.state = "connected";
     this._callbacks.onConnected?.();
   }
 
-  async disconnect(): Promise<void> {
+  async _disconnect(): Promise<void> {
     this.state = "disconnecting";
     await this._disconnectLLM();
     this.state = "disconnected";
@@ -352,7 +360,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
       await p;
       this._onMessage({
         type: RTVIMessageType.BOT_READY,
-        data: {},
+        data: { version: "1.0.0" },
       } as RTVIMessage);
     } catch (e) {
       logger.error("Failed to start bot");
@@ -362,35 +370,21 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
 
   sendMessage(message: RTVIMessage): void {
     switch (message.type) {
-      case "action": {
-        const data = message.data as RTVIActionRequestData;
-        switch (data.action) {
-          case "append_to_messages":
-            if (data.arguments) {
-              let messages: LLMContextMessage[] = [];
-              let runImmediately = false;
-              for (const a of data.arguments) {
-                if (a.name === "messages") {
-                  messages = a.value as Array<LLMContextMessage>;
-                } else if (a.name === "run_immediately") {
-                  runImmediately = a.value as boolean;
-                }
-              }
-              this._sendTextInput(messages, runImmediately);
-            }
-            break;
-          case "run":
-            this._run();
-            break;
-          case "get_contex":
-          case "set_context":
-            logger.warn("get_context and set_context are not implemented");
-            break;
+      case RTVIMessageType.APPEND_TO_CONTEXT:
+        {
+          const data = message.data as LLMContextMessage;
+          const runImmediately = data.run_immediately ?? false;
+          const messages = [{ content: data.content, role: data.role }];
+          this._sendTextInput(messages, runImmediately);
         }
         break;
-      }
-      case LLMMessageType.LLM_FUNCTION_CALL_RESULT: {
-        this._sendFunctionCallResult(message.data as LLMFunctionCallData);
+      case "run":
+        this._run();
+        break;
+      case RTVIMessageType.LLM_FUNCTION_CALL_RESULT: {
+        this._sendFunctionCallResult(
+          message.data as LLMFunctionCallResultResponse,
+        );
         break;
       }
     }
@@ -615,7 +609,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
             args: JSON.parse(msg.arguments),
           };
           this._onMessage({
-            type: LLMMessageType.LLM_FUNCTION_CALL,
+            type: RTVIMessageType.LLM_FUNCTION_CALL,
             data,
           } as RTVIMessage);
         }
@@ -713,7 +707,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     }
   }
 
-  private _sendFunctionCallResult(data: LLMFunctionCallData) {
+  private _sendFunctionCallResult(data: LLMFunctionCallResultResponse) {
     if (!this._channelReady() || !data.result) return;
     const event = {
       type: "conversation.item.create",

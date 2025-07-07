@@ -1,9 +1,11 @@
 import {
   logger,
-  RTVIClientOptions,
+  RTVIError,
   RTVIMessage,
+  PipecatClientOptions,
   Tracks,
   Transport,
+  TransportStartError,
   TransportState,
 } from "@pipecat-ai/client-js";
 import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
@@ -22,7 +24,14 @@ class TrackStatusMessage {
 export interface SmallWebRTCTransportConstructorOptions {
   iceServers?: RTCIceServer[];
   waitForICEGathering?: boolean;
+  connectionUrl?: string;
+  audioCodec?: string;
+  videoCodec?: string;
 }
+
+export type SmallWebRTCTransportConnectionOptions = {
+  connectionUrl?: string;
+};
 
 const RENEGOTIATE_TYPE = "renegotiate";
 class RenegotiateMessage {
@@ -58,6 +67,8 @@ const VIDEO_TRANSCEIVER_INDEX = 1;
 export class SmallWebRTCTransport extends Transport {
   public static SERVICE_NAME = "small-webrtc-transport";
 
+  private _connectionUrl: string | null = null;
+
   // Trigger when the peer connection is finally ready or in case it has failed all the attempts to connect
   private _connectResolved: ((value: PromiseLike<void> | void) => void) | null =
     null;
@@ -80,13 +91,14 @@ export class SmallWebRTCTransport extends Transport {
   private _iceServers: RTCIceServer[] = [];
   private readonly _waitForICEGathering: boolean;
 
-  constructor({
-    iceServers = [],
-    waitForICEGathering = false,
-  }: SmallWebRTCTransportConstructorOptions = {}) {
+  constructor(opts: SmallWebRTCTransportConstructorOptions = {}) {
     super();
-    this._iceServers = iceServers;
-    this._waitForICEGathering = waitForICEGathering;
+    this._iceServers = opts.iceServers || [];
+    this._waitForICEGathering = opts.waitForICEGathering || false;
+    this._connectionUrl = opts.connectionUrl || null;
+    this.audioCodec = opts.audioCodec || null;
+    this.videoCodec = opts.videoCodec || null;
+
     this.mediaManager = new DailyMediaManager(
       false,
       false,
@@ -107,29 +119,13 @@ export class SmallWebRTCTransport extends Transport {
   }
 
   public initialize(
-    options: RTVIClientOptions,
+    options: PipecatClientOptions,
     messageHandler: (ev: RTVIMessage) => void,
   ): void {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
     this._onMessage = messageHandler;
-    this.mediaManager.setRTVIOptions(options);
-
-    if (this._options.params.config?.length || 0 > 0) {
-      let config = this._options.params.config![0];
-      if (
-        config.service == SmallWebRTCTransport.SERVICE_NAME &&
-        config.options.length > 0
-      ) {
-        config.options.forEach((option) => {
-          if (option.name == "audioCodec") {
-            this.audioCodec = option.value as string;
-          } else if (option.name == "videoCodec") {
-            this.videoCodec = option.value as string;
-          }
-        });
-      }
-    }
+    this.mediaManager.setClientOptions(options);
 
     this.state = "disconnected";
     logger.debug("[RTVI Transport] Initialized");
@@ -149,19 +145,48 @@ export class SmallWebRTCTransport extends Transport {
     this.videoCodec = videoCodec;
   }
 
-  async connect(
-    authBundle: unknown,
-    abortController: AbortController,
+  _validateConnectionParams(
+    connectParams: unknown,
+  ): SmallWebRTCTransportConnectionOptions | undefined {
+    if (connectParams === undefined || connectParams === null) {
+      return undefined;
+    }
+    if (typeof connectParams !== "object") {
+      throw new RTVIError("Invalid connection parameters");
+    }
+    for (const [key, val] of Object.entries(connectParams)) {
+      if (key !== "connectionUrl") {
+        throw new RTVIError(
+          `Unrecognized connection parameter: ${key}. Only 'connectionUrl' is allowed.`,
+        );
+      } else if (typeof val !== "string") {
+        throw new RTVIError(
+          `Invalid type for connectionUrl: expected string, got ${typeof val}`,
+        );
+      }
+    }
+    return connectParams as SmallWebRTCTransportConnectionOptions;
+  }
+
+  async _connect(
+    connectParams?: SmallWebRTCTransportConnectionOptions,
   ): Promise<void> {
-    if (abortController.signal.aborted) return;
+    if (this._abortController?.signal.aborted) return;
 
     this.state = "connecting";
+
+    this._connectionUrl = connectParams?.connectionUrl ?? this._connectionUrl;
+    if (!this._connectionUrl) {
+      logger.error("No url provided for connection");
+      this.state = "error";
+      throw new TransportStartError();
+    }
 
     await this.mediaManager.connect();
 
     await this.startNewPeerConnection();
 
-    if (abortController.signal.aborted) return;
+    if (this._abortController?.signal.aborted) return;
 
     // Wait until we are actually connected and the data channel is ready
     await new Promise<void>((resolve, reject) => {
@@ -213,7 +238,7 @@ export class SmallWebRTCTransport extends Transport {
     this.dc?.send(JSON.stringify(signallingMessage));
   }
 
-  async disconnect(): Promise<void> {
+  async _disconnect(): Promise<void> {
     this.state = "disconnecting";
     await this.stop();
     this.state = "disconnected";
@@ -359,9 +384,8 @@ export class SmallWebRTCTransport extends Transport {
 
       logger.debug(`Will create offer for peerId: ${this.pc_id}`);
 
-      const url = `${this._options.params.baseUrl}${this._options.params.endpoints?.connect || ""}`;
       // Send offer to server
-      const response = await fetch(url, {
+      const response = await fetch(this._connectionUrl!, {
         body: JSON.stringify({
           sdp: offerSdp.sdp,
           type: offerSdp.type,
@@ -630,10 +654,6 @@ export class SmallWebRTCTransport extends Transport {
 
     this._state = state;
     this._callbacks.onTransportStateChanged?.(state);
-  }
-
-  get expiry(): number | undefined {
-    return this._expiry;
   }
 
   tracks(): Tracks {

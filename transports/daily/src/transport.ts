@@ -1,5 +1,6 @@
 import Daily, {
   DailyCall,
+  DailyCallOptions,
   DailyEventObjectAppMessage,
   DailyEventObjectAvailableDevicesUpdated,
   DailyEventObjectFatalError,
@@ -15,7 +16,7 @@ import Daily, {
 } from "@daily-co/daily-js";
 import {
   Participant,
-  RTVIClientOptions,
+  PipecatClientOptions,
   RTVIError,
   RTVIEventCallbacks,
   RTVIMessage,
@@ -30,20 +31,27 @@ import { MediaStreamRecorder } from "../../../lib/wavtools";
 
 import packageJson from "../package.json";
 
-export interface DailyTransportAuthBundle {
-  room_url: string;
-  token: string;
+export interface DailyConnectionEndpoint {
+  endpoint: string;
+  headers?: Headers;
+  requestData?: object;
+  timeout?: number;
 }
 
-export interface DailyTransportConstructorOptions {
+export interface DailyTransportConstructorOptions extends DailyFactoryOptions {
   bufferLocalAudioUntilBotReady?: boolean;
-  dailyFactoryOptions?: DailyFactoryOptions;
 }
 
 export enum DailyRTVIMessageType {
   AUDIO_BUFFERING_STARTED = "audio-buffering-started",
   AUDIO_BUFFERING_STOPPED = "audio-buffering-stopped",
 }
+
+export type DailyEventCallbacks = RTVIEventCallbacks &
+  Partial<{
+    onAudioBufferingStarted: () => void;
+    onAudioBufferingStopped: () => void;
+  }>;
 
 class DailyCallWrapper {
   private _daily: DailyCall;
@@ -57,18 +65,18 @@ class DailyCallWrapper {
           let errMsg;
           switch (String(prop)) {
             // Disable methods that modify the lifecycle of the call. These operations
-            // should be performed via the RTVI client in order to keep state in sync.
+            // should be performed via the PipecatClient in order to keep state in sync.
             case "preAuth":
               errMsg = `Calls to preAuth() are disabled. Please use Transport.preAuth()`;
               break;
             case "startCamera":
-              errMsg = `Calls to startCamera() are disabled. Please use RTVIClient.initDevices()`;
+              errMsg = `Calls to startCamera() are disabled. Please use PipecatClient.initDevices()`;
               break;
             case "join":
-              errMsg = `Calls to join() are disabled. Please use RTVIClient.connect()`;
+              errMsg = `Calls to join() are disabled. Please use PipecatClient.connect()`;
               break;
             case "leave":
-              errMsg = `Calls to leave() are disabled. Please use RTVIClient.disconnect()`;
+              errMsg = `Calls to leave() are disabled. Please use PipecatClient.disconnect()`;
               break;
             case "destroy":
               errMsg = `Calls to destroy() are disabled.`;
@@ -96,6 +104,9 @@ class DailyCallWrapper {
 }
 
 export class DailyTransport extends Transport {
+  // override type of _callbacks to include Daily specific callbacks
+  declare protected _callbacks: DailyEventCallbacks;
+
   declare private _dailyWrapper: DailyCallWrapper;
   declare private _daily: DailyCall;
   private _dailyFactoryOptions: DailyFactoryOptions;
@@ -112,15 +123,15 @@ export class DailyTransport extends Transport {
   private _audioQueue: ArrayBuffer[] = [];
   declare private _mediaStreamRecorder: MediaStreamRecorder;
 
-  constructor({
-    dailyFactoryOptions = {},
-    bufferLocalAudioUntilBotReady = false,
-  }: DailyTransportConstructorOptions = {}) {
+  constructor(opts: DailyTransportConstructorOptions = {}) {
     super();
-    this._callbacks = {} as RTVIEventCallbacks;
 
-    this._dailyFactoryOptions = dailyFactoryOptions;
-    this._bufferLocalAudioUntilBotReady = bufferLocalAudioUntilBotReady;
+    this._callbacks = {} as DailyEventCallbacks;
+
+    const { bufferLocalAudioUntilBotReady, ...dailyOpts } = opts;
+    this._dailyFactoryOptions = dailyOpts;
+    this._bufferLocalAudioUntilBotReady =
+      bufferLocalAudioUntilBotReady || false;
 
     this._daily = Daily.createCallObject({
       ...this._dailyFactoryOptions,
@@ -168,7 +179,7 @@ export class DailyTransport extends Transport {
       return btoa(String.fromCharCode(...pcmByteArray));
     });
 
-    const rtviMessage: RTVIMessage = {
+    const audioMessage: RTVIMessage = {
       id: "raw-audio-batch",
       label: "rtvi-ai",
       type: "raw-audio-batch",
@@ -179,18 +190,18 @@ export class DailyTransport extends Transport {
       },
     };
 
-    this.sendMessage(rtviMessage);
+    this.sendMessage(audioMessage);
   }
 
   public initialize(
-    options: RTVIClientOptions,
+    options: PipecatClientOptions,
     messageHandler: (ev: RTVIMessage) => void,
   ): void {
     if (this._bufferLocalAudioUntilBotReady) {
       this.setupRecorder();
     }
 
-    this._callbacks = options.callbacks ?? {};
+    this._callbacks = (options.callbacks ?? {}) as DailyEventCallbacks;
     this._onMessage = messageHandler;
 
     if (
@@ -212,7 +223,7 @@ export class DailyTransport extends Transport {
 
     this.state = "disconnected";
 
-    logger.debug("[RTVI Transport] Initialized", packageJson.version);
+    logger.debug("[Daily Transport] Initialized", packageJson.version);
   }
 
   get dailyCallClient(): DailyCall {
@@ -228,6 +239,10 @@ export class DailyTransport extends Transport {
 
     this._state = state;
     this._callbacks.onTransportStateChanged?.(state);
+  }
+
+  getSessionInfo() {
+    return this._daily.meetingSessionSummary();
   }
 
   async getAllCams() {
@@ -338,15 +353,12 @@ export class DailyTransport extends Transport {
 
   private async startRecording(): Promise<void> {
     try {
-      logger.info("[RTVI Transport] Initializing recording");
+      logger.info("[Daily Transport] Initializing recording");
       await this._mediaStreamRecorder.record((data) => {
         this.handleUserAudioStream(data.mono);
       }, DailyTransport.RECORDER_CHUNK_SIZE);
-      this._onMessage({
-        type: DailyRTVIMessageType.AUDIO_BUFFERING_STARTED,
-        data: {},
-      } as RTVIMessage);
-      logger.info("[RTVI Transport] Recording Initialized");
+      this._callbacks.onAudioBufferingStarted?.();
+      logger.info("[Daily Transport] Recording Initialized");
     } catch (e) {
       const err = e as Error;
       if (!err.message.includes("Already recording")) {
@@ -355,9 +367,9 @@ export class DailyTransport extends Transport {
     }
   }
 
-  async preAuth(dailyFactoryOptions: DailyFactoryOptions) {
-    this._dailyFactoryOptions = dailyFactoryOptions;
-    await this._daily.preAuth(dailyFactoryOptions);
+  async preAuth(dailyCallOptions: DailyCallOptions) {
+    this._dailyFactoryOptions = dailyCallOptions;
+    await this._daily.preAuth(dailyCallOptions);
   }
 
   async initDevices() {
@@ -392,37 +404,53 @@ export class DailyTransport extends Transport {
     this.state = "initialized";
   }
 
-  async connect(
-    authBundle: DailyTransportAuthBundle,
-    abortController: AbortController,
-  ) {
+  _validateConnectionParams(
+    connectParams?: unknown,
+  ): DailyCallOptions | undefined {
+    if (connectParams === undefined || connectParams === null) {
+      return undefined;
+    }
+    if (typeof connectParams !== "object") {
+      throw new RTVIError("Invalid connection parameters");
+    }
+    type DailyConnectParams = DailyCallOptions & {
+      room_url?: string;
+    };
+    const tmpParams = connectParams as DailyConnectParams;
+    if (tmpParams.room_url) {
+      tmpParams.url = tmpParams.room_url;
+      delete tmpParams.room_url;
+    }
+    if (!tmpParams.token) {
+      // Daily doesn't like token being in the map and undefined or null
+      delete tmpParams.token;
+    }
+    return tmpParams as DailyCallOptions;
+  }
+
+  async _connect(connectParams?: DailyCallOptions) {
     if (!this._daily) {
       throw new RTVIError("Transport instance not initialized");
     }
 
-    if (abortController.signal.aborted) return;
+    if (connectParams) {
+      this._dailyFactoryOptions = {
+        ...this._dailyFactoryOptions,
+        ...connectParams,
+      };
+    }
 
     this.state = "connecting";
 
-    const opts = this._dailyFactoryOptions;
-    opts.url = authBundle.room_url ?? opts.url;
-    if (authBundle.token != null) {
-      opts.token = authBundle.token;
-    }
     try {
-      await this._daily.join(opts);
-
-      const room = await this._daily.room();
-      if (room && "id" in room) {
-        this._expiry = room.config?.exp;
-      }
+      await this._daily.join(this._dailyFactoryOptions);
     } catch (e) {
       logger.error("Failed to join room", e);
       this.state = "error";
       throw new TransportStartError();
     }
 
-    if (abortController.signal.aborted) return;
+    if (this._abortController?.signal.aborted) return;
 
     this.state = "connected";
 
@@ -448,6 +476,16 @@ export class DailyTransport extends Transport {
         resolve();
       };
 
+      for (const id in this._daily.participants()) {
+        const p = this._daily.participants()[id];
+        if (!p.local && p.tracks?.audio?.persistentTrack) {
+          // If we already have a remote audio track, we can send the ready message immediately
+          sendReadyMessage();
+          resolve();
+          return;
+        }
+      }
+
       const readyHandler = (ev: DailyEventObjectTrack) => {
         if (!ev.participant?.local) {
           this._daily.off("track-started", readyHandler);
@@ -455,7 +493,7 @@ export class DailyTransport extends Transport {
           // Check if it's an iOS device
           if (isIOS()) {
             logger.debug(
-              "[RTVI Transport] iOS device detected, adding 0.5 second delay before sending ready message",
+              "[Daily Transport] iOS device detected, adding 0.5 second delay before sending ready message",
             );
 
             // Add 500ms delay for iOS devices:
@@ -480,10 +518,7 @@ export class DailyTransport extends Transport {
     ) {
       // disconnecting, we don't need to record anymore
       void this._mediaStreamRecorder.end();
-      this._onMessage({
-        type: DailyRTVIMessageType.AUDIO_BUFFERING_STOPPED,
-        data: {},
-      } as RTVIMessage);
+      this._callbacks.onAudioBufferingStopped?.();
     }
   }
 
@@ -515,7 +550,7 @@ export class DailyTransport extends Transport {
     this._daily.on("nonfatal-error", this.handleNonFatalError.bind(this));
   }
 
-  async disconnect() {
+  async _disconnect() {
     this.state = "disconnecting";
     this._daily.stopLocalAudioLevelObserver();
     this._daily.stopRemoteParticipantsAudioLevelObserver();
