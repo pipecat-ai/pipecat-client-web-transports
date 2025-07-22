@@ -96,9 +96,6 @@ export class SmallWebRTCTransport extends Transport {
   private _iceServers: RTCIceServer[] = [];
   private readonly _waitForICEGathering: boolean;
 
-  private screenTrack: MediaStreamTrack | null = null;
-  private _isSharingScreen: boolean = false;
-
   constructor(opts: SmallWebRTCTransportConstructorOptions = {}) {
     super();
     this._iceServers = opts.iceServers ?? [];
@@ -126,6 +123,8 @@ export class SmallWebRTCTransport extends Transport {
           } else if (event.type == "video") {
             logger.info("SmallWebRTCMediaManager replacing video track");
             await this.getVideoTransceiver().sender.replaceTrack(event.track);
+          } else {
+            console.log("need to handle track", event.type, event.track);
           }
         },
         (event) =>
@@ -420,13 +419,9 @@ export class SmallWebRTCTransport extends Transport {
           type: offerSdp.type,
           pc_id: this.pc_id,
           restart_pc: recreatePeerConnection,
-          ...this._options.params.requestData,
         }),
         headers: {
           "Content-Type": "application/json",
-          ...Object.fromEntries(
-            (this._options.params.headers ?? new Headers()).entries()
-          ),
         },
         method: "POST",
       });
@@ -618,12 +613,6 @@ export class SmallWebRTCTransport extends Transport {
     }
     this._connectFailed = null;
     this._connectResolved = null;
-
-    if (this.screenTrack) {
-      this.screenTrack.stop();
-      this.screenTrack = null;
-    }
-    this._isSharingScreen = false;
   }
 
   getAllMics(): Promise<MediaDeviceInfo[]> {
@@ -676,12 +665,22 @@ export class SmallWebRTCTransport extends Transport {
       new TrackStatusMessage(VIDEO_TRANSCEIVER_INDEX, enable),
     );
   }
+  async enableScreenShare(enable: boolean): Promise<void> {
+    console.log("!!! enableScreenShare", enable);
+    this.mediaManager.enableScreenShare(enable);
+    this.sendSignallingMessage(
+      new TrackStatusMessage(VIDEO_TRANSCEIVER_INDEX, enable),
+    );
+  }
 
   get isCamEnabled(): boolean {
     return this.mediaManager.isCamEnabled;
   }
   get isMicEnabled(): boolean {
     return this.mediaManager.isMicEnabled;
+  }
+  get isSharingScreen(): boolean {
+    return this.mediaManager.isSharingScreen;
   }
 
   get state(): TransportState {
@@ -697,65 +696,6 @@ export class SmallWebRTCTransport extends Transport {
 
   tracks(): Tracks {
     return this.mediaManager.tracks();
-  }
-
-  async enableScreenShare(enable: boolean): Promise<void> {
-    this.sendSignallingMessage(
-      new TrackStatusMessage(VIDEO_TRANSCEIVER_INDEX, enable),
-    );
-    if (enable === this._isSharingScreen) {
-      return;
-    }
-
-    if (enable) {
-      try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            displaySurface: "monitor",
-          },
-        });
-
-        const [screenTrack] = stream.getVideoTracks();
-        this.screenTrack = screenTrack;
-
-        // Handle track ending (user stops sharing via browser UI)
-        screenTrack.onended = () => {
-          void this.enableScreenShare(false);
-        };
-
-        // Store the current video track to restore it later
-        // const currentVideoTrack = this.getVideoTransceiver().sender.track;
-
-        // Replace the video transceiver's track with screen track
-        await this.getVideoTransceiver().sender.replaceTrack(screenTrack);
-        this._isSharingScreen = true;
-        this._callbacks.onTrackStarted?.(screenTrack, {
-          id: "ScreenShare",
-          name: "ScreenShare",
-          local: true,
-        });
-      } catch (error) {
-        logger.error("Failed to start screen sharing:", error);
-        throw error;
-      }
-    } else {
-      // Stop the screen track
-      if (this.screenTrack) {
-        this.screenTrack.stop();
-        this.screenTrack = null;
-      }
-
-      // Restore the original video track
-      const originalVideoTrack = this.tracks().local.video;
-      await this.getVideoTransceiver().sender.replaceTrack(
-        originalVideoTrack || null,
-      );
-      this._isSharingScreen = false;
-    }
-  }
-
-  public get isSharingScreen(): boolean {
-    return this._isSharingScreen;
   }
 
   private sdpFilterCodec(kind: string, codec: string, realSdp: string): string {

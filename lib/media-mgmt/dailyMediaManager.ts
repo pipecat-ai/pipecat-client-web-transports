@@ -254,6 +254,14 @@ export class DailyMediaManager extends MediaManager {
     this._camEnabled = enable;
     this._daily.setLocalVideo(enable);
   }
+  enableScreenShare(enable: boolean): void {
+    console.log("!!! dailyMediaManager:enableScreenShare", enable);
+    if (enable) {
+      this._daily.startScreenShare();
+    } else {
+      this._daily.stopScreenShare();
+    }
+  }
 
   get isCamEnabled(): boolean {
     return this._daily.localVideo();
@@ -261,12 +269,17 @@ export class DailyMediaManager extends MediaManager {
   get isMicEnabled(): boolean {
     return this._daily.localAudio();
   }
+  get isSharingScreen(): boolean {
+    return this._daily.localScreenAudio() || this._daily.localScreenVideo();
+  }
 
   tracks(): Tracks {
     const participants: DailyParticipantsObject = this._daily.participants();
     return {
       local: {
         audio: participants?.local?.tracks?.audio?.persistentTrack,
+        screenAudio: participants?.local?.tracks?.screenAudio?.persistentTrack,
+        screenVideo: participants?.local?.tracks?.screenVideo?.persistentTrack,
         video: participants?.local?.tracks?.video?.persistentTrack,
       },
     };
@@ -426,6 +439,7 @@ export class DailyMediaManager extends MediaManager {
         ? dailyParticipantToParticipant(event.participant)
         : undefined,
     );
+    console.log("trigger onTrackStartedCallback", event);
     this.onTrackStartedCallback?.(event);
   }
 

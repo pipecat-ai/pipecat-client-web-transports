@@ -56,9 +56,11 @@ export abstract class MediaManager {
 
   abstract enableMic(enable: boolean): void;
   abstract enableCam(enable: boolean): void;
+  abstract enableScreenShare(enable: boolean): void;
 
   abstract get isCamEnabled(): boolean;
   abstract get isMicEnabled(): boolean;
+  abstract get isSharingScreen(): boolean;
 
   abstract tracks(): Tracks;
 }
@@ -199,6 +201,9 @@ export class WavMediaManager extends MediaManager {
     // TODO: Video not supported yet
     console.warn("WavMediaManager does not support video input.");
   }
+  enableScreenShare(enable: boolean): void {
+    // TODO: Screensharing not supported yet
+  }
 
   get isCamEnabled(): boolean {
     // TODO: Video not supported yet
@@ -206,6 +211,10 @@ export class WavMediaManager extends MediaManager {
   }
   get isMicEnabled(): boolean {
     return this._micEnabled;
+  }
+  get isSharingScreen(): boolean {
+    // TODO: Screensharing not supported yet
+    return false;
   }
 
   tracks(): Tracks {
