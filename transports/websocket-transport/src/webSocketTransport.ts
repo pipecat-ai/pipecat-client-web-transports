@@ -23,6 +23,11 @@ export type WebSocketTransportOptions = {
   playerSampleRate?: number;
 };
 
+export interface WebSocketTransportConstructorOptions
+  extends WebSocketTransportOptions {
+  mediaManager?: MediaManager;
+}
+
 export class WebSocketTransport extends Transport {
   declare private _ws: ReconnectingWebSocket | null;
   private _wsUrl: string | null = null;
@@ -33,20 +38,22 @@ export class WebSocketTransport extends Transport {
   private _serializer: WebSocketSerializer;
   private _recorderSampleRate: number;
 
-  constructor(opts: WebSocketTransportOptions = {}) {
+  constructor(opts: WebSocketTransportConstructorOptions = {}) {
     super();
     this._wsUrl = opts.ws_url || null;
     this._recorderSampleRate =
       opts.recorderSampleRate || WebSocketTransport.RECORDER_SAMPLE_RATE;
-    this._mediaManager = new DailyMediaManager(
-      true,
-      true,
-      undefined,
-      undefined,
-      512,
-      this._recorderSampleRate,
-      opts.playerSampleRate || WebSocketTransport.PLAYER_SAMPLE_RATE,
-    );
+    this._mediaManager =
+      opts.mediaManager ||
+      new DailyMediaManager(
+        true,
+        true,
+        undefined,
+        undefined,
+        512,
+        this._recorderSampleRate,
+        opts.playerSampleRate || WebSocketTransport.PLAYER_SAMPLE_RATE,
+      );
     this._mediaManager.setUserAudioCallback(
       this.handleUserAudioStream.bind(this),
     );
