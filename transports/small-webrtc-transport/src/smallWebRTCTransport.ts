@@ -27,6 +27,7 @@ export interface SmallWebRTCTransportConstructorOptions {
   connectionUrl?: string;
   audioCodec?: string;
   videoCodec?: string;
+  mediaManager?: MediaManager;
 }
 
 export type SmallWebRTCTransportConnectionOptions = {
@@ -99,23 +100,26 @@ export class SmallWebRTCTransport extends Transport {
     this.audioCodec = opts.audioCodec || null;
     this.videoCodec = opts.videoCodec || null;
 
-    this.mediaManager = new DailyMediaManager(
-      false,
-      false,
-      async (event) => {
-        if (!this.pc) {
-          return;
-        }
-        if (event.type == "audio") {
-          logger.info("SmallWebRTCMediaManager replacing audio track");
-          await this.getAudioTransceiver().sender.replaceTrack(event.track);
-        } else if (event.type == "video") {
-          logger.info("SmallWebRTCMediaManager replacing video track");
-          await this.getVideoTransceiver().sender.replaceTrack(event.track);
-        }
-      },
-      (event) => logger.debug("SmallWebRTCMediaManager Track stopped:", event),
-    );
+    this.mediaManager =
+      opts.mediaManager ||
+      new DailyMediaManager(
+        false,
+        false,
+        async (event) => {
+          if (!this.pc) {
+            return;
+          }
+          if (event.type == "audio") {
+            logger.info("SmallWebRTCMediaManager replacing audio track");
+            await this.getAudioTransceiver().sender.replaceTrack(event.track);
+          } else if (event.type == "video") {
+            logger.info("SmallWebRTCMediaManager replacing video track");
+            await this.getVideoTransceiver().sender.replaceTrack(event.track);
+          }
+        },
+        (event) =>
+          logger.debug("SmallWebRTCMediaManager Track stopped:", event),
+      );
   }
 
   public initialize(
