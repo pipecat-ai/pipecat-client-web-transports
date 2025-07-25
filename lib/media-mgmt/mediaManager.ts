@@ -96,6 +96,9 @@ export class WavMediaManager extends MediaManager {
     if (this._micEnabled && !isAlreadyRecording) {
       await this._startRecording();
     }
+    if (this._camEnabled) {
+      console.warn("WavMediaManager does not support video input.");
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -178,6 +181,7 @@ export class WavMediaManager extends MediaManager {
   }
   enableCam(enable: boolean): void {
     // TODO: Video not supported yet
+    console.warn("WavMediaManager does not support video input.");
   }
 
   get isCamEnabled(): boolean {
@@ -195,7 +199,7 @@ export class WavMediaManager extends MediaManager {
 
   private async _startRecording() {
     await this._wavRecorder.record((data) => {
-      this._userAudioCallback(data.mono);
+      this._userAudioCallback?.(data.mono);
     }, this._recorderChunkSize);
     const track = this._wavRecorder.stream?.getAudioTracks()[0];
     if (track) {
