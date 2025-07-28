@@ -1,6 +1,8 @@
 import { WavRecorder, WavStreamPlayer } from "../wavtools";
 
 import {
+  DeviceError,
+  DeviceErrorType,
   PipecatClientOptions,
   RTVIEventCallbacks,
   Tracks,
@@ -84,6 +86,8 @@ export class WavMediaManager extends MediaManager {
     this._wavRecorder.listenForDeviceChange(
       this._handleAvailableDevicesUpdated.bind(this),
     );
+    this._wavRecorder.listenForDeviceErrors(null);
+    this._wavRecorder.listenForDeviceErrors(this._handleDeviceError.bind(this));
     await this._wavStreamPlayer.connect();
     this._initialized = true;
   }
@@ -226,6 +230,25 @@ export class WavMediaManager extends MediaManager {
     ) {
       this.updateMic("");
     }
+  }
+
+  private _handleDeviceError({
+    devices,
+    type,
+    error,
+  }: {
+    devices: Array<"cam" | "mic">;
+    type: DeviceErrorType;
+    error?: Error;
+  }) {
+    this._callbacks.onDeviceError?.(
+      new DeviceError(
+        devices,
+        type,
+        error?.message,
+        error ? { originalError: error } : undefined,
+      ),
+    );
   }
 }
 

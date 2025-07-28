@@ -3,14 +3,22 @@ import { MediaStreamRecorder, WavStreamPlayer } from "../wavtools";
 
 import Daily, {
   DailyCall,
+  DailyCameraErrorObject,
+  DailyCameraErrorType,
   DailyEventObjectAvailableDevicesUpdated,
+  DailyEventObjectCameraError,
   DailyEventObjectLocalAudioLevel,
   DailyEventObjectSelectedDevicesUpdated,
   DailyEventObjectTrack,
   DailyParticipant,
   DailyParticipantsObject,
 } from "@daily-co/daily-js";
-import { Participant, Tracks } from "@pipecat-ai/client-js";
+import {
+  DeviceArray,
+  DeviceError,
+  Participant,
+  Tracks,
+} from "@pipecat-ai/client-js";
 
 export class DailyMediaManager extends MediaManager {
   private _daily: DailyCall;
@@ -74,6 +82,7 @@ export class DailyMediaManager extends MediaManager {
       "selected-devices-updated",
       this._handleSelectedDevicesUpdated.bind(this),
     );
+    this._daily.on("camera-error", this.handleDeviceError.bind(this));
     this._daily.on("local-audio-level", this._handleLocalAudioLevel.bind(this));
   }
 
@@ -305,6 +314,56 @@ export class DailyMediaManager extends MediaManager {
       this._selectedMic = event.devices.mic;
       this._callbacks.onMicUpdated?.(event.devices.mic as MediaDeviceInfo);
     }
+  }
+
+  private handleDeviceError(ev: DailyEventObjectCameraError) {
+    const generateDeviceError = (
+      error: DailyCameraErrorObject<DailyCameraErrorType>,
+    ) => {
+      const devices: DeviceArray = [];
+      switch (error.type) {
+        case "permissions": {
+          error.blockedMedia.forEach((d) => {
+            devices.push(d === "video" ? "cam" : "mic");
+          });
+          return new DeviceError(devices, error.type, error.msg, {
+            blockedBy: error.blockedBy,
+          });
+        }
+        case "not-found": {
+          error.missingMedia.forEach((d) => {
+            devices.push(d === "video" ? "cam" : "mic");
+          });
+          return new DeviceError(devices, error.type, error.msg);
+        }
+        case "constraints": {
+          error.failedMedia.forEach((d) => {
+            devices.push(d === "video" ? "cam" : "mic");
+          });
+          return new DeviceError(devices, error.type, error.msg, {
+            reason: error.reason,
+          });
+        }
+        case "cam-in-use": {
+          devices.push("cam");
+          return new DeviceError(devices, error.type, error.msg);
+        }
+        case "mic-in-use": {
+          devices.push("mic");
+          return new DeviceError(devices, error.type, error.msg);
+        }
+        case "cam-mic-in-use":
+        case "undefined-mediadevices":
+        case "unknown":
+        default: {
+          devices.push("cam");
+          devices.push("mic");
+          return new DeviceError(devices, error.type, error.msg);
+        }
+      }
+    };
+    const err = generateDeviceError(ev.error);
+    this._callbacks.onDeviceError?.(generateDeviceError(ev.error));
   }
 
   private _handleLocalAudioLevel(ev: DailyEventObjectLocalAudioLevel) {

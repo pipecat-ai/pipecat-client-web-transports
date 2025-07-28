@@ -1,8 +1,11 @@
 import Daily, {
   DailyCall,
   DailyCallOptions,
+  DailyCameraErrorObject,
+  DailyCameraErrorType,
   DailyEventObjectAppMessage,
   DailyEventObjectAvailableDevicesUpdated,
+  DailyEventObjectCameraError,
   DailyEventObjectFatalError,
   DailyEventObjectLocalAudioLevel,
   DailyEventObjectNonFatalError,
@@ -15,6 +18,8 @@ import Daily, {
   DailyParticipant,
 } from "@daily-co/daily-js";
 import {
+  DeviceArray,
+  DeviceError,
   Participant,
   PipecatClientOptions,
   RTVIError,
@@ -531,6 +536,7 @@ export class DailyTransport extends Transport {
       "selected-devices-updated",
       this.handleSelectedDevicesUpdated.bind(this),
     );
+    this._daily.on("camera-error", this.handleDeviceError.bind(this));
 
     this._daily.on("track-started", this.handleTrackStarted.bind(this));
     this._daily.on("track-stopped", this.handleTrackStopped.bind(this));
@@ -606,6 +612,55 @@ export class DailyTransport extends Transport {
       this._selectedSpeaker = ev.devices.speaker;
       this._callbacks.onSpeakerUpdated?.(ev.devices.speaker as MediaDeviceInfo);
     }
+  }
+
+  private handleDeviceError(ev: DailyEventObjectCameraError) {
+    const generateDeviceError = (
+      error: DailyCameraErrorObject<DailyCameraErrorType>,
+    ) => {
+      const devices: DeviceArray = [];
+      switch (error.type) {
+        case "permissions": {
+          error.blockedMedia.forEach((d) => {
+            devices.push(d === "video" ? "cam" : "mic");
+          });
+          return new DeviceError(devices, error.type, error.msg, {
+            blockedBy: error.blockedBy,
+          });
+        }
+        case "not-found": {
+          error.missingMedia.forEach((d) => {
+            devices.push(d === "video" ? "cam" : "mic");
+          });
+          return new DeviceError(devices, error.type, error.msg);
+        }
+        case "constraints": {
+          error.failedMedia.forEach((d) => {
+            devices.push(d === "video" ? "cam" : "mic");
+          });
+          return new DeviceError(devices, error.type, error.msg, {
+            reason: error.reason,
+          });
+        }
+        case "cam-in-use": {
+          devices.push("cam");
+          return new DeviceError(devices, error.type, error.msg);
+        }
+        case "mic-in-use": {
+          devices.push("mic");
+          return new DeviceError(devices, error.type, error.msg);
+        }
+        case "cam-mic-in-use":
+        case "undefined-mediadevices":
+        case "unknown":
+        default: {
+          devices.push("cam");
+          devices.push("mic");
+          return new DeviceError(devices, error.type, error.msg);
+        }
+      }
+    };
+    this._callbacks.onDeviceError?.(generateDeviceError(ev.error));
   }
 
   private async handleLocalAudioTrack(track: MediaStreamTrack) {
