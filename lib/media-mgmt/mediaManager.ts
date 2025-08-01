@@ -81,7 +81,12 @@ export class WavMediaManager extends MediaManager {
   }
 
   async initialize(): Promise<void> {
-    await this._wavRecorder.begin();
+    try {
+      await this._wavRecorder.begin();
+    } catch (error) {
+      // void. swallow the error. we still want to set up
+      // the listeners and the player.
+    }
     this._wavRecorder.listenForDeviceChange(null);
     this._wavRecorder.listenForDeviceChange(
       this._handleAvailableDevicesUpdated.bind(this),
@@ -136,14 +141,21 @@ export class WavMediaManager extends MediaManager {
 
   async updateMic(micId: string): Promise<void> {
     const prevMic = this._wavRecorder.deviceSelection;
-    await this._wavRecorder.end();
-    await this._wavRecorder.begin(micId);
-    if (this._micEnabled) {
-      await this._startRecording();
+    if (this._wavRecorder.getStatus() !== "ended") {
+      await this._wavRecorder.end();
     }
-    const curMic = this._wavRecorder.deviceSelection;
-    if (curMic && prevMic && prevMic.label !== curMic.label) {
-      this._callbacks.onMicUpdated?.(curMic);
+    try {
+      await this._wavRecorder.begin(micId);
+      if (this._micEnabled) {
+        await this._startRecording();
+      }
+      const curMic = this._wavRecorder.deviceSelection;
+      if (curMic && prevMic && prevMic.label !== curMic.label) {
+        this._callbacks.onMicUpdated?.(curMic);
+      }
+    } catch (error) {
+      // void. If begin() fails, it will have already logged and called
+      // onDeviceError if necessary.
     }
   }
 
@@ -241,14 +253,13 @@ export class WavMediaManager extends MediaManager {
     type: DeviceErrorType;
     error?: Error;
   }) {
-    this._callbacks.onDeviceError?.(
-      new DeviceError(
-        devices,
-        type,
-        error?.message,
-        error ? { originalError: error } : undefined,
-      ),
+    const deviceError = new DeviceError(
+      devices,
+      type,
+      error?.message,
+      error ? { sourceError: error } : undefined,
     );
+    this._callbacks.onDeviceError?.(deviceError);
   }
 }
 

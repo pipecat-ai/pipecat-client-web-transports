@@ -675,8 +675,12 @@ export class DailyTransport extends Transport {
     const status = this._mediaStreamRecorder.getStatus();
     switch (status) {
       case "ended":
-        await this._mediaStreamRecorder.begin(track);
-        await this.startRecording();
+        try {
+          await this._mediaStreamRecorder.begin(track);
+          await this.startRecording();
+        } catch (e) {
+          // void. nothing to do.
+        }
         break;
       case "paused":
         await this.startRecording();
@@ -684,9 +688,13 @@ export class DailyTransport extends Transport {
       case "recording":
       default:
         if (this._currentAudioTrack !== track) {
-          await this._mediaStreamRecorder.end();
-          await this._mediaStreamRecorder.begin(track);
-          await this.startRecording();
+          try {
+            await this._mediaStreamRecorder.end();
+            await this._mediaStreamRecorder.begin(track);
+            await this.startRecording();
+          } catch (e) {
+            // void. nothing to do.
+          }
         } else {
           logger.warn(
             "track-started event received for current track and already recording",

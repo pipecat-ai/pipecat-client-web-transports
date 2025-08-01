@@ -362,7 +362,6 @@ export class DailyMediaManager extends MediaManager {
         }
       }
     };
-    const err = generateDeviceError(ev.error);
     this._callbacks.onDeviceError?.(generateDeviceError(ev.error));
   }
 
@@ -381,13 +380,17 @@ export class DailyMediaManager extends MediaManager {
         const status = this._mediaStreamRecorder.getStatus();
         switch (status) {
           case "ended":
-            await this._mediaStreamRecorder.begin(event.track);
-            if (this._connected) {
-              this._startRecording();
-              if (this._connectResolve) {
-                this._connectResolve();
-                this._connectResolve = null;
+            try {
+              await this._mediaStreamRecorder.begin(event.track);
+              if (this._connected) {
+                this._startRecording();
+                if (this._connectResolve) {
+                  this._connectResolve();
+                  this._connectResolve = null;
+                }
               }
+            } catch (e) {
+              // void. nothing to do.
             }
             break;
           case "paused":
@@ -397,8 +400,12 @@ export class DailyMediaManager extends MediaManager {
           default:
             if (this._currentAudioTrack !== event.track) {
               await this._mediaStreamRecorder.end();
-              await this._mediaStreamRecorder.begin(event.track);
-              this._startRecording();
+              try {
+                await this._mediaStreamRecorder.begin(event.track);
+                this._startRecording();
+              } catch (e) {
+                // void. nothing to do.
+              }
             } else {
               console.warn(
                 "track-started event received for current track and already recording",
