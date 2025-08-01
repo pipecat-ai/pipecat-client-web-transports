@@ -649,13 +649,17 @@ export class DailyTransport extends Transport {
         }
         case "cam-in-use": {
           devices.push("cam");
-          return new DeviceError(devices, error.type, error.msg);
+          return new DeviceError(devices, "in-use", error.msg);
         }
         case "mic-in-use": {
           devices.push("mic");
-          return new DeviceError(devices, error.type, error.msg);
+          return new DeviceError(devices, "in-use", error.msg);
         }
-        case "cam-mic-in-use":
+        case "cam-mic-in-use": {
+          devices.push("cam");
+          devices.push("mic");
+          return new DeviceError(devices, "in-use", error.msg);
+        }
         case "undefined-mediadevices":
         case "unknown":
         default: {
