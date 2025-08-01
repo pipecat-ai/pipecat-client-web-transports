@@ -298,6 +298,11 @@ export class DailyTransport extends Transport {
       .setOutputDeviceAsync({ outputDeviceId: speakerId })
       .then((infos) => {
         this._selectedSpeaker = infos.speaker;
+      })
+      .catch((e) => {
+        this._callbacks.onDeviceError?.(
+          new DeviceError(["speaker"], e.type ?? "unknown", e.message),
+        );
       });
   }
 
