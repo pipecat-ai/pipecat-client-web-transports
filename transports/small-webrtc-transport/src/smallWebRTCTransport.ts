@@ -667,9 +667,9 @@ export class SmallWebRTCTransport extends Transport {
           video: {
             displaySurface: "monitor",
             // Reduce data transmission with lower quality settings
-            width: { ideal: 720, max: 720 },
-            height: { ideal: 480, max: 480 },
-            frameRate: { ideal: 5, max: 5 }
+            width: { ideal: 640, max: 640 },
+            height: { ideal: 360, max: 360 },
+            frameRate: { ideal: 3, max: 3 }
           }
         });
 
@@ -681,9 +681,9 @@ export class SmallWebRTCTransport extends Transport {
           const capabilities = screenTrack.getCapabilities();
           if (capabilities.width && capabilities.height && capabilities.frameRate) {
             await screenTrack.applyConstraints({
-              width: { ideal: 720, max: 720 },
-              height: { ideal: 480, max: 480 },
-              frameRate: { ideal: 5, max: 5 }
+              width: { ideal: 640, max: 640 },
+              height: { ideal: 360, max: 360 },
+              frameRate: { ideal: 3, max: 3 }
             });
           }
         }

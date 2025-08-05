@@ -257,9 +257,9 @@ export class DailyMediaManager extends MediaManager {
     if (videoTrack) {
       // Apply constraints to reduce bandwidth usage
       videoTrack.applyConstraints({
-        width: { ideal: 720, max: 720 },
-        height: { ideal: 480, max: 480 },
-        frameRate: { ideal: 5, max:5 }
+        width: { ideal: 640, max: 640 },
+        height: { ideal: 360, max: 360 },
+        frameRate: { ideal: 3, max:3 }
       }).catch(error => {
         console.warn("Failed to apply video constraints:", error);
       });
@@ -373,9 +373,9 @@ export class DailyMediaManager extends MediaManager {
       // Apply video constraints to reduce data transmission
       try {
         await event.track.applyConstraints({
-          width: { ideal: 720, max: 720 },
-          height: { ideal: 480, max: 480 },
-          frameRate: { ideal: 5, max: 5 }
+          width: { ideal: 640, max: 360 },
+          height: { ideal: 640, max: 360 },
+          frameRate: { ideal: 3, max: 3 }
         });
       } catch (error) {
         console.warn("Failed to apply video constraints:", error);
