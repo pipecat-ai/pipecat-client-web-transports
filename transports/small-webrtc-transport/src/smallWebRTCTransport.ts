@@ -665,12 +665,28 @@ export class SmallWebRTCTransport extends Transport {
       try {
         const stream = await navigator.mediaDevices.getDisplayMedia({
           video: {
-            displaySurface: "monitor"
+            displaySurface: "monitor",
+            // Reduce data transmission with lower quality settings
+            width: { ideal: 720, max: 1280 },
+            height: { ideal: 480, max: 720 },
+            frameRate: { ideal: 10, max: 15 }
           }
         });
 
         const [screenTrack] = stream.getVideoTracks();
         this.screenTrack = screenTrack;
+
+        // Apply additional constraints to reduce bandwidth
+        if (screenTrack.getCapabilities) {
+          const capabilities = screenTrack.getCapabilities();
+          if (capabilities.width && capabilities.height && capabilities.frameRate) {
+            await screenTrack.applyConstraints({
+              width: { ideal: 720, max: 1280 },
+              height: { ideal: 480, max: 720 },
+              frameRate: { ideal: 10, max: 15 }
+            });
+          }
+        }
 
         // Handle track ending (user stops sharing via browser UI)
         screenTrack.onended = () => {

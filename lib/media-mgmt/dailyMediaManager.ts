@@ -244,6 +244,26 @@ export class DailyMediaManager extends MediaManager {
   enableCam(enable: boolean): void {
     this._camEnabled = enable;
     this._daily.setLocalVideo(enable);
+    
+    // Apply video constraints to reduce data transmission when camera is enabled
+    if (enable) {
+      this.applyVideoConstraints();
+    }
+  }
+
+  private applyVideoConstraints(): void {
+    const participants = this._daily.participants();
+    const videoTrack = participants?.local?.tracks?.video?.persistentTrack;
+    if (videoTrack) {
+      // Apply constraints to reduce bandwidth usage
+      videoTrack.applyConstraints({
+        width: { ideal: 720, max: 720 },
+        height: { ideal: 480, max: 480 },
+        frameRate: { ideal: 10, max:15 }
+      }).catch(error => {
+        console.warn("Failed to apply video constraints:", error);
+      });
+    }
   }
 
   get isCamEnabled(): boolean {
@@ -349,6 +369,17 @@ export class DailyMediaManager extends MediaManager {
         }
       }
       this._currentAudioTrack = event.track;
+    } else if (event.track.kind === "video") {
+      // Apply video constraints to reduce data transmission
+      try {
+        await event.track.applyConstraints({
+          width: { ideal: 720, max: 720 },
+          height: { ideal: 480, max: 480 },
+          frameRate: { ideal: 10, max: 15 }
+        });
+      } catch (error) {
+        console.warn("Failed to apply video constraints:", error);
+      }
     }
     this._callbacks.onTrackStarted?.(
       event.track,
