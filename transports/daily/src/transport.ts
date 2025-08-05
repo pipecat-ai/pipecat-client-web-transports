@@ -1,8 +1,11 @@
 import Daily, {
   DailyCall,
   DailyCallOptions,
+  DailyCameraErrorObject,
+  DailyCameraErrorType,
   DailyEventObjectAppMessage,
   DailyEventObjectAvailableDevicesUpdated,
+  DailyEventObjectCameraError,
   DailyEventObjectFatalError,
   DailyEventObjectLocalAudioLevel,
   DailyEventObjectNonFatalError,
@@ -15,6 +18,8 @@ import Daily, {
   DailyParticipant,
 } from "@daily-co/daily-js";
 import {
+  DeviceArray,
+  DeviceError,
   Participant,
   PipecatClientOptions,
   RTVIError,
@@ -293,6 +298,11 @@ export class DailyTransport extends Transport {
       .setOutputDeviceAsync({ outputDeviceId: speakerId })
       .then((infos) => {
         this._selectedSpeaker = infos.speaker;
+      })
+      .catch((e) => {
+        this._callbacks.onDeviceError?.(
+          new DeviceError(["speaker"], e.type ?? "unknown", e.message),
+        );
       });
   }
 
@@ -531,6 +541,7 @@ export class DailyTransport extends Transport {
       "selected-devices-updated",
       this.handleSelectedDevicesUpdated.bind(this),
     );
+    this._daily.on("camera-error", this.handleDeviceError.bind(this));
 
     this._daily.on("track-started", this.handleTrackStarted.bind(this));
     this._daily.on("track-stopped", this.handleTrackStopped.bind(this));
@@ -608,6 +619,59 @@ export class DailyTransport extends Transport {
     }
   }
 
+  private handleDeviceError(ev: DailyEventObjectCameraError) {
+    const generateDeviceError = (
+      error: DailyCameraErrorObject<DailyCameraErrorType>,
+    ) => {
+      const devices: DeviceArray = [];
+      switch (error.type) {
+        case "permissions": {
+          error.blockedMedia.forEach((d) => {
+            devices.push(d === "video" ? "cam" : "mic");
+          });
+          return new DeviceError(devices, error.type, error.msg, {
+            blockedBy: error.blockedBy,
+          });
+        }
+        case "not-found": {
+          error.missingMedia.forEach((d) => {
+            devices.push(d === "video" ? "cam" : "mic");
+          });
+          return new DeviceError(devices, error.type, error.msg);
+        }
+        case "constraints": {
+          error.failedMedia.forEach((d) => {
+            devices.push(d === "video" ? "cam" : "mic");
+          });
+          return new DeviceError(devices, error.type, error.msg, {
+            reason: error.reason,
+          });
+        }
+        case "cam-in-use": {
+          devices.push("cam");
+          return new DeviceError(devices, "in-use", error.msg);
+        }
+        case "mic-in-use": {
+          devices.push("mic");
+          return new DeviceError(devices, "in-use", error.msg);
+        }
+        case "cam-mic-in-use": {
+          devices.push("cam");
+          devices.push("mic");
+          return new DeviceError(devices, "in-use", error.msg);
+        }
+        case "undefined-mediadevices":
+        case "unknown":
+        default: {
+          devices.push("cam");
+          devices.push("mic");
+          return new DeviceError(devices, error.type, error.msg);
+        }
+      }
+    };
+    this._callbacks.onDeviceError?.(generateDeviceError(ev.error));
+  }
+
   private async handleLocalAudioTrack(track: MediaStreamTrack) {
     if (this.state == "ready" || !this._bufferLocalAudioUntilBotReady) {
       return;
@@ -615,8 +679,12 @@ export class DailyTransport extends Transport {
     const status = this._mediaStreamRecorder.getStatus();
     switch (status) {
       case "ended":
-        await this._mediaStreamRecorder.begin(track);
-        await this.startRecording();
+        try {
+          await this._mediaStreamRecorder.begin(track);
+          await this.startRecording();
+        } catch (e) {
+          // void. nothing to do.
+        }
         break;
       case "paused":
         await this.startRecording();
@@ -624,9 +692,13 @@ export class DailyTransport extends Transport {
       case "recording":
       default:
         if (this._currentAudioTrack !== track) {
-          await this._mediaStreamRecorder.end();
-          await this._mediaStreamRecorder.begin(track);
-          await this.startRecording();
+          try {
+            await this._mediaStreamRecorder.end();
+            await this._mediaStreamRecorder.begin(track);
+            await this.startRecording();
+          } catch (e) {
+            // void. nothing to do.
+          }
         } else {
           logger.warn(
             "track-started event received for current track and already recording",

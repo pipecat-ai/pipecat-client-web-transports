@@ -1,6 +1,8 @@
 import { WavRecorder, WavStreamPlayer } from "../wavtools";
 
 import {
+  DeviceError,
+  DeviceErrorType,
   PipecatClientOptions,
   RTVIEventCallbacks,
   Tracks,
@@ -79,11 +81,18 @@ export class WavMediaManager extends MediaManager {
   }
 
   async initialize(): Promise<void> {
-    await this._wavRecorder.begin();
+    try {
+      await this._wavRecorder.begin();
+    } catch (error) {
+      // void. swallow the error. we still want to set up
+      // the listeners and the player.
+    }
     this._wavRecorder.listenForDeviceChange(null);
     this._wavRecorder.listenForDeviceChange(
       this._handleAvailableDevicesUpdated.bind(this),
     );
+    this._wavRecorder.listenForDeviceErrors(null);
+    this._wavRecorder.listenForDeviceErrors(this._handleDeviceError.bind(this));
     await this._wavStreamPlayer.connect();
     this._initialized = true;
   }
@@ -132,14 +141,21 @@ export class WavMediaManager extends MediaManager {
 
   async updateMic(micId: string): Promise<void> {
     const prevMic = this._wavRecorder.deviceSelection;
-    await this._wavRecorder.end();
-    await this._wavRecorder.begin(micId);
-    if (this._micEnabled) {
-      await this._startRecording();
+    if (this._wavRecorder.getStatus() !== "ended") {
+      await this._wavRecorder.end();
     }
-    const curMic = this._wavRecorder.deviceSelection;
-    if (curMic && prevMic && prevMic.label !== curMic.label) {
-      this._callbacks.onMicUpdated?.(curMic);
+    try {
+      await this._wavRecorder.begin(micId);
+      if (this._micEnabled) {
+        await this._startRecording();
+      }
+      const curMic = this._wavRecorder.deviceSelection;
+      if (curMic && prevMic && prevMic.label !== curMic.label) {
+        this._callbacks.onMicUpdated?.(curMic);
+      }
+    } catch (error) {
+      // void. If begin() fails, it will have already logged and called
+      // onDeviceError if necessary.
     }
   }
 
@@ -226,6 +242,24 @@ export class WavMediaManager extends MediaManager {
     ) {
       this.updateMic("");
     }
+  }
+
+  private _handleDeviceError({
+    devices,
+    type,
+    error,
+  }: {
+    devices: Array<"cam" | "mic">;
+    type: DeviceErrorType;
+    error?: Error;
+  }) {
+    const deviceError = new DeviceError(
+      devices,
+      type,
+      error?.message,
+      error ? { sourceError: error } : undefined,
+    );
+    this._callbacks.onDeviceError?.(deviceError);
   }
 }
 

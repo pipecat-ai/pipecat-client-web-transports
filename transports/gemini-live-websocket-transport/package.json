@@ -24,14 +24,14 @@
     "@daily-co/daily-js": "^0.79.0"
   },
   "devDependencies": {
-    "@pipecat-ai/client-js": "^1.0.0",
+    "@pipecat-ai/client-js": "^1.1.0",
     "@types/node": "^22.9.0",
     "eslint": "9.11.1",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-simple-import-sort": "^12.1.1"
   },
   "peerDependencies": {
-    "@pipecat-ai/client-js": "~1.0.0"
+    "@pipecat-ai/client-js": "~1.1.0"
   },
   "description": "Pipecat Gemini Multimodal Live Transport Package",
   "author": "Daily.co",
