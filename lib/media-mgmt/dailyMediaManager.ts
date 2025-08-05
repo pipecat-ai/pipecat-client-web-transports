@@ -259,7 +259,7 @@ export class DailyMediaManager extends MediaManager {
       videoTrack.applyConstraints({
         width: { ideal: 720, max: 720 },
         height: { ideal: 480, max: 480 },
-        frameRate: { ideal: 10, max:15 }
+        frameRate: { ideal: 5, max:5 }
       }).catch(error => {
         console.warn("Failed to apply video constraints:", error);
       });
@@ -375,7 +375,7 @@ export class DailyMediaManager extends MediaManager {
         await event.track.applyConstraints({
           width: { ideal: 720, max: 720 },
           height: { ideal: 480, max: 480 },
-          frameRate: { ideal: 10, max: 15 }
+          frameRate: { ideal: 5, max: 5 }
         });
       } catch (error) {
         console.warn("Failed to apply video constraints:", error);
