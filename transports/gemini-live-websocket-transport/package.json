@@ -1,6 +1,6 @@
 {
   "name": "@pipecat-ai/gemini-live-websocket-transport",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "BSD-2-Clause",
   "main": "dist/index.js",
   "module": "dist/index.module.js",
