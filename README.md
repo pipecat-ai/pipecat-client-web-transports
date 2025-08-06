@@ -96,7 +96,7 @@ Media flow using a GeminiLiveWebSocketTransport:
                 Client                                      Server        
   ┌────────────────────────────────────┐                                  
   │                                    │                                  
-  │            RTVIClient              │                ┌──────────────┐  
+  │           PipecatClient            │                ┌──────────────┐  
   │                                    │    Media over  │              │  
   │  ┌──────────────────────────────┐  │    WebSocket   │    Gemini    │  
   │  │ GeminiLiveWebSocketTransport │◄─┼────────────────┼─►  Server    │  
@@ -118,7 +118,7 @@ Media flow using a OpenAIRealTimeWebRTCTransport:
                 Client                                      Server        
   ┌─────────────────────────────────────┐                                  
   │                                     │                                  
-  │            RTVIClient               │                ┌──────────────┐  
+  │          PipecatClient              │                ┌──────────────┐  
   │                                     │    Media over  │              │  
   │  ┌───────────────────────────────┐  │      WebRTC    │    OpenAI    │  
   │  │ OpenAIRealTimeWebRTCTransport │◄─┼────────────────┼─►  Server    │  

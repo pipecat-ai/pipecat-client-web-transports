@@ -16,7 +16,7 @@ npm install \
 
 ## Overview
 
-The `OpenAIRealTimeWebRTCTransport` is a fully functional [RTVI `Transport`](https://docs.pipecat.ai/client/js/transports/transport). It provides a framework for implementing real-time communication directly with the [OpenAI Realtime API using WebRTC](https://platform.openai.com/docs/guides/realtime-webrtc) voice-to-voice service. It handles media device management, audio/video streams, and state management for the connection.
+The `OpenAIRealTimeWebRTCTransport` is a fully functional [Pipecat `Transport`](https://docs.pipecat.ai/client/js/transports/transport). It provides a framework for implementing real-time communication directly with the [OpenAI Realtime API using WebRTC](https://platform.openai.com/docs/guides/realtime-webrtc) voice-to-voice service. It handles media device management, audio/video streams, and state management for the connection.
 
 ## Features
 
@@ -42,9 +42,8 @@ const options: OpenAIServiceOptions = {
   }
 };
 
-const transport = new OpenAIRealTimeWebRTCTransport(options);
-let RTVIConfig: RTVIClientOptions = {
-  transport,
+let PipecatConfig: PipecatClientOptions = {
+  transport: new OpenAIRealTimeWebRTCTransport(options),
   ...
 };
 
@@ -120,24 +119,17 @@ export interface OpenAIServiceOptions {
 
 ```javascript
 // at setup time...
-llmHelper = new LLMHelper({});
-rtviClient.registerHelper("llm", llmHelper);
-// the 'llm' name in this call above isn't used.
-//that value is specific to working with a pipecat pipeline
-
-// at time of sending message...
-// Send text prompt message
-llmHelper.appendToMessages({ role: "user", content: 'Hello OpenAI!' });
+pcClient.appendToContext({ role: "user", content: 'Hello OpenAI!' });
 ```
 
 ### Handling Events
 
-The transport implements the various [RTVI event handlers](https://docs.pipecat.ai/client/js/api-reference/callbacks). Check out the docs or samples for more info.
+The transport implements the various [Pipecat event handlers](https://docs.pipecat.ai/client/js/api-reference/callbacks). Check out the docs or samples for more info.
 
 ### Updating Session Configuration
 
 ```javascript
-transport.updateSessionConfig({
+pcClient.transport.updateSessionConfig({
   instructions: 'you are a an over-sharing neighbor',
   input_audio_noise_reduction: {
     type: 'near_field'

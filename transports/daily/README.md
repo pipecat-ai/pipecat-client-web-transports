@@ -33,30 +33,26 @@ The DailyTransport class provides a WebRTC transport layer using [Daily.co's](ht
 ### Basic Setup
 
 ```javascript
-import { RTVIClient } from "@pipecat-ai/client-js";
+import { PipecatClient } from "@pipecat-ai/client-js";
 import { DailyTransport } from "@pipecat-ai/daily-transport";
 
-const transport = new DailyTransport({
-  dailyFactoryOptions: {
-    // Daily.co specific configuration
-  }
-});
-
-const rtviClient = new RTVIClient({
-    transport,
+const pcClient = new PipecatClient({
+    transport: new DailyTransport({ dailyFactoryOptions }),
     enableCam: false,  // Default camera off
     enableMic: true,   // Default microphone on
     callbacks: {
       // Event handlers
     },
-    params: {
-      baseUrl,
-      endpoints
-    }
     // ...
 });
 
-await rtviClient.connect();
+pcClient.connect({
+  url: 'https://your.daily.co/room'
+});
+// OR...
+pcClient.connect({
+  endpoint: 'https://your-server/connect', // endpoint to return url
+});
 ```
 
 ## API Reference
@@ -82,7 +78,7 @@ The transport can be in one of these states:
 
 ## Events
 
-The transport implements the various [RTVI event handlers](https://docs.pipecat.ai/client/js/api-reference/callbacks). Check out the docs or samples for more info.
+The transport implements the various [Pipecat event handlers](https://docs.pipecat.ai/client/js/api-reference/callbacks). Check out the docs or samples for more info.
 
 ## Error Handling
 

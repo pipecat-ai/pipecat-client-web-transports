@@ -1,7 +1,7 @@
-# Pipecat (RTVI) Client Demo for Direct Communication with LLMs
+# Pipecat Client Demo for Direct Communication with LLMs
 
 ## Overview
-This application demonstrates a real-time voice interaction system using the RTVI Client library with both the Gemini Multimodal Live and OpenAI RealTime WebRTC integrations. It enables two-way communication between users and the LLM, featuring voice input/output, text messaging, and various audio controls.
+This application demonstrates a real-time voice interaction system using the Pipecat Client library with both the Gemini Multimodal Live and OpenAI RealTime WebRTC integrations. It enables two-way communication between users and the LLM, featuring voice input/output, text messaging, and various audio controls.
 
 ## Features
 - Real-time voice interaction with a Gemini Multimodal Live bot
@@ -45,7 +45,7 @@ Open [http://localhost:5173/](http://localhost:5173/)
 Open [http://localhost:5173?service=openai](http://localhost:5173?service=openai)
 
 ## Documentation Reference
-[RTVI Client Documentation](https://docs.pipecat.ai/client/introduction)
+[Pipecat Client Documentation](https://docs.pipecat.ai/client/introduction)
 [Gemini Multimodal Live Documentation](https://ai.google.dev/api/multimodal-live)
 [OpenAI RealTime WebRTC Documentation](https://platform.openai.com/docs/guides/realtime-webrtc)
 
@@ -75,17 +75,12 @@ The application handles various events including:
 
 ## Key Components
 
-### RTVIClient Configuration
+### PipecatClient Configuration
 ```typescript
-let RTVIConfig: RTVIClientOptions = {
+let pcConfig: PipecatClientOptions = {
   transport,
-  params: {
-    baseUrl: "api",
-    requestData: { },
-  },
   enableMic: true,
   enableCam: false,
-  timeout: 30 * 1000,
 };
 ```
 
