@@ -28,25 +28,24 @@ The WebSocketTransport class provides a Websocket transport layer establishing a
 ### Basic Setup
 
 ```javascript
-import { RTVIClient } from "@pipecat-ai/client-js";
-import { WebSocketTransport } from "@pipecat-ai/small-webrtc-transport";
+import { PipecatClient } from "@pipecat-ai/client-js";
+import { WebSocketTransport } from "@pipecat-ai/websocket-transport";
 
-const transport = new WebSocketTransport();
-
-const rtviClient = new RTVIClient({
-    transport,
+const pcClient = new PipecatClient({
+    transport: new WebSocketTransport(),
     enableMic: true,   // Default microphone on
     callbacks: {
       // Event handlers
     },
-    params: {
-      baseUrl,
-      endpoints
-    }
-    // ...
 });
 
-await rtviClient.connect();
+pcClient.connect({
+  ws_url: 'https://your.websocket/endpoint'
+});
+// OR...
+pcClient.connect({
+  endpoint: 'https://your-server/connect', // endpoint to return ws_url
+});
 ```
 
 ## API Reference
@@ -64,7 +63,7 @@ The transport can be in one of these states:
 
 ## Events
 
-The transport implements the various [RTVI event handlers](https://docs.pipecat.ai/client/js/api-reference/callbacks). Check out the docs or samples for more info.
+The transport implements the various [Pipecat event handlers](https://docs.pipecat.ai/client/js/api-reference/callbacks). Check out the docs or samples for more info.
 
 ## Error Handling
 

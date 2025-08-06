@@ -17,7 +17,7 @@ npm install \
 
 ## Overview
 
-The `GeminiLiveWebsocketTransport` class extends the `DirectToLLMBaseWebSocketTransport` to implement a fully functional [RTVI `Transport`](https://docs.pipecat.ai/client/js/transports/transport). It provides a framework for implementing real-time communication directly with the [Gemini Multimodal Live](https://ai.google.dev/api/multimodal-live) voice-to-voice service. It handles media device management, audio/video streams, and state management for the connection.
+The `GeminiLiveWebsocketTransport` class extends the `DirectToLLMBaseWebSocketTransport` to implement a fully functional [Pipecat `Transport`](https://docs.pipecat.ai/client/js/transports/transport). It provides a framework for implementing real-time communication directly with the [Gemini Multimodal Live](https://ai.google.dev/api/multimodal-live) voice-to-voice service. It handles media device management, audio/video streams, and state management for the connection.
 
 ## Features
 
@@ -44,9 +44,8 @@ const options: GeminiLLMServiceOptions = {
   }
 };
 
-const transport = new GeminiLiveWebsocketTransport(options);
-let RTVIConfig: RTVIClientOptions = {
-  transport,
+let pcConfig: PipecatClientOptions = {
+  transport: new GeminiLiveWebsocketTransport(options),
   ...
 };
 
@@ -85,19 +84,12 @@ interface GeminiLLMServiceOptions {
 
 ```javascript
 // at setup time...
-llmHelper = new LLMHelper({});
-rtviClient.registerHelper("llm", llmHelper);
-// the 'llm' name in this call above isn't used.
-//that value is specific to working with a pipecat pipeline
-
-// at time of sending message...
-// Send text prompt message
-llmHelper.appendToMessages({ role: "user", content: 'Hello Gemini!' });
+pcClient.appendToContext({ role: "user", content: 'Hello Gemini!' });
 ```
 
 ### Handling Events
 
-The transport implements the various [RTVI event handlers](https://docs.pipecat.ai/client/js/api-reference/callbacks). Check out the docs or samples for more info.
+The transport implements the various [Pipecat event handlers](https://docs.pipecat.ai/client/js/api-reference/callbacks). Check out the docs or samples for more info.
 
 ## API Reference
 
