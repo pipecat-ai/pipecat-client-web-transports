@@ -24,14 +24,18 @@ class TrackStatusMessage {
 export interface SmallWebRTCTransportConstructorOptions {
   iceServers?: RTCIceServer[];
   waitForICEGathering?: boolean;
+  /** @deprecated Use webrtc_url instead */
   connectionUrl?: string;
+  webrtc_url?: string;
   audioCodec?: string;
   videoCodec?: string;
   mediaManager?: MediaManager;
 }
 
 export type SmallWebRTCTransportConnectionOptions = {
+  /** @deprecated Use webrtc_url instead */
   connectionUrl?: string;
+  webrtc_url?: string;
 };
 
 const RENEGOTIATE_TYPE = "renegotiate";
@@ -68,7 +72,7 @@ const VIDEO_TRANSCEIVER_INDEX = 1;
 export class SmallWebRTCTransport extends Transport {
   public static SERVICE_NAME = "small-webrtc-transport";
 
-  private _connectionUrl: string | null = null;
+  private _webrtcUrl: string | null = null;
 
   // Trigger when the peer connection is finally ready or in case it has failed all the attempts to connect
   private _connectResolved: ((value: PromiseLike<void> | void) => void) | null =
@@ -96,9 +100,13 @@ export class SmallWebRTCTransport extends Transport {
     super();
     this._iceServers = opts.iceServers || [];
     this._waitForICEGathering = opts.waitForICEGathering || false;
-    this._connectionUrl = opts.connectionUrl || null;
+    this._webrtcUrl = opts.webrtc_url || opts.connectionUrl || null;
     this.audioCodec = opts.audioCodec || null;
     this.videoCodec = opts.videoCodec || null;
+
+    if (opts.connectionUrl) {
+      logger.warn("connectionUrl is deprecated, use webrtc_url instead");
+    }
 
     this.mediaManager =
       opts.mediaManager ||
@@ -159,14 +167,17 @@ export class SmallWebRTCTransport extends Transport {
       throw new RTVIError("Invalid connection parameters");
     }
     for (const [key, val] of Object.entries(connectParams)) {
-      if (key !== "connectionUrl") {
+      if (key !== "webrtc_url" && key !== "connectionUrl") {
         throw new RTVIError(
-          `Unrecognized connection parameter: ${key}. Only 'connectionUrl' is allowed.`,
+          `Unrecognized connection parameter: ${key}. Only 'webrtc_url' or 'connectionUrl' are allowed.`,
         );
       } else if (typeof val !== "string") {
         throw new RTVIError(
-          `Invalid type for connectionUrl: expected string, got ${typeof val}`,
+          `Invalid type for ${key}: expected string, got ${typeof val}`,
         );
+      }
+      if (key === "connectionUrl") {
+        logger.warn("connectionUrl is deprecated, use webrtc_url instead");
       }
     }
     return connectParams as SmallWebRTCTransportConnectionOptions;
@@ -179,8 +190,11 @@ export class SmallWebRTCTransport extends Transport {
 
     this.state = "connecting";
 
-    this._connectionUrl = connectParams?.connectionUrl ?? this._connectionUrl;
-    if (!this._connectionUrl) {
+    this._webrtcUrl =
+      connectParams?.webrtc_url ||
+      connectParams?.connectionUrl ||
+      this._webrtcUrl;
+    if (!this._webrtcUrl) {
       logger.error("No url provided for connection");
       this.state = "error";
       throw new TransportStartError();
@@ -389,7 +403,7 @@ export class SmallWebRTCTransport extends Transport {
       logger.debug(`Will create offer for peerId: ${this.pc_id}`);
 
       // Send offer to server
-      const response = await fetch(this._connectionUrl!, {
+      const response = await fetch(this._webrtcUrl!, {
         body: JSON.stringify({
           sdp: offerSdp.sdp,
           type: offerSdp.type,
