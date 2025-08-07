@@ -98,11 +98,11 @@ export class SmallWebRTCTransport extends Transport {
 
   constructor(opts: SmallWebRTCTransportConstructorOptions = {}) {
     super();
-    this._iceServers = opts.iceServers || [];
-    this._waitForICEGathering = opts.waitForICEGathering || false;
-    this._webrtcUrl = opts.webrtc_url || opts.connectionUrl || null;
-    this.audioCodec = opts.audioCodec || null;
-    this.videoCodec = opts.videoCodec || null;
+    this._iceServers = opts.iceServers ?? [];
+    this._waitForICEGathering = opts.waitForICEGathering ?? false;
+    this._webrtcUrl = opts.webrtc_url ?? opts.connectionUrl ?? null;
+    this.audioCodec = opts.audioCodec ?? null;
+    this.videoCodec = opts.videoCodec ?? null;
 
     if (opts.connectionUrl) {
       logger.warn("connectionUrl is deprecated, use webrtc_url instead");
@@ -191,8 +191,8 @@ export class SmallWebRTCTransport extends Transport {
     this.state = "connecting";
 
     this._webrtcUrl =
-      connectParams?.webrtc_url ||
-      connectParams?.connectionUrl ||
+      connectParams?.webrtc_url ??
+      connectParams?.connectionUrl ??
       this._webrtcUrl;
     if (!this._webrtcUrl) {
       logger.error("No url provided for connection");
