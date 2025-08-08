@@ -20,14 +20,14 @@ export type WebSocketTransportOptions = {
   /** @deprecated Use wsUrl instead */
   ws_url?: string;
   wsUrl?: string;
-  serializer?: WebSocketSerializer;
-  recorderSampleRate?: number;
-  playerSampleRate?: number;
 };
 
 export interface WebSocketTransportConstructorOptions
   extends WebSocketTransportOptions {
   mediaManager?: MediaManager;
+  serializer?: WebSocketSerializer;
+  recorderSampleRate?: number;
+  playerSampleRate?: number;
 }
 
 export class WebSocketTransport extends Transport {
@@ -103,11 +103,7 @@ export class WebSocketTransport extends Transport {
             `Invalid type for wsUrl: expected string, got ${typeof val}`,
           );
         }
-      } else if (
-        !["serializer", "recorderSampleRate", "playerSampleRate"].includes(
-          camelKey,
-        )
-      ) {
+      } else {
         throw new RTVIError(`Unrecognized connection parameter: ${key}.`);
       }
       fixedParams[camelKey as keyof WebSocketTransportOptions] = val;
@@ -120,7 +116,7 @@ export class WebSocketTransport extends Transport {
 
     this.state = "connecting";
 
-    this._wsUrl = connectParams?.ws_url || this._wsUrl;
+    this._wsUrl = connectParams?.wsUrl ?? connectParams?.ws_url ?? this._wsUrl;
     if (!this._wsUrl) {
       logger.error("No url provided for connection");
       this.state = "error";
