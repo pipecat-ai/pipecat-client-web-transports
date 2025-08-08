@@ -5,6 +5,11 @@ All notable changes to **Pipecat Websocket Transport** will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0]
+
+- Deprecated the transport option `ws_url` in lieu of a properly camelCased `wsUrl` for consistency. `ws_url` is still accepted from endpoints.
+- Fixed connection type to not allow anything but `wsUrl` as providing other options are no-ops.
+
 ## [1.1.0]
 
 - Add support for generating `onDeviceError` callbacks/events when receiving a camera or speaker error.
