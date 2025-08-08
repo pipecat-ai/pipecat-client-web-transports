@@ -425,11 +425,20 @@ export class DailyTransport extends Transport {
     }
     type DailyConnectParams = DailyCallOptions & {
       room_url?: string;
+      dailyRoom?: string; // for compatibility with old PipecatCloud versions
+      dailyToken?: string; // for compatibility with old PipecatCloud versions
     };
     const tmpParams = connectParams as DailyConnectParams;
     if (tmpParams.room_url) {
       tmpParams.url = tmpParams.room_url;
       delete tmpParams.room_url;
+    } else if (tmpParams.dailyRoom) {
+      tmpParams.url = tmpParams.dailyRoom;
+      delete tmpParams.dailyRoom;
+    }
+    if (tmpParams.dailyToken) {
+      tmpParams.token = tmpParams.dailyToken;
+      delete tmpParams.dailyToken;
     }
     if (!tmpParams.token) {
       // Daily doesn't like token being in the map and undefined or null
