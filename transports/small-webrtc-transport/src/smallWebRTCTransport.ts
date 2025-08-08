@@ -24,18 +24,18 @@ class TrackStatusMessage {
 export interface SmallWebRTCTransportConstructorOptions {
   iceServers?: RTCIceServer[];
   waitForICEGathering?: boolean;
-  /** @deprecated Use webrtc_url instead */
+  /** @deprecated Use webrtcUrl instead */
   connectionUrl?: string;
-  webrtc_url?: string;
+  webrtcUrl?: string;
   audioCodec?: string;
   videoCodec?: string;
   mediaManager?: MediaManager;
 }
 
 export type SmallWebRTCTransportConnectionOptions = {
-  /** @deprecated Use webrtc_url instead */
+  /** @deprecated Use webrtcUrl instead */
   connectionUrl?: string;
-  webrtc_url?: string;
+  webrtcUrl?: string;
 };
 
 const RENEGOTIATE_TYPE = "renegotiate";
@@ -100,12 +100,12 @@ export class SmallWebRTCTransport extends Transport {
     super();
     this._iceServers = opts.iceServers ?? [];
     this._waitForICEGathering = opts.waitForICEGathering ?? false;
-    this._webrtcUrl = opts.webrtc_url ?? opts.connectionUrl ?? null;
+    this._webrtcUrl = opts.webrtcUrl ?? opts.connectionUrl ?? null;
     this.audioCodec = opts.audioCodec ?? null;
     this.videoCodec = opts.videoCodec ?? null;
 
     if (opts.connectionUrl) {
-      logger.warn("connectionUrl is deprecated, use webrtc_url instead");
+      logger.warn("connectionUrl is deprecated, use webrtcUrl instead");
     }
 
     this.mediaManager =
@@ -166,21 +166,29 @@ export class SmallWebRTCTransport extends Transport {
     if (typeof connectParams !== "object") {
       throw new RTVIError("Invalid connection parameters");
     }
+    const snakeToCamel = (snakeCaseString: string) => {
+      return snakeCaseString.replace(/_([a-z,A-Z])/g, (_, letter) =>
+        letter.toUpperCase(),
+      );
+    };
+    const fixedParams: SmallWebRTCTransportConnectionOptions = {};
     for (const [key, val] of Object.entries(connectParams)) {
-      if (key !== "webrtc_url" && key !== "connectionUrl") {
+      const camelKey = snakeToCamel(key);
+      if (camelKey !== "webrtcUrl" && camelKey !== "connectionUrl") {
         throw new RTVIError(
-          `Unrecognized connection parameter: ${key}. Only 'webrtc_url' or 'connectionUrl' are allowed.`,
+          `Unrecognized connection parameter: ${key}. Only 'webrtcUrl' or 'connectionUrl' are allowed.`,
         );
       } else if (typeof val !== "string") {
         throw new RTVIError(
           `Invalid type for ${key}: expected string, got ${typeof val}`,
         );
       }
-      if (key === "connectionUrl") {
-        logger.warn("connectionUrl is deprecated, use webrtc_url instead");
+      if (camelKey === "connectionUrl") {
+        logger.warn("connectionUrl is deprecated, use webrtcUrl instead");
       }
+      fixedParams[camelKey] = val;
     }
-    return connectParams as SmallWebRTCTransportConnectionOptions;
+    return fixedParams;
   }
 
   async _connect(
@@ -191,7 +199,7 @@ export class SmallWebRTCTransport extends Transport {
     this.state = "connecting";
 
     this._webrtcUrl =
-      connectParams?.webrtc_url ??
+      connectParams?.webrtcUrl ??
       connectParams?.connectionUrl ??
       this._webrtcUrl;
     if (!this._webrtcUrl) {
