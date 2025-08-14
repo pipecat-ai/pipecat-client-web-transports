@@ -709,7 +709,6 @@ export class SmallWebRTCTransport extends Transport {
         "Screen sharing is not supported by the current media manager",
       );
     }
-    console.log("!!! enableScreenShare", enable);
     this.mediaManager.enableScreenShare(enable);
     this.sendSignallingMessage(
       new TrackStatusMessage(SCREEN_VIDEO_TRANSCEIVER_INDEX, enable),

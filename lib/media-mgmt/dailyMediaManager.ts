@@ -257,7 +257,6 @@ export class DailyMediaManager extends MediaManager {
     this._daily.setLocalVideo(enable);
   }
   enableScreenShare(enable: boolean): void {
-    console.log("!!! dailyMediaManager:enableScreenShare", enable);
     if (enable) {
       this._daily.startScreenShare();
     } else {
@@ -441,7 +440,6 @@ export class DailyMediaManager extends MediaManager {
         ? dailyParticipantToParticipant(event.participant)
         : undefined,
     );
-    console.log("trigger onTrackStartedCallback", event);
     this.onTrackStartedCallback?.(event);
   }
 
