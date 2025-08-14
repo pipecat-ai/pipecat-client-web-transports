@@ -16,9 +16,12 @@ export abstract class MediaManager {
   protected _micEnabled: boolean;
   protected _camEnabled: boolean;
 
+  protected _supportsScreenShare: boolean;
+
   constructor() {
     this._micEnabled = true;
     this._camEnabled = false;
+    this._supportsScreenShare = false;
   }
 
   setUserAudioCallback(userAudioCallback: (data: ArrayBuffer) => void) {
@@ -63,6 +66,10 @@ export abstract class MediaManager {
   abstract get isSharingScreen(): boolean;
 
   abstract tracks(): Tracks;
+
+  get supportsScreenShare(): boolean {
+    return this._supportsScreenShare;
+  }
 }
 
 export class WavMediaManager extends MediaManager {

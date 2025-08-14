@@ -59,6 +59,8 @@ export class DailyMediaManager extends MediaManager {
     this.onTrackStoppedCallback = onTrackStoppedCallback;
     this._recorderChunkSize = recorderChunkSize;
 
+    this._supportsScreenShare = true;
+
     this._daily = Daily.getCallInstance() ?? Daily.createCallObject();
 
     if (enableRecording) {
