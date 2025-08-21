@@ -210,6 +210,7 @@ export class WavMediaManager extends MediaManager {
   }
   enableScreenShare(enable: boolean): void {
     // TODO: Screensharing not supported yet
+    console.warn("WavMediaManager does not support screen sharing.");
   }
 
   get isCamEnabled(): boolean {

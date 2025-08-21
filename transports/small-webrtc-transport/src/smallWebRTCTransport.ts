@@ -22,6 +22,16 @@ class TrackStatusMessage {
   }
 }
 
+class WebRTCTrack {
+  track: MediaStreamTrack;
+  status: "new" | "muted" | "unmuted" | "ended";
+
+  constructor(track: MediaStreamTrack) {
+    this.track = track;
+    this.status = "new";
+  }
+}
+
 export interface SmallWebRTCTransportConstructorOptions {
   iceServers?: RTCIceServer[];
   waitForICEGathering?: boolean;
@@ -97,6 +107,8 @@ export class SmallWebRTCTransport extends Transport {
 
   private _iceServers: RTCIceServer[] = [];
   private readonly _waitForICEGathering: boolean;
+
+  private _incomingTracks: Map<string, WebRTCTrack> = new Map();
 
   constructor(opts: SmallWebRTCTransportConstructorOptions = {}) {
     super();
@@ -317,8 +329,43 @@ export class SmallWebRTCTransport extends Transport {
     logger.debug(`signalingState: ${pc.signalingState}`);
 
     pc.addEventListener("track", (evt: RTCTrackEvent) => {
-      logger.debug(`Received new track ${evt.track.kind}`);
-      this._callbacks.onTrackStarted?.(evt.track);
+      const streamType = evt.transceiver
+        ? evt.transceiver.mid === "0"
+          ? "microphone"
+          : evt.transceiver.mid === "1"
+            ? "camera"
+            : "screenVideo"
+        : null;
+      if (!streamType) {
+        logger.warn("Received track without transceiver mid", evt);
+        return;
+      }
+      logger.debug(
+        `Received new track ${evt.track.kind} ${evt.track.muted} ${evt.track.readyState}`,
+        evt,
+      );
+      this._incomingTracks.set(streamType, new WebRTCTrack(evt.track));
+      evt.track.addEventListener("unmute", () => {
+        const t = this._incomingTracks.get(streamType);
+        logger.debug(`Track unmute event for ${streamType}`, t);
+        if (!t) return;
+        logger.debug(`Track unmuted: ${streamType}`);
+        t.status = "unmuted";
+        this._callbacks.onTrackStarted?.(evt.track);
+      });
+      evt.track.addEventListener("mute", () => {
+        const t = this._incomingTracks.get(streamType);
+        logger.debug(`Track mute event for ${streamType}`, t);
+        if (!t || t.status !== "unmuted") return;
+        logger.debug(`Track muted: ${streamType}`);
+        t.status = "muted";
+        this._callbacks.onTrackStopped?.(evt.track);
+      });
+      evt.track.addEventListener("ended", () => {
+        logger.debug(`Track ended: ${streamType}`);
+        this._callbacks.onTrackStopped?.(evt.track);
+        this._incomingTracks.delete(streamType);
+      });
     });
 
     return pc;
@@ -470,7 +517,8 @@ export class SmallWebRTCTransport extends Transport {
     this.pc!.addTransceiver("audio", { direction: "sendrecv" });
     this.pc!.addTransceiver("video", { direction: "sendrecv" });
     if (this.mediaManager.supportsScreenShare) {
-      this.pc!.addTransceiver("video", { direction: "sendrecv" });
+      // For now, we only support receiving a single video track
+      this.pc!.addTransceiver("video", { direction: "sendonly" });
     }
   }
 
