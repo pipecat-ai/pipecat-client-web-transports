@@ -5,6 +5,10 @@ All notable changes to **Pipecat Daily WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1]
+
+- Bump daily-js version dependency to 0.83.1 to get Chrome 140 fix
+
 ## [1.2.0]
 
 - Add support for current PipecatCloud and Pipecat runners which pass `dailyRoom` and `dailyToken`
