@@ -340,29 +340,24 @@ export class SmallWebRTCTransport extends Transport {
         logger.warn("Received track without transceiver mid", evt);
         return;
       }
-      logger.debug(
-        `Received new track ${evt.track.kind} ${evt.track.muted} ${evt.track.readyState}`,
-        evt,
-      );
+      logger.debug(`Received new remote track for ${streamType}`);
       this._incomingTracks.set(streamType, new WebRTCTrack(evt.track));
       evt.track.addEventListener("unmute", () => {
         const t = this._incomingTracks.get(streamType);
-        logger.debug(`Track unmute event for ${streamType}`, t);
         if (!t) return;
-        logger.debug(`Track unmuted: ${streamType}`);
+        logger.debug(`Remote track unmuted: ${streamType}`);
         t.status = "unmuted";
         this._callbacks.onTrackStarted?.(evt.track);
       });
       evt.track.addEventListener("mute", () => {
         const t = this._incomingTracks.get(streamType);
-        logger.debug(`Track mute event for ${streamType}`, t);
         if (!t || t.status !== "unmuted") return;
-        logger.debug(`Track muted: ${streamType}`);
+        logger.debug(`Remote track muted: ${streamType}`);
         t.status = "muted";
         this._callbacks.onTrackStopped?.(evt.track);
       });
       evt.track.addEventListener("ended", () => {
-        logger.debug(`Track ended: ${streamType}`);
+        logger.debug(`Remote track ended: ${streamType}`);
         this._callbacks.onTrackStopped?.(evt.track);
         this._incomingTracks.delete(streamType);
       });
