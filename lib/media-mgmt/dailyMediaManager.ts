@@ -59,6 +59,8 @@ export class DailyMediaManager extends MediaManager {
     this.onTrackStoppedCallback = onTrackStoppedCallback;
     this._recorderChunkSize = recorderChunkSize;
 
+    this._supportsScreenShare = true;
+
     this._daily = Daily.getCallInstance() ?? Daily.createCallObject();
 
     if (enableRecording) {
@@ -254,6 +256,13 @@ export class DailyMediaManager extends MediaManager {
     this._camEnabled = enable;
     this._daily.setLocalVideo(enable);
   }
+  enableScreenShare(enable: boolean): void {
+    if (enable) {
+      this._daily.startScreenShare();
+    } else {
+      this._daily.stopScreenShare();
+    }
+  }
 
   get isCamEnabled(): boolean {
     return this._daily.localVideo();
@@ -261,12 +270,17 @@ export class DailyMediaManager extends MediaManager {
   get isMicEnabled(): boolean {
     return this._daily.localAudio();
   }
+  get isSharingScreen(): boolean {
+    return this._daily.localScreenAudio() || this._daily.localScreenVideo();
+  }
 
   tracks(): Tracks {
     const participants: DailyParticipantsObject = this._daily.participants();
     return {
       local: {
         audio: participants?.local?.tracks?.audio?.persistentTrack,
+        screenAudio: participants?.local?.tracks?.screenAudio?.persistentTrack,
+        screenVideo: participants?.local?.tracks?.screenVideo?.persistentTrack,
         video: participants?.local?.tracks?.video?.persistentTrack,
       },
     };

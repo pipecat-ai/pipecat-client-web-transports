@@ -7,6 +7,7 @@ import {
   Transport,
   TransportStartError,
   TransportState,
+  UnsupportedFeatureError,
 } from "@pipecat-ai/client-js";
 import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
@@ -18,6 +19,16 @@ class TrackStatusMessage {
   constructor(receiver_index: number, enabled: boolean) {
     this.receiver_index = receiver_index;
     this.enabled = enabled;
+  }
+}
+
+class WebRTCTrack {
+  track: MediaStreamTrack;
+  status: "new" | "muted" | "unmuted" | "ended";
+
+  constructor(track: MediaStreamTrack) {
+    this.track = track;
+    this.status = "new";
   }
 }
 
@@ -64,6 +75,7 @@ class SignallingMessageObject {
 
 const AUDIO_TRANSCEIVER_INDEX = 0;
 const VIDEO_TRANSCEIVER_INDEX = 1;
+const SCREEN_VIDEO_TRANSCEIVER_INDEX = 2;
 
 /**
  * SmallWebRTCTransport is a class that provides a client-side
@@ -96,6 +108,8 @@ export class SmallWebRTCTransport extends Transport {
   private _iceServers: RTCIceServer[] = [];
   private readonly _waitForICEGathering: boolean;
 
+  private _incomingTracks: Map<string, WebRTCTrack> = new Map();
+
   constructor(opts: SmallWebRTCTransportConstructorOptions = {}) {
     super();
     this._iceServers = opts.iceServers ?? [];
@@ -123,6 +137,15 @@ export class SmallWebRTCTransport extends Transport {
           } else if (event.type == "video") {
             logger.info("SmallWebRTCMediaManager replacing video track");
             await this.getVideoTransceiver().sender.replaceTrack(event.track);
+          } else if (event.type == "screenVideo") {
+            logger.info("SmallWebRTCMediaManager replacing screen video track");
+            await this.getScreenVideoTransceiver().sender.replaceTrack(
+              event.track,
+            );
+          } else if (event.type == "screenAudio") {
+            logger.info(
+              "SmallWebRTCMediaManager does not yet support screen audio. Track is ignored.",
+            );
           }
         },
         (event) =>
@@ -238,6 +261,15 @@ export class SmallWebRTCTransport extends Transport {
         this.mediaManager.isCamEnabled,
       ),
     );
+    if (this.mediaManager.supportsScreenShare) {
+      this.sendSignallingMessage(
+        new TrackStatusMessage(
+          SCREEN_VIDEO_TRANSCEIVER_INDEX,
+          this.mediaManager.isSharingScreen &&
+            !!this.mediaManager.tracks().local.screenVideo,
+        ),
+      );
+    }
   }
 
   sendReadyMessage() {
@@ -297,8 +329,38 @@ export class SmallWebRTCTransport extends Transport {
     logger.debug(`signalingState: ${pc.signalingState}`);
 
     pc.addEventListener("track", (evt: RTCTrackEvent) => {
-      logger.debug(`Received new track ${evt.track.kind}`);
-      this._callbacks.onTrackStarted?.(evt.track);
+      const streamType = evt.transceiver
+        ? evt.transceiver.mid === "0"
+          ? "microphone"
+          : evt.transceiver.mid === "1"
+            ? "camera"
+            : "screenVideo"
+        : null;
+      if (!streamType) {
+        logger.warn("Received track without transceiver mid", evt);
+        return;
+      }
+      logger.debug(`Received new remote track for ${streamType}`);
+      this._incomingTracks.set(streamType, new WebRTCTrack(evt.track));
+      evt.track.addEventListener("unmute", () => {
+        const t = this._incomingTracks.get(streamType);
+        if (!t) return;
+        logger.debug(`Remote track unmuted: ${streamType}`);
+        t.status = "unmuted";
+        this._callbacks.onTrackStarted?.(evt.track);
+      });
+      evt.track.addEventListener("mute", () => {
+        const t = this._incomingTracks.get(streamType);
+        if (!t || t.status !== "unmuted") return;
+        logger.debug(`Remote track muted: ${streamType}`);
+        t.status = "muted";
+        this._callbacks.onTrackStopped?.(evt.track);
+      });
+      evt.track.addEventListener("ended", () => {
+        logger.debug(`Remote track ended: ${streamType}`);
+        this._callbacks.onTrackStopped?.(evt.track);
+        this._incomingTracks.delete(streamType);
+      });
     });
 
     return pc;
@@ -444,10 +506,15 @@ export class SmallWebRTCTransport extends Transport {
 
   private addInitialTransceivers() {
     // Transceivers always appear in creation-order for both peers
-    // For now we are only considering that we are going to have 02 transceivers,
-    // one for audio and one for video
+    // For now we support 3 transceivers meant to hold the following
+    // tracks in the given order:
+    // audio, video, screenVideo
     this.pc!.addTransceiver("audio", { direction: "sendrecv" });
     this.pc!.addTransceiver("video", { direction: "sendrecv" });
+    if (this.mediaManager.supportsScreenShare) {
+      // For now, we only support receiving a single video track
+      this.pc!.addTransceiver("video", { direction: "sendonly" });
+    }
   }
 
   private getAudioTransceiver() {
@@ -460,6 +527,12 @@ export class SmallWebRTCTransport extends Transport {
     // Transceivers always appear in creation-order for both peers
     // Look at addInitialTransceivers
     return this.pc!.getTransceivers()[VIDEO_TRANSCEIVER_INDEX];
+  }
+
+  private getScreenVideoTransceiver() {
+    // Transceivers always appear in creation-order for both peers
+    // Look at addInitialTransceivers
+    return this.pc!.getTransceivers()[SCREEN_VIDEO_TRANSCEIVER_INDEX];
   }
 
   private async startNewPeerConnection(
@@ -485,6 +558,14 @@ export class SmallWebRTCTransport extends Transport {
     logger.debug(`addUserMedia videoTrack: ${videoTrack}`);
     if (videoTrack) {
       await this.getVideoTransceiver().sender.replaceTrack(videoTrack);
+    }
+
+    if (this.mediaManager.supportsScreenShare) {
+      videoTrack = this.tracks().local.screenVideo;
+      logger.debug(`addUserMedia screenVideoTrack: ${videoTrack}`);
+      if (videoTrack) {
+        await this.getScreenVideoTransceiver().sender.replaceTrack(videoTrack);
+      }
     }
   }
 
@@ -663,12 +744,28 @@ export class SmallWebRTCTransport extends Transport {
       new TrackStatusMessage(VIDEO_TRANSCEIVER_INDEX, enable),
     );
   }
+  async enableScreenShare(enable: boolean): Promise<void> {
+    if (!this.mediaManager.supportsScreenShare) {
+      throw new UnsupportedFeatureError(
+        "enableScreenShare",
+        "mediaManager",
+        "Screen sharing is not supported by the current media manager",
+      );
+    }
+    this.mediaManager.enableScreenShare(enable);
+    this.sendSignallingMessage(
+      new TrackStatusMessage(SCREEN_VIDEO_TRANSCEIVER_INDEX, enable),
+    );
+  }
 
   get isCamEnabled(): boolean {
     return this.mediaManager.isCamEnabled;
   }
   get isMicEnabled(): boolean {
     return this.mediaManager.isMicEnabled;
+  }
+  get isSharingScreen(): boolean {
+    return this.mediaManager.isSharingScreen;
   }
 
   get state(): TransportState {
@@ -684,17 +781,6 @@ export class SmallWebRTCTransport extends Transport {
 
   tracks(): Tracks {
     return this.mediaManager.tracks();
-  }
-
-  // Not implemented
-  enableScreenShare(enable: boolean): void {
-    logger.error("startScreenShare not implemented for SmallWebRTCTransport");
-    throw new Error("Not implemented");
-  }
-
-  public get isSharingScreen(): boolean {
-    logger.error("isSharingScreen not implemented for SmallWebRTCTransport");
-    return false;
   }
 
   private sdpFilterCodec(kind: string, codec: string, realSdp: string): string {

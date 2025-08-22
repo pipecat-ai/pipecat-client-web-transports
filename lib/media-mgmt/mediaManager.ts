@@ -16,9 +16,12 @@ export abstract class MediaManager {
   protected _micEnabled: boolean;
   protected _camEnabled: boolean;
 
+  protected _supportsScreenShare: boolean;
+
   constructor() {
     this._micEnabled = true;
     this._camEnabled = false;
+    this._supportsScreenShare = false;
   }
 
   setUserAudioCallback(userAudioCallback: (data: ArrayBuffer) => void) {
@@ -56,11 +59,17 @@ export abstract class MediaManager {
 
   abstract enableMic(enable: boolean): void;
   abstract enableCam(enable: boolean): void;
+  abstract enableScreenShare(enable: boolean): void;
 
   abstract get isCamEnabled(): boolean;
   abstract get isMicEnabled(): boolean;
+  abstract get isSharingScreen(): boolean;
 
   abstract tracks(): Tracks;
+
+  get supportsScreenShare(): boolean {
+    return this._supportsScreenShare;
+  }
 }
 
 export class WavMediaManager extends MediaManager {
@@ -199,6 +208,10 @@ export class WavMediaManager extends MediaManager {
     // TODO: Video not supported yet
     console.warn("WavMediaManager does not support video input.");
   }
+  enableScreenShare(enable: boolean): void {
+    // TODO: Screensharing not supported yet
+    console.warn("WavMediaManager does not support screen sharing.");
+  }
 
   get isCamEnabled(): boolean {
     // TODO: Video not supported yet
@@ -206,6 +219,10 @@ export class WavMediaManager extends MediaManager {
   }
   get isMicEnabled(): boolean {
     return this._micEnabled;
+  }
+  get isSharingScreen(): boolean {
+    // TODO: Screensharing not supported yet
+    return false;
   }
 
   tracks(): Tracks {
