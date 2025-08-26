@@ -488,6 +488,9 @@ export class DailyTransport extends Transport {
       };
 
       const sendReadyMessage = () => {
+        // TODO: Consider changing to match the iOS/Android SDKs where
+        //       we don't actually set our state to "ready" until
+        //       we've received the bot_ready signal
         this.state = "ready";
         this.flushAudioQueue();
         this.sendMessage(RTVIMessage.clientReady());

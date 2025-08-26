@@ -8,7 +8,9 @@ import {
   TransportStartError,
   TransportState,
   UnsupportedFeatureError,
+  APIRequest,
 } from "@pipecat-ai/client-js";
+import { makeRequest } from "@pipecat-ai/client-js";
 import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
 
@@ -37,7 +39,7 @@ export interface SmallWebRTCTransportConstructorOptions {
   waitForICEGathering?: boolean;
   /** @deprecated Use webrtcUrl instead */
   connectionUrl?: string;
-  webrtcUrl?: string;
+  webrtcUrl?: string | APIRequest;
   audioCodec?: string;
   videoCodec?: string;
   mediaManager?: MediaManager;
@@ -46,7 +48,7 @@ export interface SmallWebRTCTransportConstructorOptions {
 export type SmallWebRTCTransportConnectionOptions = {
   /** @deprecated Use webrtcUrl instead */
   connectionUrl?: string;
-  webrtcUrl?: string;
+  webrtcUrl?: string | APIRequest;
 };
 
 const RENEGOTIATE_TYPE = "renegotiate";
@@ -84,7 +86,7 @@ const SCREEN_VIDEO_TRANSCEIVER_INDEX = 2;
 export class SmallWebRTCTransport extends Transport {
   public static SERVICE_NAME = "small-webrtc-transport";
 
-  private _webrtcUrl: string | null = null;
+  private _offerRequest: APIRequest | null = null;
 
   // Trigger when the peer connection is finally ready or in case it has failed all the attempts to connect
   private _connectResolved: ((value: PromiseLike<void> | void) => void) | null =
@@ -114,12 +116,19 @@ export class SmallWebRTCTransport extends Transport {
     super();
     this._iceServers = opts.iceServers ?? [];
     this._waitForICEGathering = opts.waitForICEGathering ?? false;
-    this._webrtcUrl = opts.webrtcUrl ?? opts.connectionUrl ?? null;
     this.audioCodec = opts.audioCodec ?? null;
     this.videoCodec = opts.videoCodec ?? null;
 
+    const _webrtcUrl = opts.webrtcUrl ?? opts.connectionUrl ?? null;
     if (opts.connectionUrl) {
       logger.warn("connectionUrl is deprecated, use webrtcUrl instead");
+    }
+    if (_webrtcUrl) {
+      if (typeof _webrtcUrl === "string") {
+        this._offerRequest = { endpoint: _webrtcUrl };
+      } else {
+        this._offerRequest = _webrtcUrl;
+      }
     }
 
     this.mediaManager =
@@ -221,11 +230,20 @@ export class SmallWebRTCTransport extends Transport {
 
     this.state = "connecting";
 
-    this._webrtcUrl =
+    const _webrtcUrl =
       connectParams?.webrtcUrl ??
       connectParams?.connectionUrl ??
-      this._webrtcUrl;
-    if (!this._webrtcUrl) {
+      this._offerRequest;
+    if (connectParams?.connectionUrl) {
+      logger.warn("connectionUrl is deprecated, use webrtcUrl instead");
+    }
+    if (_webrtcUrl) {
+      if (typeof _webrtcUrl === "string") {
+        this._offerRequest = { endpoint: _webrtcUrl };
+      } else {
+        this._offerRequest = _webrtcUrl;
+      }
+    } else {
       logger.error("No url provided for connection");
       this.state = "error";
       throw new TransportStartError();
@@ -424,6 +442,11 @@ export class SmallWebRTCTransport extends Transport {
     if (!this.pc) {
       return Promise.reject("Peer connection is not initialized");
     }
+    if (!this._offerRequest) {
+      logger.error("No url provided for connection");
+      this.state = "error";
+      throw new TransportStartError();
+    }
 
     try {
       // Create offer
@@ -473,20 +496,27 @@ export class SmallWebRTCTransport extends Transport {
       logger.debug(`Will create offer for peerId: ${this.pc_id}`);
 
       // Send offer to server
-      const response = await fetch(this._webrtcUrl!, {
-        body: JSON.stringify({
-          sdp: offerSdp.sdp,
-          type: offerSdp.type,
-          pc_id: this.pc_id,
-          restart_pc: recreatePeerConnection,
-        }),
-        headers: {
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      });
+      const request = { ...this._offerRequest };
+      const requestData: {
+        sdp: string;
+        type: string;
+        pc_id: string | null;
+        restart_pc: boolean;
+        requestData?: any;
+      } = {
+        sdp: offerSdp.sdp,
+        type: offerSdp.type as string,
+        pc_id: this.pc_id,
+        restart_pc: recreatePeerConnection,
+      };
+      if (this._offerRequest.requestData) {
+        requestData.requestData = this._offerRequest.requestData;
+      }
+      request.requestData = requestData;
+      const answer: RTCSessionDescriptionInit = (await makeRequest(
+        request,
+      )) as RTCSessionDescriptionInit;
 
-      const answer: RTCSessionDescriptionInit = await response.json();
       // @ts-ignore
       this.pc_id = answer.pc_id;
       // @ts-ignore
