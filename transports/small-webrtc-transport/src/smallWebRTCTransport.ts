@@ -1,5 +1,6 @@
 import {
   logger,
+  makeRequest,
   RTVIError,
   RTVIMessage,
   PipecatClientOptions,
@@ -9,8 +10,8 @@ import {
   TransportState,
   UnsupportedFeatureError,
   APIRequest,
+  isAPIRequest,
 } from "@pipecat-ai/client-js";
-import { makeRequest } from "@pipecat-ai/client-js";
 import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
 
@@ -126,8 +127,10 @@ export class SmallWebRTCTransport extends Transport {
     if (_webrtcUrl) {
       if (typeof _webrtcUrl === "string") {
         this._offerRequest = { endpoint: _webrtcUrl };
-      } else {
+      } else if (isAPIRequest(_webrtcUrl)) {
         this._offerRequest = _webrtcUrl;
+      } else {
+        logger.error("Invalid webrtcUrl provided for connection. Ignoring.");
       }
     }
 
@@ -231,20 +234,21 @@ export class SmallWebRTCTransport extends Transport {
     this.state = "connecting";
 
     const _webrtcUrl =
-      connectParams?.webrtcUrl ??
-      connectParams?.connectionUrl ??
-      this._offerRequest;
+      connectParams?.webrtcUrl ?? connectParams?.connectionUrl ?? null;
     if (connectParams?.connectionUrl) {
       logger.warn("connectionUrl is deprecated, use webrtcUrl instead");
     }
     if (_webrtcUrl) {
       if (typeof _webrtcUrl === "string") {
         this._offerRequest = { endpoint: _webrtcUrl };
-      } else {
+      } else if (isAPIRequest(_webrtcUrl)) {
         this._offerRequest = _webrtcUrl;
+      } else {
+        logger.error("Invalid webrtcUrl provided in params. Ignoring.");
       }
-    } else {
-      logger.error("No url provided for connection");
+    }
+    if (!this._offerRequest) {
+      logger.error("No request details for connection");
       this.state = "error";
       throw new TransportStartError();
     }
@@ -443,7 +447,7 @@ export class SmallWebRTCTransport extends Transport {
       return Promise.reject("Peer connection is not initialized");
     }
     if (!this._offerRequest) {
-      logger.error("No url provided for connection");
+      logger.error("No request details provided for connection");
       this.state = "error";
       throw new TransportStartError();
     }
