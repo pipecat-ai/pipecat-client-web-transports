@@ -1,3 +1,4 @@
+import cloneDeep from "lodash/cloneDeep";
 import {
   logger,
   makeRequest,
@@ -540,7 +541,7 @@ export class SmallWebRTCTransport extends Transport {
       logger.debug(`Will create offer for peerId: ${this.pc_id}`);
 
       // Send offer to server
-      const request = { ...this._webrtcRequest };
+      const request = cloneDeep(this._webrtcRequest);
       const requestData: {
         sdp: string;
         type: string;

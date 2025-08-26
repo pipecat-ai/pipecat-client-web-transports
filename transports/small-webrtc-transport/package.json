@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@pipecat-ai/client-js": "file:../../../pipecat-client-web/client-js",
+    "@types/lodash": "^4.17.20",
     "@types/node": "^22.9.0",
     "eslint": "9.11.1",
     "eslint-config-prettier": "^9.1.0",
@@ -33,7 +34,8 @@
   },
   "dependencies": {
     "@daily-co/daily-js": "^0.83.1",
-    "dequal": "^2.0.3"
+    "dequal": "^2.0.3",
+    "lodash": "^4.17.21"
   },
   "description": "Pipecat Small WebRTC Transport Package",
   "author": "Daily.co",
