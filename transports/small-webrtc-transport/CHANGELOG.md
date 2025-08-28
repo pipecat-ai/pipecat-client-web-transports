@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Implemented support for passing custom data and headers to the webrtc connection (offer/answer) endpoint. The `webrtcUrl` can now be a `string` or a `APIRequest` type. Server endpoints can access custom `requestData` under that same field.
+- Deprecated the `webrtcUrl` field, replacing it with a new `webrtcRequestParams` field, adding support for passing a complete `APIRequest` type to define the connection endpoint. This allows clients to pass custom headers and data along to the offer/answer endpoint at connection time.
 
 ## [1.3.0]
 

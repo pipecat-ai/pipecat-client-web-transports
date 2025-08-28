@@ -36,19 +36,6 @@ class WebRTCTrack {
   }
 }
 
-export interface SmallWebRTCTransportConstructorOptions {
-  iceServers?: RTCIceServer[];
-  waitForICEGathering?: boolean;
-  /** @deprecated Use webrtcRequestParams instead */
-  connectionUrl?: string;
-  /** @deprecated Use webrtcRequestParams instead */
-  webrtcUrl?: string;
-  webrtcRequestParams?: APIRequest;
-  audioCodec?: string;
-  videoCodec?: string;
-  mediaManager?: MediaManager;
-}
-
 export type SmallWebRTCTransportConnectionOptions = {
   /** @deprecated Use webrtcRequestParams instead */
   connectionUrl?: string;
@@ -56,6 +43,15 @@ export type SmallWebRTCTransportConnectionOptions = {
   webrtcUrl?: string;
   webrtcRequestParams?: APIRequest;
 };
+
+export interface SmallWebRTCTransportConstructorOptions
+  extends SmallWebRTCTransportConnectionOptions {
+  iceServers?: RTCIceServer[];
+  waitForICEGathering?: boolean;
+  audioCodec?: string;
+  videoCodec?: string;
+  mediaManager?: MediaManager;
+}
 
 const RENEGOTIATE_TYPE = "renegotiate";
 class RenegotiateMessage {
@@ -125,38 +121,7 @@ export class SmallWebRTCTransport extends Transport {
     this.audioCodec = opts.audioCodec ?? null;
     this.videoCodec = opts.videoCodec ?? null;
 
-    const _webrtcUrl = opts.webrtcUrl ?? opts.connectionUrl ?? null;
-    if (_webrtcUrl) {
-      if (opts.connectionUrl) {
-        logger.warn(
-          `connectionUrl is deprecated, use webrtcRequestParams instead: { webrtcRequestParams: { endpoint: ${opts.connectionUrl} } }`,
-        );
-      } else {
-        logger.warn(
-          `webrtcUrl is deprecated, use webrtcRequestParams instead: { webrtcRequestParams: { endpoint: ${opts.webrtcUrl} } }`,
-        );
-      }
-      if (opts.webrtcRequestParams) {
-        logger.warn(
-          "Both webrtcUrl/connectionUrl and webrtcRequestParams provided. Using webrtcRequestParams.",
-        );
-      } else {
-        if (typeof _webrtcUrl === "string") {
-          this._webrtcRequest = { endpoint: _webrtcUrl };
-        } else {
-          logger.warn(`webrtcUrl is not a string. Ignoring: ${_webrtcUrl}`);
-        }
-      }
-    }
-    if (opts.webrtcRequestParams) {
-      if (isAPIRequest(opts.webrtcRequestParams)) {
-        this._webrtcRequest = opts.webrtcRequestParams;
-      } else {
-        logger.error(
-          "Invalid webrtcRequestParams provided for connection. Ignoring.",
-        );
-      }
-    }
+    this._webrtcRequest = this._resolveRequestInfo(opts);
 
     this.mediaManager =
       opts.mediaManager ||
@@ -216,6 +181,41 @@ export class SmallWebRTCTransport extends Transport {
     this.videoCodec = videoCodec;
   }
 
+  _resolveRequestInfo(
+    params:
+      | SmallWebRTCTransportConstructorOptions
+      | SmallWebRTCTransportConnectionOptions,
+  ): APIRequest | null {
+    let requestInfo: APIRequest | null = null;
+    const _webrtcUrl = params.webrtcUrl ?? params.connectionUrl ?? null;
+    if (_webrtcUrl) {
+      const key = params.webrtcUrl ? "webrtcUrl" : "connectionUrl";
+      logger.warn(`${key} is deprecated. Use webrtcRequestParams instead.`);
+      if (params.webrtcRequestParams) {
+        logger.warn(
+          `Both ${key} and webrtcRequestParams provided. Using webrtcRequestParams.`,
+        );
+      } else {
+        if (typeof _webrtcUrl === "string") {
+          requestInfo = { endpoint: _webrtcUrl };
+        } else {
+          logger.error(`Invalid ${key} provided in params. Ignoring.`);
+        }
+      }
+    }
+    if (params.webrtcRequestParams) {
+      if (isAPIRequest(params.webrtcRequestParams)) {
+        // Override any previous request set in the constructor, do not try to merge
+        requestInfo = params.webrtcRequestParams;
+      } else {
+        logger.error(
+          `Invalid webrtcRequestParams provided in params. Ignoring.`,
+        );
+      }
+    }
+    return requestInfo ?? this._webrtcRequest;
+  }
+
   _validateConnectionParams(
     connectParams: unknown,
   ): SmallWebRTCTransportConnectionOptions | undefined {
@@ -231,31 +231,27 @@ export class SmallWebRTCTransport extends Transport {
       );
     };
     const fixedParams: SmallWebRTCTransportConnectionOptions = {};
-    const deprecatedKeys = ["webrtcUrl", "connectionUrl"];
-    const supportedKeys = ["webrtcRequestParams"];
+    const supportedKeys = ["webrtcUrl", "connectionUrl", "webrtcRequestParams"];
+    // Warn about unrecognized keys and convert supported keys from snake_case to camelCase
     for (const [key, val] of Object.entries(connectParams)) {
       const camelKey = snakeToCamel(key);
-      if (supportedKeys.includes(camelKey)) {
-        if (!isAPIRequest(val)) {
-          throw new RTVIError(
-            `Invalid type provided for ${key}: expected an APIRequest with an endpoint, got ${JSON.stringify(val)}`,
-          );
-        }
-      } else if (deprecatedKeys.includes(camelKey)) {
+      if (!supportedKeys.includes(camelKey)) {
         logger.warn(
-          `"${key}" is deprecated and will be removed in future versions.`,
+          `Unrecognized connection parameter: ${key}. This parameter will be ignored.`,
         );
-        if (typeof val !== "string") {
-          throw new RTVIError(
-            `Invalid type provided for ${key}: expected string, got ${typeof val}`,
-          );
-        }
       } else {
-        throw new RTVIError(`Unrecognized connection parameter: ${key}.`);
+        fixedParams[camelKey as keyof SmallWebRTCTransportConnectionOptions] =
+          val;
       }
-
-      fixedParams[camelKey as keyof SmallWebRTCTransportConnectionOptions] =
-        val;
+    }
+    const webrtcRequestParams = this._resolveRequestInfo(fixedParams);
+    if (webrtcRequestParams) {
+      fixedParams.webrtcRequestParams = webrtcRequestParams;
+    }
+    delete fixedParams.connectionUrl;
+    delete fixedParams.webrtcUrl;
+    if (Object.keys(fixedParams).length === 0) {
+      return undefined;
     }
     return fixedParams;
   }
@@ -267,27 +263,11 @@ export class SmallWebRTCTransport extends Transport {
 
     this.state = "connecting";
 
-    const _webrtcUrl =
-      connectParams?.webrtcUrl ?? connectParams?.connectionUrl ?? null;
-    if (_webrtcUrl) {
-      const key = connectParams?.webrtcUrl ? "webrtcUrl" : "connectionUrl";
-      logger.warn(`${key} is deprecated. Use webrtcRequestParams instead.`);
-      if (typeof _webrtcUrl === "string") {
-        this._webrtcRequest = { endpoint: _webrtcUrl };
-      } else {
-        logger.error(`Invalid ${key} provided in params. Ignoring.`);
-      }
-    }
-    if (connectParams?.webrtcRequestParams) {
-      if (isAPIRequest(connectParams.webrtcRequestParams)) {
-        // Override any previous request set in the constructor, do not try to merge
-        this._webrtcRequest = connectParams.webrtcRequestParams;
-      } else {
-        logger.error(
-          `Invalid webrtcRequestParams provided in params. Ignoring.`,
-        );
-      }
-    }
+    // Note: There is no need to validate the params here, as they were already
+    //       validated and fixed in the parent class's connect() method (which calls
+    //       _validateConnectionParams() and passes the result to _connect()).
+    this._webrtcRequest =
+      connectParams?.webrtcRequestParams ?? this._webrtcRequest;
     if (!this._webrtcRequest) {
       logger.error("No request details provided for WebRTC connection");
       this.state = "error";
