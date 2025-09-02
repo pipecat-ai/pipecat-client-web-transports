@@ -1,5 +1,7 @@
+import cloneDeep from "lodash/cloneDeep";
 import {
   logger,
+  makeRequest,
   RTVIError,
   RTVIMessage,
   PipecatClientOptions,
@@ -8,6 +10,8 @@ import {
   TransportStartError,
   TransportState,
   UnsupportedFeatureError,
+  APIRequest,
+  isAPIRequest,
 } from "@pipecat-ai/client-js";
 import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
@@ -32,22 +36,22 @@ class WebRTCTrack {
   }
 }
 
-export interface SmallWebRTCTransportConstructorOptions {
+export type SmallWebRTCTransportConnectionOptions = {
+  /** @deprecated Use webrtcRequestParams instead */
+  connectionUrl?: string;
+  /** @deprecated Use webrtcRequestParams instead */
+  webrtcUrl?: string;
+  webrtcRequestParams?: APIRequest;
+};
+
+export interface SmallWebRTCTransportConstructorOptions
+  extends SmallWebRTCTransportConnectionOptions {
   iceServers?: RTCIceServer[];
   waitForICEGathering?: boolean;
-  /** @deprecated Use webrtcUrl instead */
-  connectionUrl?: string;
-  webrtcUrl?: string;
   audioCodec?: string;
   videoCodec?: string;
   mediaManager?: MediaManager;
 }
-
-export type SmallWebRTCTransportConnectionOptions = {
-  /** @deprecated Use webrtcUrl instead */
-  connectionUrl?: string;
-  webrtcUrl?: string;
-};
 
 const RENEGOTIATE_TYPE = "renegotiate";
 class RenegotiateMessage {
@@ -84,7 +88,7 @@ const SCREEN_VIDEO_TRANSCEIVER_INDEX = 2;
 export class SmallWebRTCTransport extends Transport {
   public static SERVICE_NAME = "small-webrtc-transport";
 
-  private _webrtcUrl: string | null = null;
+  private _webrtcRequest: APIRequest | null = null;
 
   // Trigger when the peer connection is finally ready or in case it has failed all the attempts to connect
   private _connectResolved: ((value: PromiseLike<void> | void) => void) | null =
@@ -114,13 +118,10 @@ export class SmallWebRTCTransport extends Transport {
     super();
     this._iceServers = opts.iceServers ?? [];
     this._waitForICEGathering = opts.waitForICEGathering ?? false;
-    this._webrtcUrl = opts.webrtcUrl ?? opts.connectionUrl ?? null;
     this.audioCodec = opts.audioCodec ?? null;
     this.videoCodec = opts.videoCodec ?? null;
 
-    if (opts.connectionUrl) {
-      logger.warn("connectionUrl is deprecated, use webrtcUrl instead");
-    }
+    this._webrtcRequest = this._resolveRequestInfo(opts);
 
     this.mediaManager =
       opts.mediaManager ||
@@ -180,6 +181,41 @@ export class SmallWebRTCTransport extends Transport {
     this.videoCodec = videoCodec;
   }
 
+  _resolveRequestInfo(
+    params:
+      | SmallWebRTCTransportConstructorOptions
+      | SmallWebRTCTransportConnectionOptions,
+  ): APIRequest | null {
+    let requestInfo: APIRequest | null = null;
+    const _webrtcUrl = params.webrtcUrl ?? params.connectionUrl ?? null;
+    if (_webrtcUrl) {
+      const key = params.webrtcUrl ? "webrtcUrl" : "connectionUrl";
+      logger.warn(`${key} is deprecated. Use webrtcRequestParams instead.`);
+      if (params.webrtcRequestParams) {
+        logger.warn(
+          `Both ${key} and webrtcRequestParams provided. Using webrtcRequestParams.`,
+        );
+      } else {
+        if (typeof _webrtcUrl === "string") {
+          requestInfo = { endpoint: _webrtcUrl };
+        } else {
+          logger.error(`Invalid ${key} provided in params. Ignoring.`);
+        }
+      }
+    }
+    if (params.webrtcRequestParams) {
+      if (isAPIRequest(params.webrtcRequestParams)) {
+        // Override any previous request set in the constructor, do not try to merge
+        requestInfo = params.webrtcRequestParams;
+      } else {
+        logger.error(
+          `Invalid webrtcRequestParams provided in params. Ignoring.`,
+        );
+      }
+    }
+    return requestInfo ?? this._webrtcRequest;
+  }
+
   _validateConnectionParams(
     connectParams: unknown,
   ): SmallWebRTCTransportConnectionOptions | undefined {
@@ -195,21 +231,27 @@ export class SmallWebRTCTransport extends Transport {
       );
     };
     const fixedParams: SmallWebRTCTransportConnectionOptions = {};
+    const supportedKeys = ["webrtcUrl", "connectionUrl", "webrtcRequestParams"];
+    // Warn about unrecognized keys and convert supported keys from snake_case to camelCase
     for (const [key, val] of Object.entries(connectParams)) {
       const camelKey = snakeToCamel(key);
-      if (camelKey !== "webrtcUrl" && camelKey !== "connectionUrl") {
-        throw new RTVIError(
-          `Unrecognized connection parameter: ${key}. Only 'webrtcUrl' or 'connectionUrl' are allowed.`,
+      if (!supportedKeys.includes(camelKey)) {
+        logger.warn(
+          `Unrecognized connection parameter: ${key}. This parameter will be ignored.`,
         );
-      } else if (typeof val !== "string") {
-        throw new RTVIError(
-          `Invalid type for ${key}: expected string, got ${typeof val}`,
-        );
+      } else {
+        fixedParams[camelKey as keyof SmallWebRTCTransportConnectionOptions] =
+          val;
       }
-      if (camelKey === "connectionUrl") {
-        logger.warn("connectionUrl is deprecated, use webrtcUrl instead");
-      }
-      fixedParams[camelKey] = val;
+    }
+    const webrtcRequestParams = this._resolveRequestInfo(fixedParams);
+    if (webrtcRequestParams) {
+      fixedParams.webrtcRequestParams = webrtcRequestParams;
+    }
+    delete fixedParams.connectionUrl;
+    delete fixedParams.webrtcUrl;
+    if (Object.keys(fixedParams).length === 0) {
+      return undefined;
     }
     return fixedParams;
   }
@@ -221,12 +263,13 @@ export class SmallWebRTCTransport extends Transport {
 
     this.state = "connecting";
 
-    this._webrtcUrl =
-      connectParams?.webrtcUrl ??
-      connectParams?.connectionUrl ??
-      this._webrtcUrl;
-    if (!this._webrtcUrl) {
-      logger.error("No url provided for connection");
+    // Note: There is no need to validate the params here, as they were already
+    //       validated and fixed in the parent class's connect() method (which calls
+    //       _validateConnectionParams() and passes the result to _connect()).
+    this._webrtcRequest =
+      connectParams?.webrtcRequestParams ?? this._webrtcRequest;
+    if (!this._webrtcRequest) {
+      logger.error("No request details provided for WebRTC connection");
       this.state = "error";
       throw new TransportStartError();
     }
@@ -424,6 +467,11 @@ export class SmallWebRTCTransport extends Transport {
     if (!this.pc) {
       return Promise.reject("Peer connection is not initialized");
     }
+    if (!this._webrtcRequest) {
+      logger.error("No request details provided for WebRTC connection");
+      this.state = "error";
+      throw new TransportStartError();
+    }
 
     try {
       // Create offer
@@ -473,20 +521,27 @@ export class SmallWebRTCTransport extends Transport {
       logger.debug(`Will create offer for peerId: ${this.pc_id}`);
 
       // Send offer to server
-      const response = await fetch(this._webrtcUrl!, {
-        body: JSON.stringify({
-          sdp: offerSdp.sdp,
-          type: offerSdp.type,
-          pc_id: this.pc_id,
-          restart_pc: recreatePeerConnection,
-        }),
-        headers: {
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      });
+      const request = cloneDeep(this._webrtcRequest);
+      const requestData: {
+        sdp: string;
+        type: string;
+        pc_id: string | null;
+        restart_pc: boolean;
+        requestData?: any;
+      } = {
+        sdp: offerSdp.sdp,
+        type: offerSdp.type as string,
+        pc_id: this.pc_id,
+        restart_pc: recreatePeerConnection,
+      };
+      if (this._webrtcRequest.requestData) {
+        requestData.requestData = this._webrtcRequest.requestData;
+      }
+      request.requestData = requestData;
+      const answer: RTCSessionDescriptionInit = (await makeRequest(
+        request,
+      )) as RTCSessionDescriptionInit;
 
-      const answer: RTCSessionDescriptionInit = await response.json();
       // @ts-ignore
       this.pc_id = answer.pc_id;
       // @ts-ignore
