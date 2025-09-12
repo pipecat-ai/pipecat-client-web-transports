@@ -5,6 +5,10 @@ All notable changes to **Pipecat Websocket Transport** will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0]
+
+- Bump client-js version to work with latest 1.3.0 and support latest features
+
 ## [1.2.1]
 
 - Bump daily-js version dependency to 0.83.1 to get Chrome 140 fix
