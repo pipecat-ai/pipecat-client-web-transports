@@ -96,6 +96,7 @@ export class DailyMediaManager extends MediaManager {
     const infos = await this._daily.startCamera({
       startVideoOff: !this._camEnabled,
       startAudioOff: !this._micEnabled,
+      dailyConfig: { useDevicePreferenceCookies: true },
     });
     const { devices } = await this._daily.enumerateDevices();
     const cams = devices.filter((d) => d.kind === "videoinput");

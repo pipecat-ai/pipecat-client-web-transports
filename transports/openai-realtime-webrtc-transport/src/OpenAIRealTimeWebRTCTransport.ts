@@ -155,6 +155,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     const infos = await this._daily.startCamera({
       startVideoOff: true, // !(this._options.enableCam == true),
       startAudioOff: !(this._options.enableMic ?? true),
+      dailyConfig: { useDevicePreferenceCookies: true },
     });
     const { devices } = await this._daily.enumerateDevices();
     const cams = devices.filter((d) => d.kind === "videoinput");
