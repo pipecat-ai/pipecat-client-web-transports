@@ -135,6 +135,17 @@ export class DailyTransport extends Transport {
 
     const { bufferLocalAudioUntilBotReady, ...dailyOpts } = opts;
     this._dailyFactoryOptions = dailyOpts;
+    // Enable device preference cookies by default
+    if (
+      typeof this._dailyFactoryOptions.dailyConfig
+        ?.useDevicePreferenceCookies === "undefined"
+    ) {
+      // purposeful == to check undefined or null
+      if (this._dailyFactoryOptions.dailyConfig == null) {
+        this._dailyFactoryOptions.dailyConfig = {};
+      }
+      this._dailyFactoryOptions.dailyConfig.useDevicePreferenceCookies = true;
+    }
     this._bufferLocalAudioUntilBotReady =
       bufferLocalAudioUntilBotReady || false;
 
