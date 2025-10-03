@@ -353,9 +353,18 @@ export class SmallWebRTCTransport extends Transport {
     let pc = new RTCPeerConnection(config);
 
     pc.addEventListener("icegatheringstatechange", () => {
-      logger.debug(`iceGatheringState: ${this.pc!.iceGatheringState}`);
+      if (
+        pc.iceGatheringState === "complete" &&
+        pc.iceConnectionState === "checking"
+      ) {
+        logger.info(
+          "Ice gathering completed and connection is still checking. Trying to reconnect.",
+        );
+        // If ICE gathering has completed and the previous connection was still in the "checking" state,
+        // we will reconnect to use all the new ICE candidates.
+        void this.attemptReconnection(false);
+      }
     });
-    logger.debug(`iceGatheringState: ${pc.iceGatheringState}`);
 
     pc.addEventListener("iceconnectionstatechange", () =>
       this.handleICEConnectionStateChange(),
@@ -461,6 +470,48 @@ export class SmallWebRTCTransport extends Transport {
     }
   }
 
+  private async waitForIceGatheringComplete(timeoutMs = 2000): Promise<void> {
+    const pc = this.pc!;
+    if (pc.iceGatheringState === "complete") return;
+
+    logger.info(
+      "Waiting for ICE gathering to complete. Current state:",
+      pc.iceGatheringState,
+    );
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        logger.debug("New ICE candidate:", event.candidate);
+      } else {
+        logger.info("All ICE candidates have been sent.");
+      }
+    };
+
+    return new Promise<void>((resolve) => {
+      let timeoutId: ReturnType<typeof setTimeout>;
+      const cleanup = () => {
+        pc.removeEventListener("icegatheringstatechange", checkState);
+        clearTimeout(timeoutId);
+      };
+      const checkState = () => {
+        logger.debug("icegatheringstatechange:", pc.iceGatheringState);
+        if (pc.iceGatheringState === "complete") {
+          cleanup();
+          resolve();
+        }
+      };
+      const onTimeout = () => {
+        logger.debug(`ICE gathering timed out after ${timeoutMs} ms.`);
+        cleanup();
+        resolve();
+      };
+      pc.addEventListener("icegatheringstatechange", checkState);
+      timeoutId = setTimeout(onTimeout, timeoutMs);
+      // Checking the state again to avoid race conditions
+      checkState();
+    });
+  }
+
   private async negotiate(
     recreatePeerConnection: boolean = false,
   ): Promise<void> {
@@ -480,22 +531,7 @@ export class SmallWebRTCTransport extends Transport {
 
       // Wait for ICE gathering to complete
       if (this._waitForICEGathering) {
-        await new Promise<void>((resolve) => {
-          if (this.pc!.iceGatheringState === "complete") {
-            resolve();
-          } else {
-            const checkState = () => {
-              if (this.pc!.iceGatheringState === "complete") {
-                this.pc!.removeEventListener(
-                  "icegatheringstatechange",
-                  checkState,
-                );
-                resolve();
-              }
-            };
-            this.pc!.addEventListener("icegatheringstatechange", checkState);
-          }
-        });
+        await this.waitForIceGatheringComplete();
       }
 
       let offerSdp = this.pc!.localDescription!;
@@ -646,7 +682,7 @@ export class SmallWebRTCTransport extends Transport {
         }
       }
     } catch (error) {
-      console.error("Failed to parse JSON message:", error);
+      logger.error("Failed to parse JSON message:", error);
     }
   }
 
@@ -666,7 +702,7 @@ export class SmallWebRTCTransport extends Transport {
         void this.disconnect();
         break;
       default:
-        console.warn("Unknown signalling message:", signallingMessage.message);
+        logger.warn("Unknown signalling message:", signallingMessage.message);
     }
   }
 
