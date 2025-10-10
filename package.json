@@ -19,7 +19,7 @@
     "typescript": "^5.5.4"
   },
   "peerDependencies": {
-    "@daily-co/daily-js": "^0.83.1",
+    "@daily-co/daily-js": "^0.84.0",
     "@pipecat-ai/client-js": "^1.4.0"
   }
 }
