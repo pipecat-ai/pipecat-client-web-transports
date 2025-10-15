@@ -114,8 +114,10 @@ export class SmallWebRTCTransport extends Transport {
 
   private _incomingTracks: Map<string, WebRTCTrack> = new Map();
 
-  private canSendIceCandidates: boolean = false;
-  private pendingIceCandidates: RTCIceCandidate[] = [];
+  private _canSendIceCandidates: boolean = false;
+  private _candidateQueue: RTCIceCandidate[] = [];
+  private _flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private _flushInterval = 200;
 
   constructor(opts: SmallWebRTCTransportConstructorOptions = {}) {
     super();
@@ -360,14 +362,7 @@ export class SmallWebRTCTransport extends Transport {
     pc.onicecandidate = async (event) => {
       if (event.candidate) {
         logger.debug("New ICE candidate:", event.candidate);
-        // Check if we can send ICE candidates (we have received the answer with pc_id)
-        if (this.canSendIceCandidates) {
-          // Send immediately
-          await this.sendIceCandidate(event.candidate);
-        } else {
-          // Queue the candidate until we have pc_id
-          this.pendingIceCandidates.push(event.candidate);
-        }
+        await this.sendIceCandidate(event.candidate);
       } else {
         logger.info("All ICE candidates have been sent.");
       }
@@ -530,6 +525,31 @@ export class SmallWebRTCTransport extends Transport {
       logger.error("No request details provided for WebRTC connection");
       return;
     }
+    this._candidateQueue.push(candidate);
+    // We are sending all the ice candidates each 200ms
+    if (!this._flushTimer) {
+      this._flushTimer = setTimeout(
+        () => this.flushIceCandidates(),
+        this._flushInterval,
+      );
+    }
+  }
+
+  private async flushIceCandidates(): Promise<void> {
+    this._flushTimer = null;
+    if (
+      !this._webrtcRequest ||
+      this._candidateQueue.length === 0 ||
+      !this._canSendIceCandidates
+    )
+      return;
+
+    // Drain queue
+    const candidates = this._candidateQueue.splice(
+      0,
+      this._candidateQueue.length,
+    );
+
     try {
       const headers = new Headers({
         "Content-Type": "application/json",
@@ -537,15 +557,20 @@ export class SmallWebRTCTransport extends Transport {
           (this._webrtcRequest.headers ?? new Headers()).entries(),
         ),
       });
+
+      const payload = {
+        pc_id: this.pc_id,
+        candidates: candidates.map((c) => ({
+          candidate: c.candidate,
+          sdp_mid: c.sdpMid,
+          sdp_mline_index: c.sdpMLineIndex,
+        })),
+      };
+
       await fetch(this._webrtcRequest.endpoint, {
         method: "PATCH",
-        headers: headers,
-        body: JSON.stringify({
-          pc_id: this.pc_id,
-          candidate: candidate.candidate,
-          sdp_mid: candidate.sdpMid,
-          sdp_mline_index: candidate.sdpMLineIndex,
-        }),
+        headers,
+        body: JSON.stringify(payload),
       });
     } catch (e) {
       logger.error(`Failed to send ICE candidate: ${e}`);
@@ -672,12 +697,8 @@ export class SmallWebRTCTransport extends Transport {
     await this.addUserMedia();
     await this.negotiate(recreatePeerConnection);
     // Sending the ice candidates
-    this.canSendIceCandidates = true;
-    // Send any queued ICE candidates
-    for (const candidate of this.pendingIceCandidates) {
-      await this.sendIceCandidate(candidate);
-    }
-    this.pendingIceCandidates = [];
+    this._canSendIceCandidates = true;
+    await this.flushIceCandidates();
   }
 
   private async addUserMedia(): Promise<void> {
@@ -822,8 +843,8 @@ export class SmallWebRTCTransport extends Transport {
     this.isReconnecting = false;
     this._callbacks.onDisconnected?.();
 
-    this.pendingIceCandidates = [];
-    this.canSendIceCandidates = false;
+    this._candidateQueue = [];
+    this._canSendIceCandidates = false;
 
     if (this._connectFailed) {
       this._connectFailed();
