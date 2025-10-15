@@ -371,7 +371,8 @@ export class SmallWebRTCTransport extends Transport {
     pc.addEventListener("icegatheringstatechange", () => {
       if (
         pc.iceGatheringState === "complete" &&
-        pc.iceConnectionState === "checking"
+        pc.iceConnectionState === "checking" &&
+        this._waitForICEGathering
       ) {
         logger.info(
           "Ice gathering completed and connection is still checking. Trying to reconnect.",
