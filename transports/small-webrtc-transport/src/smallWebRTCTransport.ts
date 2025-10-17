@@ -42,6 +42,7 @@ export type SmallWebRTCTransportConnectionOptions = {
   /** @deprecated Use webrtcRequestParams instead */
   webrtcUrl?: string;
   webrtcRequestParams?: APIRequest;
+  iceServers?: RTCIceServer[];
 };
 
 export interface SmallWebRTCTransportConstructorOptions
@@ -245,15 +246,8 @@ export class SmallWebRTCTransport extends Transport {
     return true;
   }
 
-  private _updateIceServers(params: Record<string, any>) {
-    const iceServers = params?.iceConfig?.iceServers;
-    if (iceServers) {
-      this._iceServers = iceServers;
-    }
-  }
-
   private _fixConnectionOptionsParams(
-    params: Record<string, unknown>,
+    params: Record<string, any>,
     supportedKeys: string[],
   ): SmallWebRTCTransportConnectionOptions {
     const snakeToCamel = (snakeCaseString: string) => {
@@ -263,6 +257,11 @@ export class SmallWebRTCTransport extends Transport {
     };
 
     const result: SmallWebRTCTransportConnectionOptions = {};
+    const iceServers = params?.iceConfig?.iceServers;
+    if (iceServers) {
+      result.iceServers = iceServers;
+    }
+
     for (const [key, val] of Object.entries(params)) {
       const camelKey = snakeToCamel(key);
       if (!supportedKeys.includes(camelKey)) {
@@ -313,10 +312,14 @@ export class SmallWebRTCTransport extends Transport {
   ): SmallWebRTCTransportConnectionOptions | undefined {
     if (!this._isValidObject(connectParams)) return undefined;
 
-    const params = connectParams as Record<string, unknown>;
-    this._updateIceServers(params);
+    const params = connectParams as Record<string, any>;
 
-    const supportedKeys = ["webrtcUrl", "connectionUrl", "webrtcRequestParams"];
+    const supportedKeys = [
+      "webrtcUrl",
+      "connectionUrl",
+      "webrtcRequestParams",
+      "iceServers",
+    ];
 
     if (this._shouldUseStartBotFallback(params, supportedKeys)) {
       return this._buildConnectionOptionsBasedOnStartBotParams(params);
@@ -342,6 +345,10 @@ export class SmallWebRTCTransport extends Transport {
     if (this._abortController?.signal.aborted) return;
 
     this.state = "connecting";
+
+    if (connectParams?.iceServers) {
+      this._iceServers = connectParams?.iceServers;
+    }
 
     // Note: There is no need to validate the params here, as they were already
     //       validated and fixed in the parent class's connect() method (which calls
