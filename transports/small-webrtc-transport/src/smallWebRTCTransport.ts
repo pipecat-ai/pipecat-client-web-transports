@@ -116,8 +116,8 @@ export class SmallWebRTCTransport extends Transport {
 
   private _canSendIceCandidates: boolean = false;
   private _candidateQueue: RTCIceCandidate[] = [];
-  private _flushTimer: ReturnType<typeof setTimeout> | null = null;
-  private _flushInterval = 200;
+  private __flushTimeout: ReturnType<typeof setTimeout> | null = null;
+  private _flushDelay = 200;
 
   constructor(opts: SmallWebRTCTransportConstructorOptions = {}) {
     super();
@@ -528,16 +528,16 @@ export class SmallWebRTCTransport extends Transport {
     }
     this._candidateQueue.push(candidate);
     // We are sending all the ice candidates each 200ms
-    if (!this._flushTimer) {
-      this._flushTimer = setTimeout(
+    if (!this.__flushTimeout) {
+      this.__flushTimeout = setTimeout(
         () => this.flushIceCandidates(),
-        this._flushInterval,
+        this._flushDelay,
       );
     }
   }
 
   private async flushIceCandidates(): Promise<void> {
-    this._flushTimer = null;
+    this.__flushTimeout = null;
     if (
       !this._webrtcRequest ||
       this._candidateQueue.length === 0 ||
