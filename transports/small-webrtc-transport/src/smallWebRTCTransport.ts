@@ -257,11 +257,6 @@ export class SmallWebRTCTransport extends Transport {
     };
 
     const result: SmallWebRTCTransportConnectionOptions = {};
-    const iceServers = params?.iceConfig?.iceServers;
-    if (iceServers) {
-      result.iceServers = iceServers;
-    }
-
     for (const [key, val] of Object.entries(params)) {
       const camelKey = snakeToCamel(key);
       if (!supportedKeys.includes(camelKey)) {
@@ -282,7 +277,6 @@ export class SmallWebRTCTransport extends Transport {
     const keys = Object.keys(params);
     const startEndpoint = this._getStartEndpointAsString();
     return (
-      !!this.startBotParams &&
       !!startEndpoint &&
       keys.includes("sessionId") &&
       !supportedKeys.some((k) => keys.includes(k))
@@ -290,7 +284,7 @@ export class SmallWebRTCTransport extends Transport {
   }
 
   private _buildConnectionOptionsBasedOnStartBotParams(
-    params: Record<string, unknown>,
+    params: Record<string, any>,
   ): SmallWebRTCTransportConnectionOptions {
     const sessionId = params.sessionId as string;
     const startEndpoint = this._getStartEndpointAsString()!;
@@ -304,6 +298,7 @@ export class SmallWebRTCTransport extends Transport {
         endpoint: offerUrl,
         headers: this.startBotParams!.headers,
       },
+      iceServers: params?.iceConfig?.iceServers,
     };
   }
 
