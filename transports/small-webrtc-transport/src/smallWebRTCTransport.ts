@@ -36,12 +36,17 @@ class WebRTCTrack {
   }
 }
 
+export type IceConfig = {
+  iceServers?: RTCIceServer[];
+};
+
 export type SmallWebRTCTransportConnectionOptions = {
   /** @deprecated Use webrtcRequestParams instead */
   connectionUrl?: string;
   /** @deprecated Use webrtcRequestParams instead */
   webrtcUrl?: string;
   webrtcRequestParams?: APIRequest;
+  iceConfig?: IceConfig;
 };
 
 export interface SmallWebRTCTransportConstructorOptions
@@ -221,40 +226,113 @@ export class SmallWebRTCTransport extends Transport {
     return requestInfo ?? this._webrtcRequest;
   }
 
-  _validateConnectionParams(
-    connectParams: unknown,
-  ): SmallWebRTCTransportConnectionOptions | undefined {
-    if (connectParams === undefined || connectParams === null) {
-      return undefined;
+  _getStartEndpointAsString(): string | undefined {
+    const startEndpoint = this.startBotParams?.endpoint;
+    switch (typeof startEndpoint) {
+      case "string":
+        return startEndpoint;
+      case "object":
+        if (startEndpoint instanceof URL) {
+          return startEndpoint.toString();
+        }
+        if (startEndpoint instanceof Request) {
+          return startEndpoint.url;
+        }
     }
-    if (typeof connectParams !== "object") {
+    return;
+  }
+
+  private _isValidObject(value: unknown): value is object {
+    if (value === null || value === undefined) return false;
+    if (typeof value !== "object") {
       throw new RTVIError("Invalid connection parameters");
     }
+    return true;
+  }
+
+  private _fixConnectionOptionsParams(
+    params: Record<string, any>,
+    supportedKeys: string[],
+  ): SmallWebRTCTransportConnectionOptions {
     const snakeToCamel = (snakeCaseString: string) => {
       return snakeCaseString.replace(/_([a-z,A-Z])/g, (_, letter) =>
         letter.toUpperCase(),
       );
     };
-    const fixedParams: SmallWebRTCTransportConnectionOptions = {};
-    const supportedKeys = ["webrtcUrl", "connectionUrl", "webrtcRequestParams"];
-    // Warn about unrecognized keys and convert supported keys from snake_case to camelCase
-    for (const [key, val] of Object.entries(connectParams)) {
+
+    let result: SmallWebRTCTransportConnectionOptions = {};
+    let sessionId;
+    for (const [key, val] of Object.entries(params)) {
       const camelKey = snakeToCamel(key);
-      if (!supportedKeys.includes(camelKey)) {
-        logger.warn(
-          `Unrecognized connection parameter: ${key}. This parameter will be ignored.`,
-        );
-      } else {
-        fixedParams[camelKey as keyof SmallWebRTCTransportConnectionOptions] =
-          val;
+      if (camelKey === "sessionId") {
+        sessionId = val;
+        continue;
       }
+      if (!supportedKeys.includes(camelKey)) {
+        logger.warn(`Unrecognized connection parameter: ${key}. Ignored.`);
+        continue;
+      }
+      result[camelKey as keyof SmallWebRTCTransportConnectionOptions] =
+        val as any;
     }
+
+    if (sessionId && this._shouldUseStartBotFallback(result)) {
+      result.webrtcRequestParams =
+        this._buildRequestParamsBasedOnStartBotParams(sessionId);
+    }
+
+    return result;
+  }
+
+  private _shouldUseStartBotFallback(
+    options: SmallWebRTCTransportConnectionOptions,
+  ): boolean {
+    const hasStartEndpoint = !!this._getStartEndpointAsString();
+
+    const hasNoConnectionParams =
+      !options.webrtcUrl &&
+      !options.connectionUrl &&
+      !options.webrtcRequestParams;
+
+    return hasStartEndpoint && hasNoConnectionParams;
+  }
+
+  private _buildRequestParamsBasedOnStartBotParams(
+    sessionId: string,
+  ): APIRequest {
+    const startEndpoint = this._getStartEndpointAsString()!;
+    const offerUrl = startEndpoint.replace(
+      "/start",
+      `/sessions/${sessionId}/api/offer`,
+    );
+    return {
+      endpoint: offerUrl,
+      headers: this.startBotParams!.headers,
+    };
+  }
+
+  _validateConnectionParams(
+    connectParams: unknown,
+  ): SmallWebRTCTransportConnectionOptions | undefined {
+    if (!this._isValidObject(connectParams)) return undefined;
+
+    const params = connectParams as Record<string, any>;
+
+    const supportedKeys = [
+      "webrtcUrl",
+      "connectionUrl",
+      "webrtcRequestParams",
+      "iceConfig",
+    ];
+
+    const fixedParams = this._fixConnectionOptionsParams(params, supportedKeys);
     const webrtcRequestParams = this._resolveRequestInfo(fixedParams);
     if (webrtcRequestParams) {
       fixedParams.webrtcRequestParams = webrtcRequestParams;
     }
     delete fixedParams.connectionUrl;
     delete fixedParams.webrtcUrl;
+
     if (Object.keys(fixedParams).length === 0) {
       return undefined;
     }
@@ -267,6 +345,10 @@ export class SmallWebRTCTransport extends Transport {
     if (this._abortController?.signal.aborted) return;
 
     this.state = "connecting";
+
+    if (connectParams?.iceConfig?.iceServers) {
+      this._iceServers = connectParams?.iceConfig?.iceServers;
+    }
 
     // Note: There is no need to validate the params here, as they were already
     //       validated and fixed in the parent class's connect() method (which calls
