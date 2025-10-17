@@ -114,6 +114,11 @@ export class SmallWebRTCTransport extends Transport {
 
   private _incomingTracks: Map<string, WebRTCTrack> = new Map();
 
+  private _canSendIceCandidates: boolean = false;
+  private _candidateQueue: RTCIceCandidate[] = [];
+  private __flushTimeout: ReturnType<typeof setTimeout> | null = null;
+  private _flushDelay = 200;
+
   constructor(opts: SmallWebRTCTransportConstructorOptions = {}) {
     super();
     this._iceServers = opts.iceServers ?? [];
@@ -280,11 +285,13 @@ export class SmallWebRTCTransport extends Transport {
 
     if (this._abortController?.signal.aborted) return;
 
-    // Wait until we are actually connected and the data channel is ready
-    await new Promise<void>((resolve, reject) => {
-      this._connectResolved = resolve;
-      this._connectFailed = reject;
-    });
+    if (this.dc?.readyState !== "open") {
+      // Wait until we are actually connected and the data channel is ready
+      await new Promise<void>((resolve, reject) => {
+        this._connectResolved = resolve;
+        this._connectFailed = reject;
+      });
+    }
 
     this.state = "connected";
     this._callbacks.onConnected?.();
@@ -352,10 +359,20 @@ export class SmallWebRTCTransport extends Transport {
 
     let pc = new RTCPeerConnection(config);
 
+    pc.onicecandidate = async (event) => {
+      if (event.candidate) {
+        logger.debug("New ICE candidate:", event.candidate);
+        await this.sendIceCandidate(event.candidate);
+      } else {
+        logger.info("All ICE candidates have been sent.");
+      }
+    };
+
     pc.addEventListener("icegatheringstatechange", () => {
       if (
         pc.iceGatheringState === "complete" &&
-        pc.iceConnectionState === "checking"
+        pc.iceConnectionState === "checking" &&
+        this._waitForICEGathering
       ) {
         logger.info(
           "Ice gathering completed and connection is still checking. Trying to reconnect.",
@@ -479,14 +496,6 @@ export class SmallWebRTCTransport extends Transport {
       pc.iceGatheringState,
     );
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        logger.debug("New ICE candidate:", event.candidate);
-      } else {
-        logger.info("All ICE candidates have been sent.");
-      }
-    };
-
     return new Promise<void>((resolve) => {
       let timeoutId: ReturnType<typeof setTimeout>;
       const cleanup = () => {
@@ -510,6 +519,63 @@ export class SmallWebRTCTransport extends Transport {
       // Checking the state again to avoid race conditions
       checkState();
     });
+  }
+
+  private async sendIceCandidate(candidate: RTCIceCandidate): Promise<void> {
+    if (!this._webrtcRequest) {
+      logger.error("No request details provided for WebRTC connection");
+      return;
+    }
+    this._candidateQueue.push(candidate);
+    // We are sending all the ice candidates each 200ms
+    if (!this.__flushTimeout) {
+      this.__flushTimeout = setTimeout(
+        () => this.flushIceCandidates(),
+        this._flushDelay,
+      );
+    }
+  }
+
+  private async flushIceCandidates(): Promise<void> {
+    this.__flushTimeout = null;
+    if (
+      !this._webrtcRequest ||
+      this._candidateQueue.length === 0 ||
+      !this._canSendIceCandidates
+    )
+      return;
+
+    // Drain queue
+    const candidates = this._candidateQueue.splice(
+      0,
+      this._candidateQueue.length,
+    );
+
+    try {
+      const headers = new Headers({
+        "Content-Type": "application/json",
+        ...Object.fromEntries(
+          (this._webrtcRequest.headers ?? new Headers()).entries(),
+        ),
+      });
+
+      const payload = {
+        pc_id: this.pc_id,
+        candidates: candidates.map((c) => ({
+          candidate: c.candidate,
+          sdp_mid: c.sdpMid,
+          sdp_mline_index: c.sdpMLineIndex,
+        })),
+      };
+
+      await fetch(this._webrtcRequest.endpoint, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      logger.error(`Failed to send ICE candidate: ${e}`);
+    }
   }
 
   private async negotiate(
@@ -583,9 +649,6 @@ export class SmallWebRTCTransport extends Transport {
       // @ts-ignore
       logger.debug(`Received answer for peer connection id ${answer.pc_id}`);
       await this.pc!.setRemoteDescription(answer);
-      logger.debug(
-        `Remote candidate supports trickle ice: ${this.pc.canTrickleIceCandidates}`,
-      );
     } catch (e) {
       logger.debug(
         `Reconnection attempt ${this.reconnectionAttempts} failed: ${e}`,
@@ -634,6 +697,9 @@ export class SmallWebRTCTransport extends Transport {
     this.dc = this.createDataChannel("chat", { ordered: true });
     await this.addUserMedia();
     await this.negotiate(recreatePeerConnection);
+    // Sending the ice candidates
+    this._canSendIceCandidates = true;
+    await this.flushIceCandidates();
   }
 
   private async addUserMedia(): Promise<void> {
@@ -777,6 +843,9 @@ export class SmallWebRTCTransport extends Transport {
     this.reconnectionAttempts = 0;
     this.isReconnecting = false;
     this._callbacks.onDisconnected?.();
+
+    this._candidateQueue = [];
+    this._canSendIceCandidates = false;
 
     if (this._connectFailed) {
       this._connectFailed();
