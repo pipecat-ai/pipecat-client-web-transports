@@ -283,6 +283,16 @@ export class SmallWebRTCTransport extends Transport {
     );
   }
 
+  private _isRTCIceServerArray(value: unknown): boolean {
+    return (
+      Array.isArray(value) &&
+      value.every(
+        (server) =>
+          typeof server === "object" && server !== null && "urls" in server,
+      )
+    );
+  }
+
   private _buildConnectionOptionsBasedOnStartBotParams(
     params: Record<string, any>,
   ): SmallWebRTCTransportConnectionOptions {
@@ -293,13 +303,16 @@ export class SmallWebRTCTransport extends Transport {
       `/sessions/${sessionId}/api/offer`,
     );
 
-    return {
+    let result: SmallWebRTCTransportConnectionOptions = {
       webrtcRequestParams: {
         endpoint: offerUrl,
         headers: this.startBotParams!.headers,
       },
-      iceServers: params?.iceConfig?.iceServers,
     };
+    if (this._isRTCIceServerArray(params?.iceConfig?.iceServers)) {
+      result.iceServers = params?.iceConfig?.iceServers;
+    }
+    return result;
   }
 
   _validateConnectionParams(
