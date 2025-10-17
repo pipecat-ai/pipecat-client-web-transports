@@ -221,40 +221,115 @@ export class SmallWebRTCTransport extends Transport {
     return requestInfo ?? this._webrtcRequest;
   }
 
-  _validateConnectionParams(
-    connectParams: unknown,
-  ): SmallWebRTCTransportConnectionOptions | undefined {
-    if (connectParams === undefined || connectParams === null) {
-      return undefined;
+  _getStartEndpointAsString(): string | undefined {
+    const startEndpoint = this.startBotParams?.endpoint;
+    switch (typeof startEndpoint) {
+      case "string":
+        return startEndpoint;
+      case "object":
+        if (startEndpoint instanceof URL) {
+          return startEndpoint.toString();
+        }
+        if (startEndpoint instanceof Request) {
+          return startEndpoint.url;
+        }
     }
-    if (typeof connectParams !== "object") {
+    return;
+  }
+
+  private _isValidObject(value: unknown): value is object {
+    if (value === null || value === undefined) return false;
+    if (typeof value !== "object") {
       throw new RTVIError("Invalid connection parameters");
     }
+    return true;
+  }
+
+  private _updateIceServers(params: Record<string, any>) {
+    const iceServers = params?.iceConfig?.iceServers;
+    if (iceServers) {
+      this._iceServers = iceServers;
+    }
+  }
+
+  private _fixConnectionOptionsParams(
+    params: Record<string, unknown>,
+    supportedKeys: string[],
+  ): SmallWebRTCTransportConnectionOptions {
     const snakeToCamel = (snakeCaseString: string) => {
       return snakeCaseString.replace(/_([a-z,A-Z])/g, (_, letter) =>
         letter.toUpperCase(),
       );
     };
-    const fixedParams: SmallWebRTCTransportConnectionOptions = {};
-    const supportedKeys = ["webrtcUrl", "connectionUrl", "webrtcRequestParams"];
-    // Warn about unrecognized keys and convert supported keys from snake_case to camelCase
-    for (const [key, val] of Object.entries(connectParams)) {
+
+    const result: SmallWebRTCTransportConnectionOptions = {};
+    for (const [key, val] of Object.entries(params)) {
       const camelKey = snakeToCamel(key);
       if (!supportedKeys.includes(camelKey)) {
-        logger.warn(
-          `Unrecognized connection parameter: ${key}. This parameter will be ignored.`,
-        );
-      } else {
-        fixedParams[camelKey as keyof SmallWebRTCTransportConnectionOptions] =
-          val;
+        logger.warn(`Unrecognized connection parameter: ${key}. Ignored.`);
+        continue;
       }
+      result[camelKey as keyof SmallWebRTCTransportConnectionOptions] =
+        val as any;
     }
+
+    return result;
+  }
+
+  private _shouldUseStartBotFallback(
+    params: Record<string, unknown>,
+    supportedKeys: string[],
+  ): boolean {
+    const keys = Object.keys(params);
+    const startEndpoint = this._getStartEndpointAsString();
+    return (
+      !!this.startBotParams &&
+      !!startEndpoint &&
+      keys.includes("sessionId") &&
+      !supportedKeys.some((k) => keys.includes(k))
+    );
+  }
+
+  private _buildConnectionOptionsBasedOnStartBotParams(
+    params: Record<string, unknown>,
+  ): SmallWebRTCTransportConnectionOptions {
+    const sessionId = params.sessionId as string;
+    const startEndpoint = this._getStartEndpointAsString()!;
+    const offerUrl = startEndpoint.replace(
+      "/start",
+      `/sessions/${sessionId}/api/offer`,
+    );
+
+    return {
+      webrtcRequestParams: {
+        endpoint: offerUrl,
+        headers: this.startBotParams!.headers,
+      },
+    };
+  }
+
+  _validateConnectionParams(
+    connectParams: unknown,
+  ): SmallWebRTCTransportConnectionOptions | undefined {
+    if (!this._isValidObject(connectParams)) return undefined;
+
+    const params = connectParams as Record<string, unknown>;
+    this._updateIceServers(params);
+
+    const supportedKeys = ["webrtcUrl", "connectionUrl", "webrtcRequestParams"];
+
+    if (this._shouldUseStartBotFallback(params, supportedKeys)) {
+      return this._buildConnectionOptionsBasedOnStartBotParams(params);
+    }
+
+    const fixedParams = this._fixConnectionOptionsParams(params, supportedKeys);
     const webrtcRequestParams = this._resolveRequestInfo(fixedParams);
     if (webrtcRequestParams) {
       fixedParams.webrtcRequestParams = webrtcRequestParams;
     }
     delete fixedParams.connectionUrl;
     delete fixedParams.webrtcUrl;
+
     if (Object.keys(fixedParams).length === 0) {
       return undefined;
     }
