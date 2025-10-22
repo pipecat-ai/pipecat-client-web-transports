@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.7.0]
 
+- Allowing `startBotAndConnect` to work with Pipecat Cloud and Pipecat runner.
 - Adding support for trickle ice.
 
 ## [1.6.1]
