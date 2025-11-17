@@ -308,6 +308,7 @@ export class SmallWebRTCTransport extends Transport {
     return {
       endpoint: offerUrl,
       headers: this.startBotParams!.headers,
+      requestData: this.startBotParams!.requestData,
     };
   }
 
