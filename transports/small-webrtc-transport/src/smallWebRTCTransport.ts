@@ -305,10 +305,13 @@ export class SmallWebRTCTransport extends Transport {
       "/start",
       `/sessions/${sessionId}/api/offer`,
     );
+    const offerRequestData = this.startBotParams!.requestData
+      ? (this.startBotParams!.requestData as any).body
+      : undefined;
     return {
       endpoint: offerUrl,
       headers: this.startBotParams!.headers,
-      requestData: this.startBotParams!.requestData,
+      requestData: offerRequestData,
     };
   }
 

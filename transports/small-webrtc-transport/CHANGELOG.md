@@ -5,6 +5,23 @@ All notable changes to **Pipecat Small WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2]
+
+### Changed
+- Modified `startBotAndConnect` method to handle request data differently for internal endpoint calls:
+  - When calling the `start` endpoint: sends the complete `requestData` object (including all properties like `createDailyRoom`, `enableDefaultIceServers`, etc.)
+  - When calling the `connect` endpoint: only sends the data contained within the `body` property of `requestData`
+  
+  **Example:** If `startBotAndConnect` is called with:
+  ```
+    requestData: {
+      createDailyRoom: false,
+      enableDefaultIceServers: true,
+      body: { character_id: characterId }
+    }
+  ```
+  The `start` endpoint receives the full object, while the `connect` endpoint only receives `{ character_id: characterId }`.
+
 ## [1.7.1]
 
 - Fixed an issue in `startBotAndConnect` where `requestData` was not carried over when invoking the `connect` endpoint.
