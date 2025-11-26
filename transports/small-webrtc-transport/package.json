@@ -25,7 +25,7 @@
     "@pipecat-ai/client-js": "^1.4.0",
     "@types/lodash": "^4.17.20",
     "@types/node": "^22.9.0",
-    "eslint": "9.11.1",
+    "eslint": "9.39.1",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-simple-import-sort": "^12.1.1"
   },
