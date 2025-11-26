@@ -24,7 +24,7 @@
     "@types/morgan": "^1.9.9",
     "@types/node": "^22.9.0",
     "concurrently": "^9.1.0",
-    "eslint": "^9.15.0",
+    "eslint": "^9.39.1",
     "nodemon": "^3.1.7",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
