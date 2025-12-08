@@ -52,6 +52,7 @@ export type SmallWebRTCTransportConnectionOptions = {
 export interface SmallWebRTCTransportConstructorOptions
   extends SmallWebRTCTransportConnectionOptions {
   iceServers?: RTCIceServer[];
+  iceTransportPolicy?: RTCIceTransportPolicy;
   waitForICEGathering?: boolean;
   audioCodec?: string;
   videoCodec?: string;
@@ -118,6 +119,7 @@ export class SmallWebRTCTransport extends Transport {
 
   private _iceServers: RTCIceServer[] = [];
   private readonly _waitForICEGathering: boolean;
+  private _iceTransportPolicy: RTCIceTransportPolicy | undefined;
 
   private _incomingTracks: Map<string, WebRTCTrack> = new Map();
 
@@ -129,6 +131,7 @@ export class SmallWebRTCTransport extends Transport {
   constructor(opts: SmallWebRTCTransportConstructorOptions = {}) {
     super();
     this._iceServers = opts.iceServers ?? [];
+    this._iceTransportPolicy = opts.iceTransportPolicy ?? "all";
     this._waitForICEGathering = opts.waitForICEGathering ?? false;
     this.audioCodec = opts.audioCodec ?? null;
     this.videoCodec = opts.videoCodec ?? null;
@@ -443,6 +446,7 @@ export class SmallWebRTCTransport extends Transport {
   private createPeerConnection(): RTCPeerConnection {
     const config: RTCConfiguration = {
       iceServers: this._iceServers,
+      iceTransportPolicy: this._iceTransportPolicy,
     };
 
     let pc = new RTCPeerConnection(config);
