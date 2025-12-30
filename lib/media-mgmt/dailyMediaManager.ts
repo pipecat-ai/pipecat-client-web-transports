@@ -205,8 +205,22 @@ export class DailyMediaManager extends MediaManager {
       });
   }
   async updateSpeaker(speakerId: string): Promise<void> {
+    if (!this._wavStreamPlayer) {
+      try {
+        const dInfo = await this._daily.setOutputDeviceAsync({
+          outputDeviceId: speakerId,
+        });
+        this._selectedSpeaker = dInfo.speaker as MediaDeviceInfo;
+        this._callbacks.onSpeakerUpdated?.(this._selectedSpeaker);
+      } catch (e) {
+        console.error("Error setting output device", e);
+      }
+      return;
+    }
+
     if (speakerId !== "default" && this._selectedSpeaker.deviceId === speakerId)
       return;
+
     let sID = speakerId;
     if (sID === "default") {
       const speakers = await this.getAllSpeakers();
