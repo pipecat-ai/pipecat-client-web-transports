@@ -1,7 +1,10 @@
 import cloneDeep from "lodash/cloneDeep";
 import {
+  APIRequest,
+  isAPIRequest,
   logger,
   makeRequest,
+  MessageTooLargeError,
   RTVIError,
   RTVIMessage,
   PipecatClientOptions,
@@ -10,8 +13,6 @@ import {
   TransportStartError,
   TransportState,
   UnsupportedFeatureError,
-  APIRequest,
-  isAPIRequest,
 } from "@pipecat-ai/client-js";
 import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
@@ -421,6 +422,20 @@ export class SmallWebRTCTransport extends Transport {
     if (!this.dc || this.dc.readyState !== "open") {
       logger.warn(`Datachannel is not ready. Message not sent: ${message}`);
       return;
+    }
+    const getSizeInBytes = (obj: any) => {
+      const jsonString = JSON.stringify(obj);
+      const encoder = new TextEncoder();
+      const bytes = encoder.encode(jsonString);
+      return bytes.length;
+    };
+
+    const objectSize = getSizeInBytes(message);
+    const maxSize = this.pc?.sctp?.maxMessageSize ?? 64 * 1024;
+    if (objectSize > maxSize) {
+      throw new MessageTooLargeError(
+        "Message data too large. Max size is " + maxSize,
+      );
     }
     this.dc?.send(JSON.stringify(message));
   }

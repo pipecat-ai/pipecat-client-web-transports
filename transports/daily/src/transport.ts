@@ -20,6 +20,7 @@ import Daily, {
 import {
   DeviceArray,
   DeviceError,
+  MessageTooLargeError,
   Participant,
   PipecatClientOptions,
   RTVIError,
@@ -597,7 +598,17 @@ export class DailyTransport extends Transport {
   }
 
   public sendMessage(message: RTVIMessage) {
-    this._daily.sendAppMessage(message, "*");
+    try {
+      this._daily.sendAppMessage(message, "*");
+    } catch (error: unknown) {
+      if (
+        error instanceof Error &&
+        error.message.includes("Message data too large")
+      ) {
+        throw new MessageTooLargeError(error.message);
+      }
+      throw error;
+    }
   }
 
   private handleAppMessage(ev: DailyEventObjectAppMessage) {
