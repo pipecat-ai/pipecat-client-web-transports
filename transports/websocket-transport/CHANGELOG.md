@@ -5,6 +5,10 @@ All notable changes to **Pipecat Websocket Transport** will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- Set `_maxMessageSize` to the server's supported max size (1 MB)
+
 ## [1.5.0]
 
 - Bump client-js version to work with latest 1.5.0 and support latest features

@@ -5,6 +5,12 @@ All notable changes to **Pipecat Small WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- Added message size checking to `sendMessage()` to ensure no large
+  messages are sent, causing the data channel to fail and not recover.
+- Set `_maxMessageSize` to the peer connections's max size (defaults to 64KB)
+
 ## [1.8.1]
 
 - Fixed issue causing `updateSpeaker()` not to work.
