@@ -11,6 +11,7 @@ import {
   Transport,
   TransportStartError,
   TransportState,
+  UnsupportedFeatureError,
   logger,
 } from "@pipecat-ai/client-js";
 
@@ -388,6 +389,11 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
         );
         break;
       }
+      default:
+        throw new UnsupportedFeatureError(
+          message.type,
+          "OpenAIRealTimeWebRTCTransport",
+        );
     }
   }
 

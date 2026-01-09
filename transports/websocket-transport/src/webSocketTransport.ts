@@ -61,6 +61,7 @@ export class WebSocketTransport extends Transport {
     );
     this._ws = null;
     this._serializer = opts.serializer || new ProtobufFrameSerializer();
+    this._maxMessageSize = 1024 * 1024; // python websockets default to 1MB
   }
 
   initialize(
