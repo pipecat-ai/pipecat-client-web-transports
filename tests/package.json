@@ -12,6 +12,7 @@
     "@pipecat-ai/client-js": "^1.7.0",
     "@pipecat-ai/daily-transport": "*",
     "@pipecat-ai/gemini-live-websocket-transport": "*",
+    "@pipecat-ai/livekit-transport": "*",
     "@pipecat-ai/moq-transport": "*",
     "@pipecat-ai/openai-realtime-webrtc-transport": "*",
     "@pipecat-ai/small-webrtc-transport": "*",
