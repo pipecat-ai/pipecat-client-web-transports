@@ -3,7 +3,7 @@
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/transport)
 [![Discord](https://img.shields.io/discord/1239284677165056021)](https://discord.gg/pipecat)
 
-A mono-repo to house the various supported Transport options to be used with the pipecat-client-web library. Currently, there are four transports: `small-webrtc-transport`, `daily-transport`, `gemini-live-websocket-transport`, and `openai-realtime-webrtc-transport`.
+A mono-repo to house the various supported Transport options to be used with the pipecat-client-web library. Currently, there are five transports: `small-webrtc-transport`, `daily-transport`, `livekit-transport`, `gemini-live-websocket-transport`, and `openai-realtime-webrtc-transport`.
 
 ## Documentation
 
@@ -68,6 +68,40 @@ Typical media flow using a DailyTransport:
   │                   │       &        │                              │         │   │  
   │ ┌──────────────┐  │  WebRTC Media  │  ┌──────────────┐    media   │ ┌─────┐ │   │  
   │ │DailyTransport│◄─┼────────────────┼─►│DailyTransport┼────────────┼─► STT │ │   │  
+  │ └──────────────┘  │                │  └───────▲──────┘     in     │ └──┬──┘ │   │  
+  │                   │                │          │                   │    │    │   │  
+  └───────────────────┘                │          │                   │ ┌──▼──┐ │   │  
+                                       │          │                   │ │ LLM │ │   │  
+                                       │          │                   │ └──┬──┘ │   │  
+                                       │          │                   │    │    │   │  
+                                       │          │                   │ ┌──▼──┐ │   │  
+                                       │          │     media         │ │ TTS │ │   │  
+                                       │          └───────────────────┼─┴─────┘ │   │  
+                                       │                 out          └─────────┘   │  
+                                       │                                            │  
+                                       └────────────────────────────────────────────┘  
+                                                                                       
+```
+
+### [LiveKitTransport](/transports/livekit-transport/README.md)
+
+[![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/livekit)
+[![README](https://img.shields.io/badge/README-goldenrod)](/transports/livekit-transport/README.md)
+![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/livekit-transport)
+
+This Transport uses the [LiveKit](https://livekit.io) real-time communication platform to connect to a bot and stream media over a WebRTC connection. LiveKit provides a scalable, distributed WebRTC infrastructure with features like edge routing, session observability, and recording capabilities.
+
+Typical media flow using a LiveKitTransport:
+```
+                                                                                       
+                                       ┌────────────────────────────────────────────┐  
+                                       │                                            │  
+  ┌───────────────────┐                │                 Server       ┌─────────┐   │  
+  │                   │                │                              │Pipecat  │   │  
+  │      Client       │  RTVI Messages │                              │Pipeline │   │  
+  │                   │       &        │                              │         │   │  
+  │ ┌──────────────┐  │  WebRTC Media  │  ┌──────────────┐    media   │ ┌─────┐ │   │  
+  │ │LiveKitTranspo│◄─┼────────────────┼─►│LiveKitTranspo┼────────────┼─► STT │ │   │  
   │ └──────────────┘  │                │  └───────▲──────┘     in     │ └──┬──┘ │   │  
   │                   │                │          │                   │    │    │   │  
   └───────────────────┘                │          │                   │ ┌──▼──┐ │   │  

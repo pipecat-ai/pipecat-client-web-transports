@@ -1,0 +1,42 @@
+{
+  "name": "@pipecat-ai/livekit-transport",
+  "version": "1.8.1",
+  "license": "BSD-2-Clause",
+  "main": "dist/index.js",
+  "module": "dist/index.module.js",
+  "types": "dist/index.d.ts",
+  "source": "src/index.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pipecat-ai/pipecat-client-web-transports.git"
+  },
+  "files": [
+    "dist",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "parcel build --no-cache",
+    "dev": "parcel watch",
+    "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "@pipecat-ai/client-js": "^1.5.0",
+    "@types/node": "^22.9.0",
+    "eslint": "9.39.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-simple-import-sort": "^12.1.1"
+  },
+  "peerDependencies": {
+    "@pipecat-ai/client-js": "~1.5.0"
+  },
+  "dependencies": {
+    "livekit-client": "^2.17.0"
+  },
+  "description": "Pipecat Livekit Transport Package",
+  "author": "Himanshu Gunwant",
+  "bugs": {
+    "url": "https://github.com/pipecat-ai/pipecat-client-web-transports/issues"
+  }
+}
