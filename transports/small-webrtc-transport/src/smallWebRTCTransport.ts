@@ -307,13 +307,14 @@ export class SmallWebRTCTransport extends Transport {
     const offerUrl = this.offerUrlTemplate
       ? this.offerUrlTemplate.replace(":sessionId", sessionId)
       : startEndpoint.replace("/start", `/sessions/${sessionId}/api/offer`);
-    const offerRequestData = this.startBotParams!.requestData
-      ? (this.startBotParams!.requestData as any).body
-      : undefined;
+    if (this.startBotParams!.endpoint instanceof Request) {
+      return {
+        endpoint: new Request(offerUrl, this.startBotParams?.endpoint),
+      };
+    }
     return {
       endpoint: offerUrl,
       headers: this.startBotParams!.headers,
-      requestData: offerRequestData,
     };
   }
 
@@ -711,7 +712,6 @@ export class SmallWebRTCTransport extends Transport {
       logger.debug(`Will create offer for peerId: ${this.pc_id}`);
 
       // Send offer to server
-      const request = cloneDeep(this._webrtcRequest);
       const requestData: {
         sdp: string;
         type: string;
@@ -724,10 +724,20 @@ export class SmallWebRTCTransport extends Transport {
         pc_id: this.pc_id,
         restart_pc: recreatePeerConnection,
       };
-      if (this._webrtcRequest.requestData) {
-        requestData.requestData = this._webrtcRequest.requestData;
+      let request: APIRequest;
+      if (this._webrtcRequest.endpoint instanceof Request) {
+        request = {
+          endpoint: new Request(this._webrtcRequest.endpoint, {
+            body: JSON.stringify(requestData),
+          }),
+        };
+      } else {
+        request = cloneDeep(this._webrtcRequest);
+        if (this._webrtcRequest.requestData) {
+          requestData.requestData = this._webrtcRequest.requestData;
+        }
+        request.requestData = requestData;
       }
-      request.requestData = requestData;
       const answer: RTCSessionDescriptionInit = (await makeRequest(
         request,
       )) as RTCSessionDescriptionInit;

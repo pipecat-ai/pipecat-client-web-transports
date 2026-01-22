@@ -5,6 +5,14 @@ All notable changes to **Pipecat Small WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Fix issues surrounding requestData in the offer endpoint
+    1. If the endpoint was a Request type, any requestData provided would be lost
+    2. Now that runners cache the requestData provided to /start, we do not need to re-send it in the offer (which conveniently ALSO solves issues if the endpoint provided to start was a Request type :))
+
 ## [1.8.1]
 
 - Fixed issue causing `updateSpeaker()` not to work.
