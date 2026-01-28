@@ -238,7 +238,10 @@ export class SmallWebRTCTransport extends Transport {
         if (startEndpoint instanceof URL) {
           return startEndpoint.toString();
         }
-        if (startEndpoint instanceof Request) {
+        if (
+          typeof Request !== "undefined" &&
+          startEndpoint instanceof Request
+        ) {
           return startEndpoint.url;
         }
     }
@@ -307,7 +310,10 @@ export class SmallWebRTCTransport extends Transport {
     const offerUrl = this.offerUrlTemplate
       ? this.offerUrlTemplate.replace(":sessionId", sessionId)
       : startEndpoint.replace("/start", `/sessions/${sessionId}/api/offer`);
-    if (this.startBotParams!.endpoint instanceof Request) {
+    if (
+      typeof Request !== "undefined" &&
+      this.startBotParams!.endpoint instanceof Request
+    ) {
       return {
         endpoint: new Request(offerUrl, this.startBotParams?.endpoint),
       };
@@ -725,7 +731,10 @@ export class SmallWebRTCTransport extends Transport {
         restart_pc: recreatePeerConnection,
       };
       let request: APIRequest;
-      if (this._webrtcRequest.endpoint instanceof Request) {
+      if (
+        typeof Request !== "undefined" &&
+        this._webrtcRequest.endpoint instanceof Request
+      ) {
         request = {
           endpoint: new Request(this._webrtcRequest.endpoint, {
             body: JSON.stringify(requestData),
