@@ -7,7 +7,7 @@ export class ProtobufFrameSerializer implements WebSocketSerializer {
   serializeAudio(
     data: ArrayBuffer,
     sampleRate: number,
-    numChannels: number,
+    numChannels: number
   ): Uint8Array {
     const pcmByteArray = new Uint8Array(data);
     const frame = Frame.create({
@@ -36,7 +36,7 @@ export class ProtobufFrameSerializer implements WebSocketSerializer {
     return new Uint8Array(Frame.toBinary(frame));
   }
   async deserialize(
-    data: any,
+    data: any
   ): Promise<
     | { type: "audio"; audio: Int16Array }
     | { type: "message"; message: RTVIMessage }

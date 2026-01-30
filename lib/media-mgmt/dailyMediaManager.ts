@@ -48,7 +48,7 @@ export class DailyMediaManager extends MediaManager {
     onTrackStoppedCallback?: (event: DailyEventObjectTrack) => void,
     recorderChunkSize: number | undefined = undefined,
     recorderSampleRate: number = 24000,
-    playerSampleRate: number = 24000,
+    playerSampleRate: number = 24000
   ) {
     super();
     this._initialized = false;
@@ -78,11 +78,11 @@ export class DailyMediaManager extends MediaManager {
     this._daily.on("track-stopped", this.handleTrackStopped.bind(this));
     this._daily.on(
       "available-devices-updated",
-      this._handleAvailableDevicesUpdated.bind(this),
+      this._handleAvailableDevicesUpdated.bind(this)
     );
     this._daily.on(
       "selected-devices-updated",
-      this._handleSelectedDevicesUpdated.bind(this),
+      this._handleSelectedDevicesUpdated.bind(this)
     );
     this._daily.on("camera-error", this.handleDeviceError.bind(this));
     this._daily.on("local-audio-level", this._handleLocalAudioLevel.bind(this));
@@ -172,7 +172,7 @@ export class DailyMediaManager extends MediaManager {
 
   bufferBotAudio(
     data: ArrayBuffer | Int16Array,
-    id?: string,
+    id?: string
   ): Int16Array | undefined {
     return this._wavStreamPlayer?.add16BitPCM(data, id);
   }
@@ -231,7 +231,7 @@ export class DailyMediaManager extends MediaManager {
       }
       speakers.splice(speakers.indexOf(defaultSpeaker), 1);
       const defaultSpeakerCp = speakers.find((s) =>
-        defaultSpeaker.label.includes(s.label),
+        defaultSpeaker.label.includes(s.label)
       );
       sID = defaultSpeakerCp?.deviceId ?? speakerId;
     }
@@ -316,16 +316,16 @@ export class DailyMediaManager extends MediaManager {
   }
 
   private _handleAvailableDevicesUpdated(
-    event: DailyEventObjectAvailableDevicesUpdated,
+    event: DailyEventObjectAvailableDevicesUpdated
   ) {
     this._callbacks.onAvailableCamsUpdated?.(
-      event.availableDevices.filter((d) => d.kind === "videoinput"),
+      event.availableDevices.filter((d) => d.kind === "videoinput")
     );
     this._callbacks.onAvailableMicsUpdated?.(
-      event.availableDevices.filter((d) => d.kind === "audioinput"),
+      event.availableDevices.filter((d) => d.kind === "audioinput")
     );
     this._callbacks.onAvailableSpeakersUpdated?.(
-      event.availableDevices.filter((d) => d.kind === "audiooutput"),
+      event.availableDevices.filter((d) => d.kind === "audiooutput")
     );
     if (this._selectedSpeaker.deviceId === "default") {
       this.updateSpeaker("default");
@@ -333,7 +333,7 @@ export class DailyMediaManager extends MediaManager {
   }
 
   private _handleSelectedDevicesUpdated(
-    event: DailyEventObjectSelectedDevicesUpdated,
+    event: DailyEventObjectSelectedDevicesUpdated
   ) {
     if (this._selectedCam?.deviceId !== event.devices.camera) {
       this._selectedCam = event.devices.camera;
@@ -347,7 +347,7 @@ export class DailyMediaManager extends MediaManager {
 
   private handleDeviceError(ev: DailyEventObjectCameraError) {
     const generateDeviceError = (
-      error: DailyCameraErrorObject<DailyCameraErrorType>,
+      error: DailyCameraErrorObject<DailyCameraErrorType>
     ) => {
       const devices: DeviceArray = [];
       switch (error.type) {
@@ -441,7 +441,7 @@ export class DailyMediaManager extends MediaManager {
               }
             } else {
               console.warn(
-                "track-started event received for current track and already recording",
+                "track-started event received for current track and already recording"
               );
             }
             break;
@@ -453,7 +453,7 @@ export class DailyMediaManager extends MediaManager {
       event.track,
       event.participant
         ? dailyParticipantToParticipant(event.participant)
-        : undefined,
+        : undefined
     );
     this.onTrackStartedCallback?.(event);
   }
@@ -472,7 +472,7 @@ export class DailyMediaManager extends MediaManager {
       event.track,
       event.participant
         ? dailyParticipantToParticipant(event.participant)
-        : undefined,
+        : undefined
     );
     this.onTrackStoppedCallback?.(event);
   }

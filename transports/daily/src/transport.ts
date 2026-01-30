@@ -211,7 +211,7 @@ export class DailyTransport extends Transport {
 
   public initialize(
     options: PipecatClientOptions,
-    messageHandler: (ev: RTVIMessage) => void,
+    messageHandler: (ev: RTVIMessage) => void
   ): void {
     if (this._bufferLocalAudioUntilBotReady) {
       this.setupRecorder();
@@ -312,7 +312,7 @@ export class DailyTransport extends Transport {
       })
       .catch((e) => {
         this._callbacks.onDeviceError?.(
-          new DeviceError(["speaker"], e.type ?? "unknown", e.message),
+          new DeviceError(["speaker"], e.type ?? "unknown", e.message)
         );
       });
   }
@@ -426,7 +426,7 @@ export class DailyTransport extends Transport {
   }
 
   _validateConnectionParams(
-    connectParams?: unknown,
+    connectParams?: unknown
   ): DailyCallOptions | undefined {
     if (connectParams === undefined || connectParams === null) {
       return undefined;
@@ -526,7 +526,7 @@ export class DailyTransport extends Transport {
           // Check if it's an iOS device
           if (isIOS()) {
             logger.debug(
-              "[Daily Transport] iOS device detected, adding 0.5 second delay before sending ready message",
+              "[Daily Transport] iOS device detected, adding 0.5 second delay before sending ready message"
             );
 
             // Add 500ms delay for iOS devices:
@@ -558,11 +558,11 @@ export class DailyTransport extends Transport {
   private attachEventListeners() {
     this._daily.on(
       "available-devices-updated",
-      this.handleAvailableDevicesUpdated.bind(this),
+      this.handleAvailableDevicesUpdated.bind(this)
     );
     this._daily.on(
       "selected-devices-updated",
-      this.handleSelectedDevicesUpdated.bind(this),
+      this.handleSelectedDevicesUpdated.bind(this)
     );
     this._daily.on("camera-error", this.handleDeviceError.bind(this));
 
@@ -570,13 +570,13 @@ export class DailyTransport extends Transport {
     this._daily.on("track-stopped", this.handleTrackStopped.bind(this));
     this._daily.on(
       "participant-joined",
-      this.handleParticipantJoined.bind(this),
+      this.handleParticipantJoined.bind(this)
     );
     this._daily.on("participant-left", this.handleParticipantLeft.bind(this));
     this._daily.on("local-audio-level", this.handleLocalAudioLevel.bind(this));
     this._daily.on(
       "remote-participants-audio-level",
-      this.handleRemoteAudioLevel.bind(this),
+      this.handleRemoteAudioLevel.bind(this)
     );
     this._daily.on("app-message", this.handleAppMessage.bind(this));
     this._daily.on("left-meeting", this.handleLeftMeeting.bind(this));
@@ -612,21 +612,21 @@ export class DailyTransport extends Transport {
   }
 
   private handleAvailableDevicesUpdated(
-    ev: DailyEventObjectAvailableDevicesUpdated,
+    ev: DailyEventObjectAvailableDevicesUpdated
   ) {
     this._callbacks.onAvailableCamsUpdated?.(
-      ev.availableDevices.filter((d) => d.kind === "videoinput"),
+      ev.availableDevices.filter((d) => d.kind === "videoinput")
     );
     this._callbacks.onAvailableMicsUpdated?.(
-      ev.availableDevices.filter((d) => d.kind === "audioinput"),
+      ev.availableDevices.filter((d) => d.kind === "audioinput")
     );
     this._callbacks.onAvailableSpeakersUpdated?.(
-      ev.availableDevices.filter((d) => d.kind === "audiooutput"),
+      ev.availableDevices.filter((d) => d.kind === "audiooutput")
     );
   }
 
   private handleSelectedDevicesUpdated(
-    ev: DailyEventObjectSelectedDevicesUpdated,
+    ev: DailyEventObjectSelectedDevicesUpdated
   ) {
     if (this._selectedCam?.deviceId !== ev.devices.camera) {
       this._selectedCam = ev.devices.camera;
@@ -644,7 +644,7 @@ export class DailyTransport extends Transport {
 
   private handleDeviceError(ev: DailyEventObjectCameraError) {
     const generateDeviceError = (
-      error: DailyCameraErrorObject<DailyCameraErrorType>,
+      error: DailyCameraErrorObject<DailyCameraErrorType>
     ) => {
       const devices: DeviceArray = [];
       switch (error.type) {
@@ -724,7 +724,7 @@ export class DailyTransport extends Transport {
           }
         } else {
           logger.warn(
-            "track-started event received for current track and already recording",
+            "track-started event received for current track and already recording"
           );
         }
         break;
@@ -738,7 +738,7 @@ export class DailyTransport extends Transport {
         ev.track,
         ev.participant
           ? dailyParticipantToParticipant(ev.participant)
-          : undefined,
+          : undefined
       );
     } else {
       if (ev.participant?.local && ev.track.kind === "audio") {
@@ -748,7 +748,7 @@ export class DailyTransport extends Transport {
         ev.track,
         ev.participant
           ? dailyParticipantToParticipant(ev.participant)
-          : undefined,
+          : undefined
       );
     }
   }
@@ -759,14 +759,14 @@ export class DailyTransport extends Transport {
         ev.track,
         ev.participant
           ? dailyParticipantToParticipant(ev.participant)
-          : undefined,
+          : undefined
       );
     } else {
       this._callbacks.onTrackStopped?.(
         ev.track,
         ev.participant
           ? dailyParticipantToParticipant(ev.participant)
-          : undefined,
+          : undefined
       );
     }
   }
@@ -800,7 +800,7 @@ export class DailyTransport extends Transport {
   }
 
   private handleRemoteAudioLevel(
-    ev: DailyEventObjectRemoteParticipantsAudioLevel,
+    ev: DailyEventObjectRemoteParticipantsAudioLevel
   ) {
     const participants = this._daily.participants();
     const ids = Object.keys(ev.participantsAudioLevel);
@@ -809,7 +809,7 @@ export class DailyTransport extends Transport {
       const level = ev.participantsAudioLevel[id];
       this._callbacks.onRemoteAudioLevel?.(
         level,
-        dailyParticipantToParticipant(participants[id]),
+        dailyParticipantToParticipant(participants[id])
       );
     }
   }

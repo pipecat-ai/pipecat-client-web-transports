@@ -5,7 +5,7 @@ export interface WebSocketSerializer {
   serializeAudio(
     data: ArrayBuffer,
     sampleRate: number,
-    numChannels: number,
+    numChannels: number
   ): any;
   serializeMessage(msg: RTVIMessage): any;
   deserialize(data: any): Promise<

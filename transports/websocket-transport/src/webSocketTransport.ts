@@ -54,10 +54,10 @@ export class WebSocketTransport extends Transport {
         undefined,
         512,
         this._recorderSampleRate,
-        opts.playerSampleRate ?? WebSocketTransport.PLAYER_SAMPLE_RATE,
+        opts.playerSampleRate ?? WebSocketTransport.PLAYER_SAMPLE_RATE
       );
     this._mediaManager.setUserAudioCallback(
-      this.handleUserAudioStream.bind(this),
+      this.handleUserAudioStream.bind(this)
     );
     this._ws = null;
     this._serializer = opts.serializer || new ProtobufFrameSerializer();
@@ -65,7 +65,7 @@ export class WebSocketTransport extends Transport {
 
   initialize(
     options: PipecatClientOptions,
-    messageHandler: (ev: RTVIMessage) => void,
+    messageHandler: (ev: RTVIMessage) => void
   ): void {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
@@ -81,7 +81,7 @@ export class WebSocketTransport extends Transport {
   }
 
   _validateConnectionParams(
-    connectParams: unknown,
+    connectParams: unknown
   ): WebSocketTransportOptions | undefined {
     if (connectParams === undefined || connectParams === null) {
       return undefined;
@@ -91,7 +91,7 @@ export class WebSocketTransport extends Transport {
     }
     const snakeToCamel = (snakeCaseString: string) => {
       return snakeCaseString.replace(/_([a-z,A-Z])/g, (_, letter) =>
-        letter.toUpperCase(),
+        letter.toUpperCase()
       );
     };
     const fixedParams: WebSocketTransportOptions = {};
@@ -100,7 +100,7 @@ export class WebSocketTransport extends Transport {
       if (camelKey === "wsUrl") {
         if (typeof val !== "string") {
           throw new RTVIError(
-            `Invalid type for wsUrl: expected string, got ${typeof val}`,
+            `Invalid type for wsUrl: expected string, got ${typeof val}`
           );
         }
       } else {
@@ -280,7 +280,7 @@ export class WebSocketTransport extends Transport {
       const encoded = this._serializer.serializeAudio(
         data,
         this._recorderSampleRate,
-        1,
+        1
       );
       await this._sendMsg(encoded);
     } catch (e) {
@@ -319,7 +319,7 @@ export class WebSocketTransport extends Transport {
     throw new UnsupportedFeatureError(
       "enableScreenShare",
       "webSocketTransport",
-      "This feature has not been implemented",
+      "This feature has not been implemented"
     );
   }
 
@@ -333,7 +333,7 @@ export class WebSocketTransport extends Transport {
     throw new UnsupportedFeatureError(
       "enableCam",
       "webSocketTransport",
-      "This feature has not been implemented",
+      "This feature has not been implemented"
     );
   }
 
@@ -347,7 +347,7 @@ export class WebSocketTransport extends Transport {
     throw new UnsupportedFeatureError(
       "selectedCam",
       "webSocketTransport",
-      "This feature has not been implemented",
+      "This feature has not been implemented"
     );
   }
 }

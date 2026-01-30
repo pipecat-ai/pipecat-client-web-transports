@@ -38,7 +38,7 @@ class rWebSocket {
 
   addEventListener(
     type: string,
-    listener: (this: WebSocket, ev: Event) => any,
+    listener: (this: WebSocket, ev: Event) => any
   ) {
     this._ws.addEventListener(type, listener);
   }
@@ -158,7 +158,7 @@ export class ReconnectingWebSocket extends EventEmitter {
   constructor(
     address: string,
     protocols?: string | string[],
-    options: WebSocketOptions = {},
+    options: WebSocketOptions = {}
   ) {
     super();
 
@@ -208,7 +208,7 @@ export class ReconnectingWebSocket extends EventEmitter {
           console.warn(
             `signaling socket closed unexpectedly: ${code}${
               reason ? " " + reason : ""
-            }`,
+            }`
           );
           this._closeSocket();
           this.emit("close", code, reason);
@@ -219,12 +219,12 @@ export class ReconnectingWebSocket extends EventEmitter {
           console.warn(
             `signaling socket closed on error: ${code}${
               reason ? " " + reason : ""
-            }`,
+            }`
           );
           if (!ws._rejected) {
             ws._rejected = true;
             const err = new Error(
-              `WebSocket connection error (${code}): ${reason}`,
+              `WebSocket connection error (${code}): ${reason}`
             );
             err.name = WEBSOCKET_ERROR;
             reject(err);
@@ -244,7 +244,7 @@ export class ReconnectingWebSocket extends EventEmitter {
           ws._rejected = true;
           ws.close();
           let err = Error(
-            "wss connection interrupted by disconnect or newer connection",
+            "wss connection interrupted by disconnect or newer connection"
           );
           err.name = SIG_CONNECTION_CANCELED;
           reject(err);
@@ -255,7 +255,7 @@ export class ReconnectingWebSocket extends EventEmitter {
         if (this._keepAliveInterval) {
           this._keepIntervalID = setInterval(
             () => this.checkSocketHealthAndSendKeepAlive(),
-            this._keepAliveInterval,
+            this._keepAliveInterval
           );
         }
         this._ws = ws;

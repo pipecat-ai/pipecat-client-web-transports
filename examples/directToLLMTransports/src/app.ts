@@ -275,7 +275,7 @@ export async function setupEventHandlers() {
       audio.srcObject = new MediaStream([track]);
       audio.autoplay = true;
       audioDiv.appendChild(audio);
-    },
+    }
   );
 
   // For realtime v2v transports, this event will only fire for the
@@ -284,7 +284,7 @@ export async function setupEventHandlers() {
     RTVIEvent.TrackStopped,
     (track: MediaStreamTrack, participant?: Participant) => {
       console.log(" --> track stopped", participant, track);
-    },
+    }
   );
 
   pcClient.on(RTVIEvent.UserStartedSpeaking, () => {
@@ -372,7 +372,7 @@ function sendUserMessage() {
 function updateSpeakerBubble(level: number, whom: string) {
   const volume = level * 100;
   const userBubble = document.getElementById(
-    whom === "user" ? "user-bubble" : "bot-bubble",
+    whom === "user" ? "user-bubble" : "bot-bubble"
   )!;
   // Scale the bubble size based on the volume value
   const scale = 1 + volume / 50; // Adjust the divisor to control the scaling effect
@@ -404,7 +404,7 @@ async function registerFunctionCallHandlers() {
       console.log("changing background color to", color);
       document.body.style.backgroundColor = color;
       return Promise.resolve({ success: true, color });
-    },
+    }
   );
   pcClient.registerFunctionCallHandler(
     "getWeather",
@@ -419,16 +419,16 @@ async function registerFunctionCallHandlers() {
         return ret;
       }
       const locationReq = await fetch(
-        `http://api.openweathermap.org/geo/1.0/direct?q=${location}&limit=1&appid=${key}`,
+        `http://api.openweathermap.org/geo/1.0/direct?q=${location}&limit=1&appid=${key}`
       );
       const locJson = await locationReq.json();
       const loc = { lat: locJson[0].lat, lon: locJson[0].lon };
       const exclude = ["minutely", "hourly", "daily"].join(",");
       const weatherRec = await fetch(
-        `https://api.openweathermap.org/data/3.0/onecall?lat=${loc.lat}&lon=${loc.lon}&exclude=${exclude}&appid=${key}`,
+        `https://api.openweathermap.org/data/3.0/onecall?lat=${loc.lat}&lon=${loc.lon}&exclude=${exclude}&appid=${key}`
       );
       const weather = await weatherRec.json();
       return { success: true, weather: weather.current };
-    },
+    }
   );
 }
