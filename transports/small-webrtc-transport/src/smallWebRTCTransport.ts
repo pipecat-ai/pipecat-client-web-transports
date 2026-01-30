@@ -646,13 +646,22 @@ export class SmallWebRTCTransport extends Transport {
       this._candidateQueue.length,
     );
 
+    let headers;
     try {
-      const headers = new Headers({
-        "Content-Type": "application/json",
-        ...Object.fromEntries(
-          (this._webrtcRequest.headers ?? new Headers()).entries(),
-        ),
-      });
+      if (
+        typeof Request !== "undefined" &&
+        this._webrtcRequest.endpoint instanceof Request
+      ) {
+        console.log("Using Request object headers");
+        headers = this._webrtcRequest.endpoint.headers;
+      } else {
+        headers = new Headers({
+          "Content-Type": "application/json",
+          ...Object.fromEntries(
+            (this._webrtcRequest.headers ?? new Headers()).entries(),
+          ),
+        });
+      }
 
       const payload = {
         pc_id: this.pc_id,
