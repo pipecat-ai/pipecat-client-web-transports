@@ -10,7 +10,7 @@ export class TwilioSerializer implements WebSocketSerializer {
   serializeAudio(
     data: ArrayBuffer,
     sampleRate: number,
-    numChannels: number,
+    numChannels: number
   ): string {
     const pcmSamples = new Int16Array(data);
     const muLawSamples = mulaw.encode(pcmSamples);
@@ -48,7 +48,7 @@ export class TwilioSerializer implements WebSocketSerializer {
   }
 
   async deserialize(
-    data: any,
+    data: any
   ): Promise<
     | { type: "audio"; audio: Int16Array }
     | { type: "message"; message: RTVIMessage }

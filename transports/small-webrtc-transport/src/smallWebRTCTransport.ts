@@ -154,22 +154,21 @@ export class SmallWebRTCTransport extends Transport {
           } else if (event.type == "screenVideo") {
             logger.info("SmallWebRTCMediaManager replacing screen video track");
             await this.getScreenVideoTransceiver().sender.replaceTrack(
-              event.track,
+              event.track
             );
           } else if (event.type == "screenAudio") {
             logger.info(
-              "SmallWebRTCMediaManager does not yet support screen audio. Track is ignored.",
+              "SmallWebRTCMediaManager does not yet support screen audio. Track is ignored."
             );
           }
         },
-        (event) =>
-          logger.debug("SmallWebRTCMediaManager Track stopped:", event),
+        (event) => logger.debug("SmallWebRTCMediaManager Track stopped:", event)
       );
   }
 
   public initialize(
     options: PipecatClientOptions,
-    messageHandler: (ev: RTVIMessage) => void,
+    messageHandler: (ev: RTVIMessage) => void
   ): void {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
@@ -197,7 +196,7 @@ export class SmallWebRTCTransport extends Transport {
   _resolveRequestInfo(
     params:
       | SmallWebRTCTransportConstructorOptions
-      | SmallWebRTCTransportConnectionOptions,
+      | SmallWebRTCTransportConnectionOptions
   ): APIRequest | null {
     let requestInfo: APIRequest | null = null;
     const _webrtcUrl = params.webrtcUrl ?? params.connectionUrl ?? null;
@@ -206,7 +205,7 @@ export class SmallWebRTCTransport extends Transport {
       logger.warn(`${key} is deprecated. Use webrtcRequestParams instead.`);
       if (params.webrtcRequestParams) {
         logger.warn(
-          `Both ${key} and webrtcRequestParams provided. Using webrtcRequestParams.`,
+          `Both ${key} and webrtcRequestParams provided. Using webrtcRequestParams.`
         );
       } else {
         if (typeof _webrtcUrl === "string") {
@@ -222,7 +221,7 @@ export class SmallWebRTCTransport extends Transport {
         requestInfo = params.webrtcRequestParams;
       } else {
         logger.error(
-          `Invalid webrtcRequestParams provided in params. Ignoring.`,
+          `Invalid webrtcRequestParams provided in params. Ignoring.`
         );
       }
     }
@@ -258,11 +257,11 @@ export class SmallWebRTCTransport extends Transport {
 
   private _fixConnectionOptionsParams(
     params: Record<string, any>,
-    supportedKeys: string[],
+    supportedKeys: string[]
   ): SmallWebRTCTransportConnectionOptions {
     const snakeToCamel = (snakeCaseString: string) => {
       return snakeCaseString.replace(/_([a-z,A-Z])/g, (_, letter) =>
-        letter.toUpperCase(),
+        letter.toUpperCase()
       );
     };
 
@@ -291,7 +290,7 @@ export class SmallWebRTCTransport extends Transport {
   }
 
   private _shouldUseStartBotFallback(
-    options: SmallWebRTCTransportConnectionOptions,
+    options: SmallWebRTCTransportConnectionOptions
   ): boolean {
     const hasStartEndpoint = !!this._getStartEndpointAsString();
 
@@ -304,7 +303,7 @@ export class SmallWebRTCTransport extends Transport {
   }
 
   private _buildRequestParamsBasedOnStartBotParams(
-    sessionId: string,
+    sessionId: string
   ): APIRequest {
     const startEndpoint = this._getStartEndpointAsString()!;
     const offerUrl = this.offerUrlTemplate
@@ -325,7 +324,7 @@ export class SmallWebRTCTransport extends Transport {
   }
 
   _validateConnectionParams(
-    connectParams: unknown,
+    connectParams: unknown
   ): SmallWebRTCTransportConnectionOptions | undefined {
     if (!this._isValidObject(connectParams)) return undefined;
 
@@ -353,7 +352,7 @@ export class SmallWebRTCTransport extends Transport {
   }
 
   async _connect(
-    connectParams?: SmallWebRTCTransportConnectionOptions,
+    connectParams?: SmallWebRTCTransportConnectionOptions
   ): Promise<void> {
     if (this._abortController?.signal.aborted) return;
 
@@ -397,22 +396,22 @@ export class SmallWebRTCTransport extends Transport {
     this.sendSignallingMessage(
       new TrackStatusMessage(
         AUDIO_TRANSCEIVER_INDEX,
-        this.mediaManager.isMicEnabled,
-      ),
+        this.mediaManager.isMicEnabled
+      )
     );
     this.sendSignallingMessage(
       new TrackStatusMessage(
         VIDEO_TRANSCEIVER_INDEX,
-        this.mediaManager.isCamEnabled,
-      ),
+        this.mediaManager.isCamEnabled
+      )
     );
     if (this.mediaManager.supportsScreenShare) {
       this.sendSignallingMessage(
         new TrackStatusMessage(
           SCREEN_VIDEO_TRANSCEIVER_INDEX,
           this.mediaManager.isSharingScreen &&
-            !!this.mediaManager.tracks().local.screenVideo,
-        ),
+            !!this.mediaManager.tracks().local.screenVideo
+        )
       );
     }
   }
@@ -470,7 +469,7 @@ export class SmallWebRTCTransport extends Transport {
         this._waitForICEGathering
       ) {
         logger.info(
-          "Ice gathering completed and connection is still checking. Trying to reconnect.",
+          "Ice gathering completed and connection is still checking. Trying to reconnect."
         );
         // If ICE gathering has completed and the previous connection was still in the "checking" state,
         // we will reconnect to use all the new ICE candidates.
@@ -479,7 +478,7 @@ export class SmallWebRTCTransport extends Transport {
     });
 
     pc.addEventListener("iceconnectionstatechange", () =>
-      this.handleICEConnectionStateChange(),
+      this.handleICEConnectionStateChange()
     );
 
     logger.debug(`iceConnectionState: ${pc.iceConnectionState}`);
@@ -554,7 +553,7 @@ export class SmallWebRTCTransport extends Transport {
   }
 
   private async attemptReconnection(
-    recreatePeerConnection: boolean = false,
+    recreatePeerConnection: boolean = false
   ): Promise<void> {
     if (this.isReconnecting) {
       logger.debug("Reconnection already in progress, skipping.");
@@ -588,7 +587,7 @@ export class SmallWebRTCTransport extends Transport {
 
     logger.info(
       "Waiting for ICE gathering to complete. Current state:",
-      pc.iceGatheringState,
+      pc.iceGatheringState
     );
 
     return new Promise<void>((resolve) => {
@@ -626,7 +625,7 @@ export class SmallWebRTCTransport extends Transport {
     if (!this.__flushTimeout) {
       this.__flushTimeout = setTimeout(
         () => this.flushIceCandidates(),
-        this._flushDelay,
+        this._flushDelay
       );
     }
   }
@@ -643,7 +642,7 @@ export class SmallWebRTCTransport extends Transport {
     // Drain queue
     const candidates = this._candidateQueue.splice(
       0,
-      this._candidateQueue.length,
+      this._candidateQueue.length
     );
 
     let headers;
@@ -658,7 +657,7 @@ export class SmallWebRTCTransport extends Transport {
         headers = new Headers({
           "Content-Type": "application/json",
           ...Object.fromEntries(
-            (this._webrtcRequest.headers ?? new Headers()).entries(),
+            (this._webrtcRequest.headers ?? new Headers()).entries()
           ),
         });
       }
@@ -683,7 +682,7 @@ export class SmallWebRTCTransport extends Transport {
   }
 
   private async negotiate(
-    recreatePeerConnection: boolean = false,
+    recreatePeerConnection: boolean = false
   ): Promise<void> {
     if (!this.pc) {
       return Promise.reject("Peer connection is not initialized");
@@ -711,7 +710,7 @@ export class SmallWebRTCTransport extends Transport {
         offerSdp.sdp = this.sdpFilterCodec(
           "audio",
           this.audioCodec,
-          offerSdp.sdp,
+          offerSdp.sdp
         );
       }
       // Filter video codec
@@ -720,7 +719,7 @@ export class SmallWebRTCTransport extends Transport {
         offerSdp.sdp = this.sdpFilterCodec(
           "video",
           this.videoCodec,
-          offerSdp.sdp,
+          offerSdp.sdp
         );
       }
 
@@ -757,7 +756,7 @@ export class SmallWebRTCTransport extends Transport {
         request.requestData = requestData;
       }
       const answer: RTCSessionDescriptionInit = (await makeRequest(
-        request,
+        request
       )) as RTCSessionDescriptionInit;
 
       // @ts-ignore
@@ -767,7 +766,7 @@ export class SmallWebRTCTransport extends Transport {
       await this.pc!.setRemoteDescription(answer);
     } catch (e) {
       logger.debug(
-        `Reconnection attempt ${this.reconnectionAttempts} failed: ${e}`,
+        `Reconnection attempt ${this.reconnectionAttempts} failed: ${e}`
       );
       this.isReconnecting = false;
       setTimeout(() => this.attemptReconnection(true), 2000);
@@ -806,7 +805,7 @@ export class SmallWebRTCTransport extends Transport {
   }
 
   private async startNewPeerConnection(
-    recreatePeerConnection: boolean = false,
+    recreatePeerConnection: boolean = false
   ) {
     this.pc = this.createPeerConnection();
     this.addInitialTransceivers();
@@ -851,7 +850,7 @@ export class SmallWebRTCTransport extends Transport {
       // Check if it's a signalling message
       if (messageObj.type === SIGNALLING_TYPE) {
         void this.handleSignallingMessage(
-          messageObj as SignallingMessageObject,
+          messageObj as SignallingMessageObject
         ); // Delegate to handleSignallingMessage
       } else {
         // Bubble any messages with rtvi-ai label
@@ -870,7 +869,7 @@ export class SmallWebRTCTransport extends Transport {
 
   // Method to handle signalling messages specifically
   async handleSignallingMessage(
-    messageObj: SignallingMessageObject,
+    messageObj: SignallingMessageObject
   ): Promise<void> {
     // Cast the object to the correct type after verification
     const signallingMessage = messageObj as SignallingMessageObject;
@@ -890,7 +889,7 @@ export class SmallWebRTCTransport extends Transport {
 
   private createDataChannel(
     label: string,
-    options: RTCDataChannelInit,
+    options: RTCDataChannelInit
   ): RTCDataChannel {
     const dc = this.pc!.createDataChannel(label, options);
 
@@ -1011,13 +1010,13 @@ export class SmallWebRTCTransport extends Transport {
   enableMic(enable: boolean): void {
     this.mediaManager.enableMic(enable);
     this.sendSignallingMessage(
-      new TrackStatusMessage(AUDIO_TRANSCEIVER_INDEX, enable),
+      new TrackStatusMessage(AUDIO_TRANSCEIVER_INDEX, enable)
     );
   }
   enableCam(enable: boolean): void {
     this.mediaManager.enableCam(enable);
     this.sendSignallingMessage(
-      new TrackStatusMessage(VIDEO_TRANSCEIVER_INDEX, enable),
+      new TrackStatusMessage(VIDEO_TRANSCEIVER_INDEX, enable)
     );
   }
   async enableScreenShare(enable: boolean): Promise<void> {
@@ -1025,12 +1024,12 @@ export class SmallWebRTCTransport extends Transport {
       throw new UnsupportedFeatureError(
         "enableScreenShare",
         "mediaManager",
-        "Screen sharing is not supported by the current media manager",
+        "Screen sharing is not supported by the current media manager"
       );
     }
     this.mediaManager.enableScreenShare(enable);
     this.sendSignallingMessage(
-      new TrackStatusMessage(SCREEN_VIDEO_TRANSCEIVER_INDEX, enable),
+      new TrackStatusMessage(SCREEN_VIDEO_TRANSCEIVER_INDEX, enable)
     );
   }
 
@@ -1063,7 +1062,7 @@ export class SmallWebRTCTransport extends Transport {
     const allowed: number[] = [];
     const rtxRegex = new RegExp("a=fmtp:(\\d+) apt=(\\d+)\\r$");
     const codecRegex = new RegExp(
-      "a=rtpmap:([0-9]+) " + this.escapeRegExp(codec),
+      "a=rtpmap:([0-9]+) " + this.escapeRegExp(codec)
     );
     const videoRegex = new RegExp("(m=" + kind + " .*?)( ([0-9]+))*\\s*$");
 

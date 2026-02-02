@@ -52,7 +52,7 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
 
   constructor(
     service_options: GeminiLLMServiceOptions,
-    manager?: MediaManager,
+    manager?: MediaManager
   ) {
     if (!manager) {
       manager = new DailyMediaManager();
@@ -81,7 +81,7 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
   attachLLMListeners(): void {
     if (!this._ws) {
       console.error(
-        "attachLLMListeners called before the websocket is initialized. Be sure to call initializeLLM() first.",
+        "attachLLMListeners called before the websocket is initialized. Be sure to call initializeLLM() first."
       );
       return;
     }
@@ -141,7 +141,7 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
   }
 
   _validateConnectionParams(
-    connectParams: unknown,
+    connectParams: unknown
   ): undefined | GeminiLLMServiceOptions {
     if (connectParams === undefined || connectParams === null) {
       return undefined;
@@ -155,7 +155,7 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
   async connectLLM(): Promise<void> {
     if (!this._ws) {
       console.error(
-        "connectLLM called before the websocket is initialized. Be sure to call initializeLLM() first.",
+        "connectLLM called before the websocket is initialized. Be sure to call initializeLLM() first."
       );
       return;
     }
@@ -194,7 +194,7 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
             this.state = "error";
             throw new TransportStartError(msg);
           }
-        },
+        }
       );
     }
   }
@@ -246,7 +246,7 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
     } else {
       throw new UnsupportedFeatureError(
         message.type,
-        `GeminiLiveWebSocketTransport`,
+        `GeminiLiveWebSocketTransport`
       );
     }
   }
@@ -274,7 +274,7 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
   async _sendTextInput(
     text: string,
     role: string,
-    turnComplete: boolean | undefined = undefined,
+    turnComplete: boolean | undefined = undefined
   ): Promise<void> {
     const msg = {
       clientContent: {
@@ -316,18 +316,18 @@ export class GeminiLiveWebsocketTransport extends DirectToLLMBaseWebSocketTransp
   // Not implemented
   enableScreenShare(enable: boolean): void {
     logger.error(
-      "startScreenShare not implemented for GeminiLiveWebsocketTransport",
+      "startScreenShare not implemented for GeminiLiveWebsocketTransport"
     );
     throw new UnsupportedFeatureError(
       "Screen sharing",
       "GeminiLiveWebsocketTransport",
-      "This feature has not been implemented",
+      "This feature has not been implemented"
     );
   }
 
   public get isSharingScreen(): boolean {
     logger.error(
-      "isSharingScreen not implemented for GeminiLiveWebsocketTransport",
+      "isSharingScreen not implemented for GeminiLiveWebsocketTransport"
     );
     return false;
   }
@@ -354,10 +354,10 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 
 function mergeBuffers(
   leftBuffer: ArrayBuffer,
-  rightBuffer: ArrayBuffer,
+  rightBuffer: ArrayBuffer
 ): ArrayBuffer {
   const tmpArray = new Uint8Array(
-    leftBuffer.byteLength + rightBuffer.byteLength,
+    leftBuffer.byteLength + rightBuffer.byteLength
   );
   tmpArray.set(new Uint8Array(leftBuffer), 0);
   tmpArray.set(new Uint8Array(rightBuffer), leftBuffer.byteLength);

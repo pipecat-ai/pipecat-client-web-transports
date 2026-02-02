@@ -119,7 +119,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
   // client and call super() on this method
   initialize(
     options: PipecatClientOptions,
-    messageHandler: (ev: RTVIMessage) => void,
+    messageHandler: (ev: RTVIMessage) => void
   ): void {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
@@ -181,7 +181,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
   /**********************************/
   /** Call Lifecycle functionality */
   _validateConnectionParams(
-    connectParams: unknown,
+    connectParams: unknown
   ): undefined | OpenAIServiceOptions {
     if (connectParams === undefined || connectParams === null) {
       return undefined;
@@ -195,7 +195,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
   async _connect(): Promise<void> {
     if (!this._openai_cxn) {
       logger.error(
-        "connectLLM called before the webrtc connection is initialized. Be sure to call initializeLLM() first.",
+        "connectLLM called before the webrtc connection is initialized. Be sure to call initializeLLM() first."
       );
       return;
     }
@@ -238,7 +238,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
   public updateSettings(settings: OpenAISessionConfig) {
     if (settings.voice && this._channelReady()) {
       logger.warn(
-        "changing voice settings after session start is not supported",
+        "changing voice settings after session start is not supported"
       );
       delete settings.voice;
     }
@@ -320,14 +320,14 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
   // Not implemented
   enableScreenShare(enable: boolean): void {
     logger.error(
-      "startScreenShare not implemented for OpenAIRealTimeWebRTCTransport",
+      "startScreenShare not implemented for OpenAIRealTimeWebRTCTransport"
     );
     throw new Error("Not implemented");
   }
 
   public get isSharingScreen(): boolean {
     logger.error(
-      "isSharingScreen not implemented for OpenAIRealTimeWebRTCTransport",
+      "isSharingScreen not implemented for OpenAIRealTimeWebRTCTransport"
     );
     return false;
   }
@@ -384,7 +384,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
         break;
       case RTVIMessageType.LLM_FUNCTION_CALL_RESULT: {
         this._sendFunctionCallResult(
-          message.data as LLMFunctionCallResultResponse,
+          message.data as LLMFunctionCallResultResponse
         );
         break;
       }
@@ -407,10 +407,10 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
         } catch (e) {
           logger.error(
             "Failed to get mic track. OpenAI requires audio on initial connection.",
-            e,
+            e
           );
           throw new RTVIError(
-            "Failed to get mic track. OpenAI requires audio on initial connection.",
+            "Failed to get mic track. OpenAI requires audio on initial connection."
           );
         }
       }
@@ -429,11 +429,11 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     this._daily.on("track-stopped", this._handleTrackStopped.bind(this));
     this._daily.on(
       "available-devices-updated",
-      this._handleAvailableDevicesUpdated.bind(this),
+      this._handleAvailableDevicesUpdated.bind(this)
     );
     this._daily.on(
       "selected-devices-updated",
-      this._handleSelectedDevicesUpdated.bind(this),
+      this._handleSelectedDevicesUpdated.bind(this)
     );
     this._daily.on("local-audio-level", this._handleLocalAudioLevel.bind(this));
   }
@@ -441,7 +441,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
   private _attachLLMListeners(): void {
     if (!this._openai_cxn) {
       logger.error(
-        "_attachLLMListeners called before the websocket is initialized. Be sure to call initializeLLM() first.",
+        "_attachLLMListeners called before the websocket is initialized. Be sure to call initializeLLM() first."
       );
       return;
     }
@@ -473,12 +473,12 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
           this.state = "error";
           if (this._botIsReadyResolve) {
             this._botIsReadyResolve.reject(
-              "Connection to OpenAI failed. Check your API key.",
+              "Connection to OpenAI failed. Check your API key."
             );
             this._botIsReadyResolve = null;
           } else {
             this._callbacks.onError?.(
-              RTVIMessage.error(`Connection to OpenAI ${state}`, true),
+              RTVIMessage.error(`Connection to OpenAI ${state}`, true)
             );
           }
           // this._cleanup();
@@ -546,7 +546,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     }
     logger.debug("updating session", session_config);
     this._openai_channel!.send(
-      JSON.stringify({ type: "session.update", session: session_config }),
+      JSON.stringify({ type: "session.update", session: session_config })
     );
     if (service_options?.initial_messages) {
       this._sendTextInput(service_options.initial_messages, true);
@@ -632,37 +632,33 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     }
     this._callbacks.onTrackStarted?.(
       ev.track,
-      ev.participant
-        ? dailyParticipantToParticipant(ev.participant)
-        : undefined,
+      ev.participant ? dailyParticipantToParticipant(ev.participant) : undefined
     );
   }
 
   private async _handleTrackStopped(ev: DailyEventObjectTrack) {
     this._callbacks.onTrackStopped?.(
       ev.track,
-      ev.participant
-        ? dailyParticipantToParticipant(ev.participant)
-        : undefined,
+      ev.participant ? dailyParticipantToParticipant(ev.participant) : undefined
     );
   }
 
   private _handleAvailableDevicesUpdated(
-    ev: DailyEventObjectAvailableDevicesUpdated,
+    ev: DailyEventObjectAvailableDevicesUpdated
   ) {
     this._callbacks.onAvailableCamsUpdated?.(
-      ev.availableDevices.filter((d) => d.kind === "videoinput"),
+      ev.availableDevices.filter((d) => d.kind === "videoinput")
     );
     this._callbacks.onAvailableMicsUpdated?.(
-      ev.availableDevices.filter((d) => d.kind === "audioinput"),
+      ev.availableDevices.filter((d) => d.kind === "audioinput")
     );
     this._callbacks.onAvailableSpeakersUpdated?.(
-      ev.availableDevices.filter((d) => d.kind === "audiooutput"),
+      ev.availableDevices.filter((d) => d.kind === "audiooutput")
     );
   }
 
   private _handleSelectedDevicesUpdated(
-    ev: DailyEventObjectSelectedDevicesUpdated,
+    ev: DailyEventObjectSelectedDevicesUpdated
   ) {
     if (this._selectedCam?.deviceId !== ev.devices.camera) {
       this._selectedCam = ev.devices.camera;
@@ -684,7 +680,7 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
 
   private _sendTextInput(
     messages: LLMContextMessage[],
-    runImmediately: boolean = false,
+    runImmediately: boolean = false
   ) {
     if (!this._channelReady()) return;
     messages.forEach((m) => {

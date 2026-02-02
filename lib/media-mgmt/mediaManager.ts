@@ -42,7 +42,7 @@ export abstract class MediaManager {
   abstract userStartedSpeaking(): Promise<unknown>;
   abstract bufferBotAudio(
     data: ArrayBuffer | Int16Array,
-    id?: string,
+    id?: string
   ): Int16Array | undefined;
 
   abstract getAllMics(): Promise<MediaDeviceInfo[]>;
@@ -81,7 +81,7 @@ export class WavMediaManager extends MediaManager {
 
   constructor(
     recorderChunkSize: number | undefined = undefined,
-    recorderSampleRate: number | undefined = 24000,
+    recorderSampleRate: number | undefined = 24000
   ) {
     super();
     this._recorderChunkSize = recorderChunkSize;
@@ -98,7 +98,7 @@ export class WavMediaManager extends MediaManager {
     }
     this._wavRecorder.listenForDeviceChange(null);
     this._wavRecorder.listenForDeviceChange(
-      this._handleAvailableDevicesUpdated.bind(this),
+      this._handleAvailableDevicesUpdated.bind(this)
     );
     this._wavRecorder.listenForDeviceErrors(null);
     this._wavRecorder.listenForDeviceErrors(this._handleDeviceError.bind(this));
@@ -242,10 +242,10 @@ export class WavMediaManager extends MediaManager {
 
   private _handleAvailableDevicesUpdated(devices: MediaDeviceInfo[]) {
     this._callbacks.onAvailableCamsUpdated?.(
-      devices.filter((d) => d.kind === "videoinput"),
+      devices.filter((d) => d.kind === "videoinput")
     );
     this._callbacks.onAvailableMicsUpdated?.(
-      devices.filter((d) => d.kind === "audioinput"),
+      devices.filter((d) => d.kind === "audioinput")
     );
     // if the current device went away or we're using the default and
     // the default changed, reset the mic.
@@ -274,7 +274,7 @@ export class WavMediaManager extends MediaManager {
       devices,
       type,
       error?.message,
-      error ? { sourceError: error } : undefined,
+      error ? { sourceError: error } : undefined
     );
     this._callbacks.onDeviceError?.(deviceError);
   }

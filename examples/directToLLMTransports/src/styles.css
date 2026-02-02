@@ -1,7 +1,10 @@
 body {
   max-width: 800px;
   margin: 20px 20px;
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
 }
 
 #join-div a {
