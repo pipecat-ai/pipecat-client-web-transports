@@ -20,6 +20,6 @@
   },
   "peerDependencies": {
     "@daily-co/daily-js": "^0.86.0",
-    "@pipecat-ai/client-js": "^1.5.0"
+    "@pipecat-ai/client-js": "^1.6.0"
   }
 }
