@@ -5,6 +5,10 @@ All notable changes to **Pipecat GeminiLiveWebsocketTransport** will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0]
+
+- Bump client-js version to work with latest 1.6.0 and support latest features
+
 ## [1.4.0]
 
 - Bump client-js version to work with latest 1.5.0 and support latest features
@@ -35,4 +39,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Updating naming/dependencies from RTVIClient -> PipecatClient
     - Modified connect() to follow the new pattern of providing connection details at the time of connection vs. constructor
     - Added validation for connection parameters
- 

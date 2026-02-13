@@ -5,13 +5,17 @@ All notable changes to **Pipecat Small WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.9.0]
+
+### Added
+
+- Bump client-js version to work with latest 1.6.0 and support latest features
 
 ### Fixed
 
 - Fix issues surrounding requestData in the offer endpoint
-    1. If the endpoint was a Request type, any requestData provided would be lost
-    2. Now that runners cache the requestData provided to /start, we do not need to re-send it in the offer (which conveniently ALSO solves issues if the endpoint provided to start was a Request type :))
+  1. If the endpoint was a Request type, any requestData provided would be lost
+  2. Now that runners cache the requestData provided to /start, we do not need to re-send it in the offer (which conveniently ALSO solves issues if the endpoint provided to start was a Request type :))
 
 ## [1.8.1]
 
@@ -27,20 +31,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `offerUrlTemplate` inside the `SmallWebRTCTransportConstructorOptions`, allowing to define a template which will be used
   during the transformation between startBot and connect, to create the offer url pointing to a custom endpoint other than `/api/offer`.
-  ``` javascript
+  ```javascript
     transport: new SmallWebRTCTransport({
       offerUrlTemplate: `${this.baseUrl}/sessions/:sessionId/api/offer`
     }),
   ```
-  
+
 ## [1.7.2]
 
 ### Changed
+
 - Modified `startBotAndConnect` method to handle request data differently for internal endpoint calls:
   - When calling the `start` endpoint: sends the complete `requestData` object (including all properties like `createDailyRoom`, `enableDefaultIceServers`, etc.)
   - When calling the `connect` endpoint: only sends the data contained within the `body` property of `requestData`
-  
+
   **Example:** If `startBotAndConnect` is called with:
+
   ```
     requestData: {
       createDailyRoom: false,
@@ -48,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       body: { character_id: characterId }
     }
   ```
+
   The `start` endpoint receives the full object, while the `connect` endpoint only receives `{ character_id: characterId }`.
 
 ## [1.7.1]
@@ -117,8 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `waitForICEGathering` property: this allows users to configure whether the transport should 
-    explicitly wait for the iceGatheringState to become complete during the negotiation phase.
+- Added `waitForICEGathering` property: this allows users to configure whether the transport should
+  explicitly wait for the iceGatheringState to become complete during the negotiation phase.
 
 ### Fixed
 
