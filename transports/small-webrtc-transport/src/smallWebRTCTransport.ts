@@ -1,20 +1,21 @@
-import cloneDeep from "lodash/cloneDeep";
 import {
+  APIRequest,
+  DeviceState,
+  isAPIRequest,
   logger,
   makeRequest,
+  PipecatClientOptions,
   RTVIError,
   RTVIMessage,
-  PipecatClientOptions,
   Tracks,
   Transport,
   TransportStartError,
   TransportState,
   UnsupportedFeatureError,
-  APIRequest,
-  isAPIRequest,
 } from "@pipecat-ai/client-js";
-import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
+import cloneDeep from "lodash/cloneDeep";
 import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
+import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
 
 class TrackStatusMessage {
   type = "trackStatus";
@@ -176,13 +177,14 @@ export class SmallWebRTCTransport extends Transport {
     this.mediaManager.setClientOptions(options);
 
     this.state = "disconnected";
+    this.deviceState = "not_ready";
     logger.debug("[RTVI Transport] Initialized");
   }
 
   async initDevices() {
-    this.state = "initializing";
+    this.deviceState = "initializing";
     await this.mediaManager.initialize();
-    this.state = "initialized";
+    this.deviceState = "ready";
   }
 
   setAudioCodec(audioCodec: string | null): void {
@@ -1052,6 +1054,15 @@ export class SmallWebRTCTransport extends Transport {
 
     this._state = state;
     this._callbacks.onTransportStateChanged?.(state);
+  }
+
+  get deviceState(): DeviceState {
+    return this._deviceState;
+  }
+
+  set deviceState(deviceState: DeviceState) {
+    this._deviceState = deviceState;
+    this._callbacks.onDeviceStateChanged?.(deviceState);
   }
 
   tracks(): Tracks {
