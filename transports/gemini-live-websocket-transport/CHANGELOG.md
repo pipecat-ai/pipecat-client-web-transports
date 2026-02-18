@@ -5,6 +5,13 @@ All notable changes to **Pipecat GeminiLiveWebsocketTransport** will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- Fixed a connection bug in `GeminiLiveWebSocketTransport` caused by an outdated API path. 
+  - The `BidiGenerateContent` path was pointing to `v1alpha`, which is no longer valid. Updated to `v1beta`.
+- Updated default model from `gemini-2.0-flash-exp` to `gemini-2.5-flash-native-audio-preview-12-2025` in both the transport and the example app.
+- Added `response_modalities: "AUDIO"` to the example app's Gemini service options, required for the new model to respond with audio.
+
 ## [1.5.0]
 
 - Bump client-js version to work with latest 1.6.0 and support latest features
