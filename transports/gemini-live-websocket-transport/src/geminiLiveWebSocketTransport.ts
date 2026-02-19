@@ -17,8 +17,8 @@ import {
 } from "./directToLLMBaseWebSocketTransport";
 
 const HOST = `generativelanguage.googleapis.com`;
-const BIDI_PATH = `google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent`;
-const MODEL = "models/gemini-2.0-flash-exp";
+const BIDI_PATH = `google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent`;
+const MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025";
 
 export interface GeminiLLMServiceOptions extends LLMServiceOptions {
   initial_messages?: Array<{ content: string; role: string }>;

@@ -105,7 +105,7 @@ function geminiServiceOptions() {
   // Configure Gemini LLM service options
   const llm_service_options: GeminiLLMServiceOptions = {
     api_key: import.meta.env.VITE_DANGEROUS_GEMINI_API_KEY,
-    model: "models/gemini-2.0-flash-exp",
+    model: "models/gemini-2.5-flash-native-audio-preview-12-2025",
     initial_messages: [
       // Set up initial system and user messages.
       // Without the user message, the bot will not respond immediately
@@ -117,6 +117,7 @@ function geminiServiceOptions() {
       { role: "user", content: "Hello!" },
     ],
     settings: {
+      response_modalities: "AUDIO",
       speech_config: {
         voice_config: {
           prebuilt_voice_config: {
