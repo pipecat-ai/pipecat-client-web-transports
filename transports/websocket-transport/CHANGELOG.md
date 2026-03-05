@@ -5,6 +5,13 @@ All notable changes to **Pipecat Websocket Transport** will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.6.0...websocket-transport-v1.6.1) (2026-03-05)
+
+
+### Bug Fixes
+
+* add exports map for proper ESM/CJS resolution ([bd53457](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/bd53457d82df32117d2bba09261e1763593c6a42))
+
 ## [1.6.0]
 
 - Bump client-js version to work with latest 1.6.0 and support latest features
