@@ -1,0 +1,63 @@
+name: Publish RC
+
+on:
+  workflow_dispatch:
+    inputs:
+      transport:
+        description: 'Which transport to publish'
+        required: true
+        type: choice
+        options:
+          - daily
+          - gemini-live-websocket-transport
+          - openai-realtime-webrtc-transport
+          - small-webrtc-transport
+          - websocket-transport
+      preid:
+        description: 'Prerelease identifier'
+        required: true
+        default: 'rc'
+        type: string
+
+jobs:
+  publish-rc:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Configure Git
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'github-actions@github.com'
+
+      - name: Bump prerelease version
+        working-directory: transports/${{ github.event.inputs.transport }}
+        run: npm version prerelease --preid=${{ github.event.inputs.preid }}
+
+      - name: Build
+        run: npm run build --workspaces
+
+      - name: Publish to NPM (dev tag)
+        working-directory: transports/${{ github.event.inputs.transport }}
+        run: npm publish --tag dev --provenance
+
+      - name: Push version bump
+        run: |
+          git push
+          git push --tags

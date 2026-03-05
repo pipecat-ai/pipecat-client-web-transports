@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "include-component-in-tag": true,
+  "separate-pull-requests": true,
+  "packages": {
+    "transports/daily": {
+      "component": "daily-transport",
+      "package-name": "@pipecat-ai/daily-transport",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "transports/gemini-live-websocket-transport": {
+      "component": "gemini-live-websocket-transport",
+      "package-name": "@pipecat-ai/gemini-live-websocket-transport",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "transports/openai-realtime-webrtc-transport": {
+      "component": "openai-realtime-webrtc-transport",
+      "package-name": "@pipecat-ai/openai-realtime-webrtc-transport",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "transports/small-webrtc-transport": {
+      "component": "small-webrtc-transport",
+      "package-name": "@pipecat-ai/small-webrtc-transport",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "transports/websocket-transport": {
+      "component": "websocket-transport",
+      "package-name": "@pipecat-ai/websocket-transport",
+      "changelog-path": "CHANGELOG.md"
+    }
+  },
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance Improvements" },
+    { "type": "revert", "section": "Reverts" },
+    { "type": "docs", "section": "Documentation", "hidden": true },
+    { "type": "style", "section": "Styles", "hidden": true },
+    { "type": "chore", "section": "Miscellaneous Chores", "hidden": true },
+    { "type": "refactor", "section": "Code Refactoring", "hidden": true },
+    { "type": "test", "section": "Tests", "hidden": true },
+    { "type": "build", "section": "Build System", "hidden": true },
+    { "type": "ci", "section": "Continuous Integration", "hidden": true }
+  ]
+}
