@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated default model from `gemini-2.0-flash-exp` to `gemini-2.5-flash-native-audio-preview-12-2025` in both the transport and the example app.
 - Added `response_modalities: "AUDIO"` to the example app's Gemini service options, required for the new model to respond with audio.
 
+## [1.5.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/gemini-live-websocket-transport-v1.5.0...gemini-live-websocket-transport-v1.5.1) (2026-03-05)
+
+
+### Bug Fixes
+
+* add exports map for proper ESM/CJS resolution ([bd53457](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/bd53457d82df32117d2bba09261e1763593c6a42))
+
 ## [1.5.0]
 
 - Bump client-js version to work with latest 1.6.0 and support latest features
