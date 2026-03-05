@@ -16,10 +16,12 @@ import Daily, {
   DailyEventObjectTrack,
   DailyFactoryOptions,
   DailyParticipant,
+  DailyRoomInfo,
 } from "@daily-co/daily-js";
 import {
   DeviceArray,
   DeviceError,
+  MessageTooLargeError,
   Participant,
   PipecatClientOptions,
   RTVIError,
@@ -482,6 +484,10 @@ export class DailyTransport extends Transport {
 
     if (this._abortController?.signal.aborted) return;
 
+    const r = await this._daily.room();
+    this._maxMessageSize =
+      (r as DailyRoomInfo)?.domainConfig?.max_app_message_size ||
+      10 * 1024 * 1024;
     this.state = "connected";
 
     this._callbacks.onConnected?.();
@@ -597,7 +603,17 @@ export class DailyTransport extends Transport {
   }
 
   public sendMessage(message: RTVIMessage) {
-    this._daily.sendAppMessage(message, "*");
+    try {
+      this._daily.sendAppMessage(message, "*");
+    } catch (error: unknown) {
+      if (
+        error instanceof Error &&
+        error.message.includes("Message data too large")
+      ) {
+        throw new MessageTooLargeError(error.message);
+      }
+      throw error;
+    }
   }
 
   private handleAppMessage(ev: DailyEventObjectAppMessage) {
