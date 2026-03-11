@@ -434,7 +434,7 @@ export class SmallWebRTCTransport extends Transport {
     // Note: This shouldn't happen since client-js should have already checked this
     if (!messageSizeWithinLimit(message, this._maxMessageSize)) {
       throw new MessageTooLargeError(
-        "Message data too large. Max size is " + this._maxMessageSize,
+        "Message data too large. Max size is " + this._maxMessageSize
       );
     }
     this.dc?.send(JSON.stringify(message));
@@ -889,7 +889,7 @@ export class SmallWebRTCTransport extends Transport {
         void this.attemptReconnection(false);
         break;
       case PEER_LEFT_TYPE:
-        void this.disconnect();
+        this._callbacks.onBotDisconnected?.();
         break;
       default:
         logger.warn("Unknown signalling message:", signallingMessage.message);
