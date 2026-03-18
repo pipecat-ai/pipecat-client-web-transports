@@ -1,7 +1,6 @@
 {
   "name": "1116",
   "version": "1.0.0",
-  "main": "server/server.ts",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -14,21 +13,11 @@
   "dependencies": {
     "@pipecat-ai/client-js": "^1.6.0",
     "@pipecat-ai/gemini-live-websocket-transport": "file:../../transports/gemini-live-websocket-transport",
-    "@pipecat-ai/openai-realtime-webrtc-transport": "file:../../transports/openai-realtime-webrtc-transport",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.1",
-    "morgan": "^1.10.0"
+    "@pipecat-ai/openai-realtime-webrtc-transport": "file:../../transports/openai-realtime-webrtc-transport"
   },
   "devDependencies": {
-    "@types/express": "^5.0.0",
-    "@types/morgan": "^1.9.9",
-    "@types/node": "^22.9.0",
-    "concurrently": "^9.1.0",
     "eslint": "^9.39.1",
-    "nodemon": "^3.1.7",
-    "ts-node": "^10.9.2",
-    "ts-node-dev": "^2.0.0",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "vite": "^8.0.0"
   }
 }
