@@ -2,6 +2,9 @@
   "private": true,
   "name": "pipecat-client-web-transports",
   "version": "0.0.0",
+  "engines": {
+    "node": ">=22.14.0"
+  },
   "workspaces": [
     "transports/*"
   ],
@@ -23,7 +26,7 @@
     "typescript": "^5.5.4"
   },
   "peerDependencies": {
-    "@daily-co/daily-js": "^0.86.0",
+    "@daily-co/daily-js": "^0.89.1",
     "@pipecat-ai/client-js": "^1.6.0"
   }
 }
