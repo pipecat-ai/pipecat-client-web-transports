@@ -2,6 +2,9 @@
   "private": true,
   "name": "pipecat-client-web-transports",
   "version": "0.0.0",
+  "engines": {
+    "node": ">=22.14.0"
+  },
   "workspaces": [
     "transports/*"
   ],
@@ -12,18 +15,18 @@
   "devDependencies": {
     "@commitlint/cli": "^20.0.0",
     "@commitlint/config-conventional": "^20.0.0",
-    "@parcel/packager-ts": "^2.13.2",
-    "@parcel/transformer-typescript-tsc": "^2.13.2",
-    "@parcel/transformer-typescript-types": "^2.13.2",
-    "@parcel/validator-typescript": "^2.12.0",
+    "@parcel/packager-ts": "^2.16.0",
+    "@parcel/transformer-typescript-tsc": "^2.16.0",
+    "@parcel/transformer-typescript-types": "^2.16.0",
+    "@parcel/validator-typescript": "^2.16.0",
     "@swc/helpers": "^0.5.13",
     "husky": "^9.1.7",
-    "parcel": "^2.13.2",
+    "parcel": "^2.16.0",
     "prettier": "^3.5.3",
     "typescript": "^5.5.4"
   },
   "peerDependencies": {
-    "@daily-co/daily-js": "^0.86.0",
+    "@daily-co/daily-js": "^0.89.1",
     "@pipecat-ai/client-js": "^1.6.0"
   }
 }

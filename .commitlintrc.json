@@ -1,8 +1,15 @@
 {
   "extends": ["@commitlint/config-conventional"],
   "rules": {
-    "scope-enum": [2, "always", ["daily", "gemini", "openai", "small-webrtc", "websocket", ""]],
+    "scope-enum": [
+      2,
+      "always",
+      ["daily", "gemini", "openai", "small-webrtc", "websocket", ""]
+    ],
     "body-max-line-length": [0],
-    "footer-max-line-length": [0]
+    "footer-max-line-length": [0],
+    "header-case": [0],
+    "body-case": [0],
+    "subject-case": [0]
   }
 }
