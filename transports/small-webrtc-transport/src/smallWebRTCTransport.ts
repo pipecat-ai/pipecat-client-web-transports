@@ -8,6 +8,7 @@ import {
   MessageTooLargeError,
   RTVIError,
   RTVIMessage,
+  Participant,
   PipecatClientOptions,
   Tracks,
   Transport,
@@ -391,6 +392,7 @@ export class SmallWebRTCTransport extends Transport {
 
     this.state = "connected";
     this._callbacks.onConnected?.();
+    this._callbacks.onBotConnected?.(botParticipant(this.pc_id));
   }
 
   private syncTrackStatus() {
@@ -889,7 +891,7 @@ export class SmallWebRTCTransport extends Transport {
         void this.attemptReconnection(false);
         break;
       case PEER_LEFT_TYPE:
-        this._callbacks.onBotDisconnected?.();
+        this._callbacks.onBotDisconnected?.(botParticipant(this.pc_id));
         break;
       default:
         logger.warn("Unknown signalling message:", signallingMessage.message);
@@ -1131,3 +1133,9 @@ export class SmallWebRTCTransport extends Transport {
     return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 }
+
+const botParticipant = (pc_id?: string | null): Participant => ({
+  id: pc_id || "bot",
+  local: false,
+  name: "bot",
+});
