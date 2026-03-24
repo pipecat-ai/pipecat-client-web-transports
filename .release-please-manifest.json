@@ -3,5 +3,5 @@
   "transports/gemini-live-websocket-transport": "1.5.1",
   "transports/openai-realtime-webrtc-transport": "1.5.1",
   "transports/small-webrtc-transport": "1.9.0",
-  "transports/websocket-transport": "1.6.1"
+  "transports/websocket-transport": "1.6.2"
 }

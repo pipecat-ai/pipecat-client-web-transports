@@ -5,6 +5,14 @@ All notable changes to **Pipecat Websocket Transport** will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.6.1...websocket-transport-v1.6.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* **small-webrtc,websocket:** Fix bot disconnection logic to match Daily ([c6accf2](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c6accf2a9ad62b3fc1fb8594269354f95a9dc0af))
+* **small-webrtc,websocket:** Fix bot disconnection logic to match Daily ([4a231dc](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/4a231dc825ae60eeeb501088bdaea136e2ad22d7))
+
 ## [1.6.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.6.0...websocket-transport-v1.6.1) (2026-03-11)
 
 
