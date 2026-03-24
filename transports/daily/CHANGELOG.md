@@ -5,6 +5,14 @@ All notable changes to **Pipecat Daily WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/daily-transport-v1.6.0...daily-transport-v1.6.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* Add 500ms delay to client-ready message for iOS devices ([04c492d](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/04c492dc47d97d52e705209539691440e5b530e2))
+* add exports map for proper ESM/CJS resolution ([bd53457](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/bd53457d82df32117d2bba09261e1763593c6a42))
+
 ## [Unreleased]
 
 - Added error handling around `daily.sendAppMessage`
