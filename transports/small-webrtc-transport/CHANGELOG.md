@@ -5,6 +5,23 @@ All notable changes to **Pipecat Small WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.9.0...small-webrtc-transport-v1.10.0) (2026-03-24)
+
+
+### Features
+
+* fix request body ([c4d6884](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c4d688422fabc224f60bbc504538f7c7d7faa3e7))
+* implement screen share ([2a5b997](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/2a5b9970fce6bedfde6c694bbcfd88a623ac71f2))
+* **smallWebRTCTransport:** add iceServers option to constructor for enhanced server configuration ([94aece6](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/94aece6454ca81d16f627af36a02e71eb1d29f07))
+* **smallWebRTCTransport:** add waitForICEGathering option to constructor for improved ICE gathering control ([e2413a8](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/e2413a8deba906bf13d95d3dbcb1e36e736de6a4))
+
+
+### Bug Fixes
+
+* add exports map for proper ESM/CJS resolution ([bd53457](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/bd53457d82df32117d2bba09261e1763593c6a42))
+* **small-webrtc,websocket:** Fix bot disconnection logic to match Daily ([c6accf2](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c6accf2a9ad62b3fc1fb8594269354f95a9dc0af))
+* **small-webrtc,websocket:** Fix bot disconnection logic to match Daily ([4a231dc](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/4a231dc825ae60eeeb501088bdaea136e2ad22d7))
+
 ## [Unreleased]
 
 - Added message size checking to `sendMessage()` to ensure no large
