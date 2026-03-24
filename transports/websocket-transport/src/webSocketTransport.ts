@@ -309,9 +309,7 @@ export class WebSocketTransport extends Transport {
   }
 
   connectionError(errorMsg: string): void {
-    console.error(errorMsg);
-    this.state = "error";
-    void this.disconnect();
+    this._callbacks.onError?.(RTVIMessage.error(errorMsg, true));
   }
 
   // Not implemented

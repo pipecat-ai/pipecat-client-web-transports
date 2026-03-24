@@ -8,6 +8,7 @@ import {
   MessageTooLargeError,
   RTVIError,
   RTVIMessage,
+  Participant,
   PipecatClientOptions,
   Tracks,
   Transport,
@@ -391,6 +392,7 @@ export class SmallWebRTCTransport extends Transport {
 
     this.state = "connected";
     this._callbacks.onConnected?.();
+    this._callbacks.onBotConnected?.(botParticipant(this.pc_id));
   }
 
   private syncTrackStatus() {
@@ -434,7 +436,7 @@ export class SmallWebRTCTransport extends Transport {
     // Note: This shouldn't happen since client-js should have already checked this
     if (!messageSizeWithinLimit(message, this._maxMessageSize)) {
       throw new MessageTooLargeError(
-        "Message data too large. Max size is " + this._maxMessageSize,
+        "Message data too large. Max size is " + this._maxMessageSize
       );
     }
     this.dc?.send(JSON.stringify(message));
@@ -889,7 +891,7 @@ export class SmallWebRTCTransport extends Transport {
         void this.attemptReconnection(false);
         break;
       case PEER_LEFT_TYPE:
-        void this.disconnect();
+        this._callbacks.onBotDisconnected?.(botParticipant(this.pc_id));
         break;
       default:
         logger.warn("Unknown signalling message:", signallingMessage.message);
@@ -1131,3 +1133,9 @@ export class SmallWebRTCTransport extends Transport {
     return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 }
+
+const botParticipant = (pc_id?: string | null): Participant => ({
+  id: pc_id || "bot",
+  local: false,
+  name: "bot",
+});
