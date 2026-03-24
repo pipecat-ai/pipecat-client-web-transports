@@ -5,16 +5,25 @@ All notable changes to **Pipecat Websocket Transport** will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.6.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.6.0...websocket-transport-v1.6.1) (2026-03-11)
+## [1.6.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.6.1...websocket-transport-v1.6.2) (2026-03-24)
 
+### Changed
+
+- Bump daily-js version dependency to 0.89.1
+- Bump client-js version to work with latest 1.7.0 and support latest features
 
 ### Bug Fixes
 
-* add exports map for proper ESM/CJS resolution ([bd53457](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/bd53457d82df32117d2bba09261e1763593c6a42))
+- Fix bot disconnection logic to match Daily ([c6accf2](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c6accf2a9ad62b3fc1fb8594269354f95a9dc0af))
 
-## [Unreleased]
 
+## [1.6.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.6.0...websocket-transport-v1.6.1) (2026-03-11)
+
+### Bug Fixes
+
+- add exports map for proper ESM/CJS resolution ([bd53457](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/bd53457d82df32117d2bba09261e1763593c6a42))
 - Set `_maxMessageSize` to the server's supported max size (1 MB)
+
 
 ## [1.6.0]
 
