@@ -5,8 +5,22 @@ All notable changes to **Pipecat Small WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.10.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.9.0...small-webrtc-transport-v1.10.0) (2026-03-24)
 
+
+### Features
+
+- Now treating the `pc_id` as the bot's Participant id for use in RTVI APIs like `onBotConnected` and `onBotDisconnected`
+
+### Changed
+
+- Bump daily-js version dependency to 0.89.1
+- Bump client-js version to work with latest 1.7.0 and support latest features
+
+### Bug Fixes
+
+- Fixed missing callbacks for `onBotConnected` and `onBotDisconnected` ([c6accf2](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c6accf2a9ad62b3fc1fb8594269354f95a9dc0af))
+- add exports map for proper ESM/CJS resolution ([bd53457](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/bd53457d82df32117d2bba09261e1763593c6a42))
 - Added message size checking to `sendMessage()` to ensure no large
   messages are sent, causing the data channel to fail and not recover.
 - Set `_maxMessageSize` to the peer connections's max size (defaults to 64KB)
