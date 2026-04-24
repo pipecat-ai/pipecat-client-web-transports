@@ -20,24 +20,12 @@ export interface FakeDailyCallObject {
 }
 
 export function createFakeDailyCallObject(): FakeDailyCallObject {
-  const fake = {
+  const fake: FakeDailyCallObject = {
     startCameraCallCount: 0,
-    startCameraShouldThrow: undefined as Error | undefined,
+    startCameraShouldThrow: undefined,
     on: vi.fn(),
     off: vi.fn(),
-    startCamera: vi.fn(async function (this: FakeDailyCallObject) {
-      this.startCameraCallCount += 1;
-      if (this.startCameraShouldThrow) throw this.startCameraShouldThrow;
-      return {
-        camera: { deviceId: "cam-1", label: "Fake Cam", kind: "videoinput" },
-        mic: { deviceId: "mic-1", label: "Fake Mic", kind: "audioinput" },
-        speaker: {
-          deviceId: "spk-1",
-          label: "Fake Speaker",
-          kind: "audiooutput",
-        },
-      };
-    }),
+    startCamera: vi.fn(),
     enumerateDevices: vi.fn(async () => ({ devices: [] })),
     isLocalAudioLevelObserverRunning: vi.fn(() => false),
     isRemoteParticipantsAudioLevelObserverRunning: vi.fn(() => false),
@@ -45,8 +33,22 @@ export function createFakeDailyCallObject(): FakeDailyCallObject {
     startRemoteParticipantsAudioLevelObserver: vi.fn(async () => {}),
   };
 
-  // bind startCamera so `this` resolves correctly in the async function above
-  fake.startCamera = fake.startCamera.bind(fake) as Mock;
+  // Close over `fake` rather than binding `this` — vitest loses its Mock
+  // identity through Function.prototype.bind, which breaks
+  // toHaveBeenCalledTimes etc.
+  fake.startCamera.mockImplementation(async () => {
+    fake.startCameraCallCount += 1;
+    if (fake.startCameraShouldThrow) throw fake.startCameraShouldThrow;
+    return {
+      camera: { deviceId: "cam-1", label: "Fake Cam", kind: "videoinput" },
+      mic: { deviceId: "mic-1", label: "Fake Mic", kind: "audioinput" },
+      speaker: {
+        deviceId: "spk-1",
+        label: "Fake Speaker",
+        kind: "audiooutput",
+      },
+    };
+  });
 
-  return fake as FakeDailyCallObject;
+  return fake;
 }

@@ -103,14 +103,17 @@ export function buildSpyCallbacks(): {
  */
 export function buildClientOptions(
   transport: Transport,
-  callbacks: RTVIEventCallbacks
+  callbacks: RTVIEventCallbacks,
+  overrides: Partial<
+    Pick<PipecatClientOptions, "enableMic" | "enableCam" | "enableScreenShare">
+  > = {}
 ): PipecatClientOptions {
   return {
     transport,
     callbacks,
-    enableMic: true,
-    enableCam: false,
-    enableScreenShare: false,
+    enableMic: overrides.enableMic ?? true,
+    enableCam: overrides.enableCam ?? false,
+    enableScreenShare: overrides.enableScreenShare ?? false,
   };
 }
 
@@ -121,9 +124,15 @@ export function buildClientOptions(
  */
 export function wireTransport(
   transport: Transport,
-  callbacks: RTVIEventCallbacks
+  callbacks: RTVIEventCallbacks,
+  overrides: Partial<
+    Pick<PipecatClientOptions, "enableMic" | "enableCam" | "enableScreenShare">
+  > = {}
 ): { onMessage: Mock<(ev: RTVIMessage) => void> } {
   const onMessage = vi.fn<(ev: RTVIMessage) => void>();
-  transport.initialize(buildClientOptions(transport, callbacks), onMessage);
+  transport.initialize(
+    buildClientOptions(transport, callbacks, overrides),
+    onMessage
+  );
   return { onMessage };
 }

@@ -115,6 +115,31 @@ describe("OpenAIRealTimeWebRTCTransport.initDevices() — characterization", () 
     expect(fakeDaily.startLocalAudioLevelObserver).toHaveBeenCalledTimes(1);
   });
 
+  test.each([
+    [{ enableMic: true, enableCam: false }, { startAudioOff: false }],
+    [{ enableMic: false, enableCam: false }, { startAudioOff: true }],
+    [{ enableMic: true, enableCam: true }, { startAudioOff: false }],
+    [{ enableMic: false, enableCam: true }, { startAudioOff: true }],
+  ])(
+    "initDevices() with %j passes %j to startCamera (startVideoOff is hardcoded true regardless of enableCam)",
+    async (opts, expectedCallArg) => {
+      // OpenAI's transport hardcodes startVideoOff: true in initDevices, so
+      // enableCam: true does NOT actually turn the camera on at init time.
+      // enableMic flows through normally as startAudioOff: !enableMic.
+      // Lock this in — the Plan B work around per-transport device management
+      // (B3) will need to decide whether to keep this quirk.
+      const { callbacks } = buildSpyCallbacks();
+      wireTransport(transport, callbacks, opts);
+
+      await transport.initDevices();
+
+      expect(fakeDaily.startCamera).toHaveBeenCalledTimes(1);
+      expect(fakeDaily.startCamera).toHaveBeenCalledWith(
+        expect.objectContaining({ ...expectedCallArg, startVideoOff: true })
+      );
+    }
+  );
+
   test("initDevices() rejection propagates and leaves state at 'initializing'", async () => {
     fakeDaily.startCameraShouldThrow = new Error("permission denied");
     const { callbacks, recorder } = buildSpyCallbacks();

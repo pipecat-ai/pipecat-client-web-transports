@@ -116,6 +116,38 @@ describe("DailyTransport.initDevices() — characterization", () => {
     ).toHaveBeenCalledTimes(1);
   });
 
+  test.each([
+    [
+      { enableMic: true, enableCam: false },
+      { startAudioOff: false, startVideoOff: true },
+    ],
+    [
+      { enableMic: false, enableCam: false },
+      { startAudioOff: true, startVideoOff: true },
+    ],
+    [
+      { enableMic: true, enableCam: true },
+      { startAudioOff: false, startVideoOff: false },
+    ],
+    [
+      { enableMic: false, enableCam: true },
+      { startAudioOff: true, startVideoOff: false },
+    ],
+  ])(
+    "initialize(%j) propagates enableMic/enableCam to startCamera as %j",
+    async (opts, expectedCallArg) => {
+      const { callbacks } = buildSpyCallbacks();
+      wireTransport(transport, callbacks, opts);
+
+      await transport.initDevices();
+
+      expect(fakeDaily.startCamera).toHaveBeenCalledTimes(1);
+      expect(fakeDaily.startCamera).toHaveBeenCalledWith(
+        expect.objectContaining(expectedCallArg)
+      );
+    }
+  );
+
   test("initDevices() rejection propagates and leaves state at 'initializing'", async () => {
     fakeDaily.startCameraShouldThrow = new Error("permission denied");
     const { callbacks, recorder } = buildSpyCallbacks();

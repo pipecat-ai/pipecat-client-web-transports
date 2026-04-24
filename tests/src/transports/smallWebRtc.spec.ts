@@ -73,6 +73,24 @@ describe("SmallWebRTCTransport.initDevices() — characterization", () => {
     ]);
   });
 
+  test.each([
+    [{ enableMic: true, enableCam: false }],
+    [{ enableMic: false, enableCam: false }],
+    [{ enableMic: true, enableCam: true }],
+    [{ enableMic: false, enableCam: true }],
+  ])(
+    "initialize(%j) forwards enableMic/enableCam through to mediaManager.setClientOptions",
+    (opts) => {
+      const { callbacks } = buildSpyCallbacks();
+      wireTransport(transport, callbacks, opts);
+
+      expect(mediaManager.setClientOptions).toHaveBeenCalledTimes(1);
+      expect(mediaManager.setClientOptions).toHaveBeenCalledWith(
+        expect.objectContaining(opts)
+      );
+    }
+  );
+
   test("initDevices() rejection propagates and leaves state at 'initializing'", async () => {
     mediaManager.initializeShouldThrow = new Error("getUserMedia failed");
     const { callbacks, recorder } = buildSpyCallbacks();
