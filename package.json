@@ -6,11 +6,13 @@
     "node": ">=22.14.0"
   },
   "workspaces": [
-    "transports/*"
+    "transports/*",
+    "tests"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
-    "prepare": "husky"
+    "build": "npm run build --workspaces --if-present",
+    "prepare": "husky",
+    "test": "npm run test --workspace @pipecat-ai-transports/characterization-tests"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.0.0",

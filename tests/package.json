@@ -1,0 +1,22 @@
+{
+  "name": "@pipecat-ai-transports/characterization-tests",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Characterization tests for Pipecat transports. Not published; runs via the root workspace.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@pipecat-ai/client-js": "^1.7.0",
+    "@pipecat-ai/daily-transport": "*",
+    "@pipecat-ai/gemini-live-websocket-transport": "*",
+    "@pipecat-ai/openai-realtime-webrtc-transport": "*",
+    "@pipecat-ai/small-webrtc-transport": "*",
+    "@pipecat-ai/websocket-transport": "*",
+    "happy-dom": "^15.11.7",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.8"
+  }
+}
