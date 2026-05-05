@@ -324,7 +324,15 @@ export class DailyTransport extends Transport {
   }
 
   enableMic(enable: boolean) {
-    this._daily.setLocalAudio(enable);
+    // Persist the caller's preference so a subsequent connect() picks it
+    // up via initDevices()'s startCamera({ startAudioOff }) call. Without
+    // this, pre-session toggles were silently lost. Apply live only when
+    // joined — pre-session, daily-js can't act on the request because the
+    // call object isn't part of a meeting yet.
+    this._dailyFactoryOptions.startAudioOff = !enable;
+    if (this._daily.participants()?.local) {
+      this._daily.setLocalAudio(enable);
+    }
   }
 
   get isMicEnabled() {
@@ -332,7 +340,10 @@ export class DailyTransport extends Transport {
   }
 
   enableCam(enable: boolean) {
-    this._daily.setLocalVideo(enable);
+    this._dailyFactoryOptions.startVideoOff = !enable;
+    if (this._daily.participants()?.local) {
+      this._daily.setLocalVideo(enable);
+    }
   }
 
   get isCamEnabled() {

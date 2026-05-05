@@ -15,11 +15,27 @@ export interface FakeDailyCallObject {
   isRemoteParticipantsAudioLevelObserverRunning: Mock;
   startLocalAudioLevelObserver: Mock;
   startRemoteParticipantsAudioLevelObserver: Mock;
+  participants: Mock;
+  setLocalAudio: Mock;
+  setLocalVideo: Mock;
+  localAudio: Mock;
+  localVideo: Mock;
+  setJoined: (joined: boolean) => void;
   startCameraCallCount: number;
   startCameraShouldThrow?: Error;
 }
 
 export function createFakeDailyCallObject(): FakeDailyCallObject {
+  // Tracks whether the call has been "joined" — used by participants() so
+  // tests can model the pre-session vs post-join boundary that
+  // enableMic/enableCam now guards on.
+  let joined = false;
+  // Tracks last-applied audio/video state, mirrored by setLocalAudio /
+  // setLocalVideo so localAudio() / localVideo() can return realistic
+  // values once the call is joined.
+  let audioOn = true;
+  let videoOn = false;
+
   const fake: FakeDailyCallObject = {
     startCameraCallCount: 0,
     startCameraShouldThrow: undefined,
@@ -31,6 +47,18 @@ export function createFakeDailyCallObject(): FakeDailyCallObject {
     isRemoteParticipantsAudioLevelObserverRunning: vi.fn(() => false),
     startLocalAudioLevelObserver: vi.fn(async () => {}),
     startRemoteParticipantsAudioLevelObserver: vi.fn(async () => {}),
+    participants: vi.fn(() => (joined ? { local: { id: "local-1" } } : {})),
+    setLocalAudio: vi.fn((enable: boolean) => {
+      audioOn = enable;
+    }),
+    setLocalVideo: vi.fn((enable: boolean) => {
+      videoOn = enable;
+    }),
+    localAudio: vi.fn(() => audioOn),
+    localVideo: vi.fn(() => videoOn),
+    setJoined: (next: boolean) => {
+      joined = next;
+    },
   };
 
   // Close over `fake` rather than binding `this` — vitest loses its Mock
