@@ -106,6 +106,21 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
   private _selectedMic: MediaDeviceInfo | Record<string, never> = {};
   private _selectedSpeaker: MediaDeviceInfo | Record<string, never> = {};
 
+  // Caller's most recent enableMic/enableCam preference. Initialized from
+  // PipecatClientOptions on the first initialize() call and updated by
+  // enableMic/enableCam calls. Used by initDevices()'s startCamera() so a
+  // pre-session toggle is honored when the call actually starts. Without
+  // this, late mutations were silently lost.
+  private _micEnabled: boolean = true;
+  private _camEnabled: boolean = false;
+
+  // Tracks whether initialize() has run at least once. _disconnect() calls
+  // initialize() again as a reset hook; on that re-run we must NOT re-derive
+  // _micEnabled / _camEnabled from the original options, or the user's most
+  // recent enable* preference would be silently overwritten on reconnect
+  // (caught by Copilot review on PR #114).
+  private _initializedOnce: boolean = false;
+
   declare private _botIsReadyResolve: {
     resolve: (value: void | PromiseLike<void>) => void;
     reject: (reason?: any) => void;
@@ -125,6 +140,15 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
     this._onMessage = messageHandler;
+
+    // Only seed enable-state from options on the very first initialize().
+    // Subsequent runs (triggered by _disconnect's reset hook) must preserve
+    // the user's most recent enable* preference.
+    if (!this._initializedOnce) {
+      this._micEnabled = options.enableMic ?? true;
+      this._camEnabled = options.enableCam === true;
+      this._initializedOnce = true;
+    }
 
     this._openai_cxn = new RTCPeerConnection();
 
@@ -154,8 +178,8 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
     this.state = "initializing";
 
     const infos = await this._daily.startCamera({
-      startVideoOff: true, // !(this._options.enableCam == true),
-      startAudioOff: !(this._options.enableMic ?? true),
+      startVideoOff: true, // !this._camEnabled — kept hardcoded; OpenAI is audio-only today
+      startAudioOff: !this._micEnabled,
       dailyConfig: { useDevicePreferenceCookies: true },
     });
     const { devices } = await this._daily.enumerateDevices();
@@ -303,18 +327,38 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
   }
 
   enableMic(enable: boolean): void {
-    if (!this._daily.participants()?.local) return;
-    this._daily.setLocalAudio(enable);
+    // Persist the caller's preference so a subsequent connect() picks it
+    // up via initDevices()'s startCamera({ startAudioOff }) call. Without
+    // this, pre-session toggles were silently lost. Apply live only when
+    // joined — pre-session, daily-js can't act on the request because the
+    // call object isn't part of a meeting yet.
+    this._micEnabled = enable;
+    if (this._daily.participants()?.local) {
+      this._daily.setLocalAudio(enable);
+    }
   }
   enableCam(enable: boolean): void {
-    if (!this._daily.participants()?.local) return;
-    this._daily.setLocalVideo(enable);
+    // OpenAI's startCamera is hardcoded to startVideoOff: true (see
+    // initDevices), so toggling cam pre-session won't actually enable
+    // video on connect today. Storing the preference anyway keeps the
+    // path symmetric with enableMic, and the transport is ready for the
+    // day OpenAI gains video support.
+    this._camEnabled = enable;
+    if (this._daily.participants()?.local) {
+      this._daily.setLocalVideo(enable);
+    }
   }
 
   get isCamEnabled(): boolean {
+    // Pre-session, daily-js's localVideo() reflects no live track and
+    // doesn't represent the caller's intent. Fall back to the stored
+    // preference so callers see a stable answer across the
+    // pre/post-join boundary.
+    if (!this._daily.participants()?.local) return this._camEnabled;
     return this._daily.localVideo();
   }
   get isMicEnabled(): boolean {
+    if (!this._daily.participants()?.local) return this._micEnabled;
     return this._daily.localAudio();
   }
 
