@@ -5,6 +5,20 @@ All notable changes to **Pipecat OpenAIRealTimeWebRTCTransport** will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/openai-realtime-webrtc-transport-v1.5.1...openai-realtime-webrtc-transport-v1.5.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* persist enableMic/enableCam across the pre-session boundary ([6cf0d9a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/6cf0d9a6337b7fc4fe04d440809234f82c734c81))
+* persist enableMic/enableCam preference across the pre-session boundary ([610b7e3](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/610b7e3f17f23c5c5b507e4821c71a7be32eeafd))
+
+
+### Miscellaneous Chores
+
+* **daily,gemini,openai,small-webrtc,websocket:** Bump client-js dep… ([9180f89](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/9180f890bb01c1e8c2f74a9abe7fc8e0777a86c3))
+* **daily,gemini,openai,small-webrtc,websocket:** Bump client-js dependency to latest 1.7.0 ([8825761](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/882576168ed38e4eb01d03211363c7cafed72967))
+
 ## [1.5.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/openai-realtime-webrtc-transport-v1.5.0...openai-realtime-webrtc-transport-v1.5.1) (2026-03-17)
 
 
