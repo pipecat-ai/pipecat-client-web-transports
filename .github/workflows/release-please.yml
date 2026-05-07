@@ -29,7 +29,7 @@ jobs:
 
   publish-daily:
     needs: release-please
-    if: ${{ contains(fromJson(needs.release-please.outputs.paths_released), 'transports/daily') }}
+    if: ${{ needs.release-please.outputs.releases_created == 'true' && contains(fromJson(needs.release-please.outputs.paths_released), 'transports/daily') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -47,7 +47,7 @@ jobs:
 
   publish-gemini:
     needs: release-please
-    if: ${{ contains(fromJson(needs.release-please.outputs.paths_released), 'transports/gemini-live-websocket-transport') }}
+    if: ${{ needs.release-please.outputs.releases_created == 'true' && contains(fromJson(needs.release-please.outputs.paths_released), 'transports/gemini-live-websocket-transport') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -65,7 +65,7 @@ jobs:
 
   publish-openai:
     needs: release-please
-    if: ${{ contains(fromJson(needs.release-please.outputs.paths_released), 'transports/openai-realtime-webrtc-transport') }}
+    if: ${{ needs.release-please.outputs.releases_created == 'true' && contains(fromJson(needs.release-please.outputs.paths_released), 'transports/openai-realtime-webrtc-transport') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -83,7 +83,7 @@ jobs:
 
   publish-small-webrtc:
     needs: release-please
-    if: ${{ contains(fromJson(needs.release-please.outputs.paths_released), 'transports/small-webrtc-transport') }}
+    if: ${{ needs.release-please.outputs.releases_created == 'true' && contains(fromJson(needs.release-please.outputs.paths_released), 'transports/small-webrtc-transport') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -101,7 +101,7 @@ jobs:
 
   publish-websocket:
     needs: release-please
-    if: ${{ contains(fromJson(needs.release-please.outputs.paths_released), 'transports/websocket-transport') }}
+    if: ${{ needs.release-please.outputs.releases_created == 'true' && contains(fromJson(needs.release-please.outputs.paths_released), 'transports/websocket-transport') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
