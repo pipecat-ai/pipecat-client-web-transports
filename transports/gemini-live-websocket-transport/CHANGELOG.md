@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+- Bump client-js version to work with latest 1.8.0 and support latest features
 - Fixed a connection bug in `GeminiLiveWebSocketTransport` caused by an outdated API path. 
   - The `BidiGenerateContent` path was pointing to `v1alpha`, which is no longer valid. Updated to `v1beta`.
 - Updated default model from `gemini-2.0-flash-exp` to `gemini-2.5-flash-native-audio-preview-12-2025` in both the transport and the example app.
