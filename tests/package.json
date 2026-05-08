@@ -15,8 +15,8 @@
     "@pipecat-ai/openai-realtime-webrtc-transport": "*",
     "@pipecat-ai/small-webrtc-transport": "*",
     "@pipecat-ai/websocket-transport": "*",
-    "happy-dom": "^15.11.7",
+    "happy-dom": "^20.9.0",
     "typescript": "^5.5.4",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.5"
   }
 }
