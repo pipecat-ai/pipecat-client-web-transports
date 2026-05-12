@@ -37,4 +37,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Dependencies
 
 - `livekit-client`: ^2.17.0
-- `@pipecat-ai/client-js`: ~1.5.0 (peer dependency)
+- `@pipecat-ai/client-js`: ^1.7.0 (peer dependency)

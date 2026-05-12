@@ -37,9 +37,7 @@ import { PipecatClient } from "@pipecat-ai/client-js";
 import { LiveKitTransport } from "@pipecat-ai/livekit-transport";
 
 const pcClient = new PipecatClient({
-  transport: new LiveKitTransport({
-    authUrl: "https://your.server/livekit-auth"
-  }),
+  transport: new LiveKitTransport(),
   enableCam: false,  // Default camera off
   enableMic: true,   // Default microphone on
   callbacks: {
@@ -47,7 +45,10 @@ const pcClient = new PipecatClient({
   },
 });
 
-await pcClient.connect();
+// Auth credentials are passed to connect(), not the constructor
+await pcClient.connect({
+  authUrl: "https://your.server/livekit-auth",
+});
 ```
 
 ### Basic Setup with Direct Token
@@ -57,10 +58,7 @@ import { PipecatClient } from "@pipecat-ai/client-js";
 import { LiveKitTransport } from "@pipecat-ai/livekit-transport";
 
 const pcClient = new PipecatClient({
-  transport: new LiveKitTransport({
-    roomUrl: "wss://your-livekit-server.com",
-    roomToken: "your-livekit-access-token"
-  }),
+  transport: new LiveKitTransport(),
   enableCam: false,
   enableMic: true,
   callbacks: {
@@ -69,30 +67,44 @@ const pcClient = new PipecatClient({
   },
 });
 
-await pcClient.connect();
+await pcClient.connect({
+  url: "wss://your-livekit-server.com",
+  token: "your-livekit-access-token",
+});
 ```
 
 ## API Reference
 
 ### Constructor Options
 
-The LiveKitTransport accepts LiveKit `RoomOptions` along with connection parameters:
+The `LiveKitTransport` constructor accepts LiveKit `RoomOptions` to configure the room:
 
 ```typescript
-type LiveKitTransportConstructorOptions = RoomOptions & (
-  | {
-      authUrl: string;  // URL to fetch room credentials
-    }
-  | {
-      roomUrl: string;  // LiveKit server WebSocket URL
-      roomToken: string;  // LiveKit access token
-    }
-);
+type LiveKitTransportConstructorOptions = RoomOptions;
+
+// Example with custom room options
+const transport = new LiveKitTransport({
+  adaptiveStream: true,
+  dynacast: true,
+});
 ```
 
-**Authentication Options:**
-- **authUrl**: URL endpoint that returns `{ url: string, token: string }` for LiveKit connection
-- **roomUrl + roomToken**: Direct LiveKit connection credentials
+**Connection credentials** are passed to `pcClient.connect()`, not the constructor:
+
+```typescript
+// Auth URL (server returns { url, token })
+await pcClient.connect({ authUrl: "https://your.server/livekit-auth" });
+
+// Direct credentials
+await pcClient.connect({ url: "wss://your-livekit-server.com", token: "..." });
+
+// Auth URL with POST body
+await pcClient.connect({
+  authUrl: "https://your.server/livekit-auth",
+  authMethod: "POST",
+  authBody: { roomName: "my-room" },
+});
+```
 
 **RoomOptions** (from LiveKit SDK):
 - `adaptiveStream`: Enable/disable adaptive stream

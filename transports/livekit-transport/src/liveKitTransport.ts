@@ -2,7 +2,6 @@ import {
   DeviceError,
   Participant,
   PipecatClientOptions,
-  RTVIError,
   RTVIEventCallbacks,
   RTVIMessage,
   Tracks,
@@ -46,10 +45,11 @@ export class LiveKitTransport extends Transport {
 
   private _micEnabled: boolean = false;
   private _camEnabled: boolean = false;
+  private _listenersAttached: boolean = false;
+  private _deviceChangeHandler = () => this.updateAvailableDevices();
 
   protected _state: TransportState = "disconnected";
   protected _callbacks: RTVIEventCallbacks = {};
-  public __onMessage?: (msg: RTVIMessage) => void;
 
   constructor(options: LiveKitTransportConstructorOptions = {}) {
     super();
@@ -126,10 +126,6 @@ export class LiveKitTransport extends Transport {
   }
 
   async _connect(connectParams?: LiveKitConnectParams): Promise<void> {
-    if (!this._room) {
-      throw new RTVIError("Transport instance not initialized");
-    }
-
     const params = connectParams || ({} as Partial<LiveKitConnectParams>);
     let { url, token } = params;
 
@@ -207,9 +203,11 @@ export class LiveKitTransport extends Transport {
 
   async _disconnect(): Promise<void> {
     this.state = "disconnecting";
-    if (this._room) {
-      await this._room.disconnect();
-    }
+    navigator.mediaDevices.removeEventListener(
+      "devicechange",
+      this._deviceChangeHandler
+    );
+    await this._room.disconnect();
     this.state = "disconnected";
     this._callbacks.onDisconnected?.();
   }
@@ -243,62 +241,52 @@ export class LiveKitTransport extends Transport {
     return devices.filter((d) => d.kind === "audiooutput");
   }
 
-  updateMic(micId: string): void {
-    this._room
-      .switchActiveDevice("audioinput", micId)
-      .then(() => {
-        // Update selected mic
-        this.getAllMics().then((mics) => {
-          const mic = mics.find((m) => m.deviceId === micId);
-          if (mic) {
-            this._selectedMic = mic;
-            this._callbacks.onMicUpdated?.(mic);
-          }
-        });
-      })
-      .catch((e) => {
-        this._callbacks.onDeviceError?.(
-          new DeviceError(["mic"], "unknown", e.message)
-        );
-      });
+  async updateMic(micId: string): Promise<void> {
+    try {
+      await this._room.switchActiveDevice("audioinput", micId);
+      const mics = await this.getAllMics();
+      const mic = mics.find((m) => m.deviceId === micId);
+      if (mic) {
+        this._selectedMic = mic;
+        this._callbacks.onMicUpdated?.(mic);
+      }
+    } catch (e: unknown) {
+      this._callbacks.onDeviceError?.(
+        new DeviceError(["mic"], "unknown", (e as Error).message)
+      );
+    }
   }
 
-  updateCam(camId: string): void {
-    this._room
-      .switchActiveDevice("videoinput", camId)
-      .then(() => {
-        this.getAllCams().then((cams) => {
-          const cam = cams.find((c) => c.deviceId === camId);
-          if (cam) {
-            this._selectedCam = cam;
-            this._callbacks.onCamUpdated?.(cam);
-          }
-        });
-      })
-      .catch((e) => {
-        this._callbacks.onDeviceError?.(
-          new DeviceError(["cam"], "unknown", e.message)
-        );
-      });
+  async updateCam(camId: string): Promise<void> {
+    try {
+      await this._room.switchActiveDevice("videoinput", camId);
+      const cams = await this.getAllCams();
+      const cam = cams.find((c) => c.deviceId === camId);
+      if (cam) {
+        this._selectedCam = cam;
+        this._callbacks.onCamUpdated?.(cam);
+      }
+    } catch (e: unknown) {
+      this._callbacks.onDeviceError?.(
+        new DeviceError(["cam"], "unknown", (e as Error).message)
+      );
+    }
   }
 
-  updateSpeaker(speakerId: string): void {
-    this._room
-      .switchActiveDevice("audiooutput", speakerId)
-      .then(() => {
-        this.getAllSpeakers().then((speakers) => {
-          const s = speakers.find((d) => d.deviceId === speakerId);
-          if (s) {
-            this._selectedSpeaker = s;
-            this._callbacks.onSpeakerUpdated?.(s);
-          }
-        });
-      })
-      .catch((e) => {
-        this._callbacks.onDeviceError?.(
-          new DeviceError(["speaker"], "unknown", e.message)
-        );
-      });
+  async updateSpeaker(speakerId: string): Promise<void> {
+    try {
+      await this._room.switchActiveDevice("audiooutput", speakerId);
+      const speakers = await this.getAllSpeakers();
+      const s = speakers.find((d) => d.deviceId === speakerId);
+      if (s) {
+        this._selectedSpeaker = s;
+        this._callbacks.onSpeakerUpdated?.(s);
+      }
+    } catch (e: unknown) {
+      this._callbacks.onDeviceError?.(
+        new DeviceError(["speaker"], "unknown", (e as Error).message)
+      );
+    }
   }
 
   get selectedMic() {
@@ -312,36 +300,22 @@ export class LiveKitTransport extends Transport {
   }
 
   enableMic(enable: boolean): void {
-    this._micEnabled = enable;
     this._room.localParticipant
       .setMicrophoneEnabled(enable)
-      .then(() => {
-        // Check if we need to update the selected mic (device ID might have changed or was never set)
-        // If enabling, and we don't have a selected mic, or we just want to be sure:
+      .then(async () => {
+        this._micEnabled = enable;
         if (enable) {
-          // Try to find the active mic track to get the deviceId
           const trackPub = this._room.localParticipant.getTrackPublication(
             Track.Source.Microphone
           );
-          if (trackPub?.track?.mediaStreamTrack) {
-            const deviceId =
-              trackPub.track.mediaStreamTrack.getSettings().deviceId;
-            if (deviceId) {
-              this.getAllMics().then((mics) => {
-                const mic = mics.find((m) => m.deviceId === deviceId);
-                if (mic) {
-                  this._selectedMic = mic;
-                }
-                // Always emit update with what we have
-                if (this._isMediaDeviceInfo(this._selectedMic)) {
-                  this._callbacks.onMicUpdated?.(this._selectedMic);
-                }
-              });
-              return;
-            }
+          const deviceId =
+            trackPub?.track?.mediaStreamTrack?.getSettings().deviceId;
+          if (deviceId) {
+            const mics = await this.getAllMics();
+            const mic = mics.find((m) => m.deviceId === deviceId);
+            if (mic) this._selectedMic = mic;
           }
         }
-        // Emit update to notify listeners (e.g. PipecatClientMicToggle)
         if (this._isMediaDeviceInfo(this._selectedMic)) {
           this._callbacks.onMicUpdated?.(this._selectedMic);
         }
@@ -355,32 +329,22 @@ export class LiveKitTransport extends Transport {
   }
 
   enableCam(enable: boolean): void {
-    this._camEnabled = enable;
     this._room.localParticipant
       .setCameraEnabled(enable)
-      .then(() => {
+      .then(async () => {
+        this._camEnabled = enable;
         if (enable) {
           const trackPub = this._room.localParticipant.getTrackPublication(
             Track.Source.Camera
           );
-          if (trackPub?.track?.mediaStreamTrack) {
-            const deviceId =
-              trackPub.track.mediaStreamTrack.getSettings().deviceId;
-            if (deviceId) {
-              this.getAllCams().then((cams) => {
-                const cam = cams.find((c) => c.deviceId === deviceId);
-                if (cam) {
-                  this._selectedCam = cam;
-                }
-                if (this._isMediaDeviceInfo(this._selectedCam)) {
-                  this._callbacks.onCamUpdated?.(this._selectedCam);
-                }
-              });
-              return;
-            }
+          const deviceId =
+            trackPub?.track?.mediaStreamTrack?.getSettings().deviceId;
+          if (deviceId) {
+            const cams = await this.getAllCams();
+            const cam = cams.find((c) => c.deviceId === deviceId);
+            if (cam) this._selectedCam = cam;
           }
         }
-        // Emit update to notify listeners
         if (this._isMediaDeviceInfo(this._selectedCam)) {
           this._callbacks.onCamUpdated?.(this._selectedCam);
         }
@@ -416,25 +380,16 @@ export class LiveKitTransport extends Transport {
   }
 
   tracks(): Tracks {
-    // Map LiveKit tracks to RTVI Tracks
     const local = this._room.localParticipant;
-    // We need MediaStreamTrack
     const getTrack = (
       p: LocalParticipant | RemoteParticipant,
-      kind: string,
+      _kind: string,
       source: Track.Source
     ) => {
       const pub = p.getTrackPublication(source);
       return pub?.track?.mediaStreamTrack;
     };
 
-    // Assuming Bot is one of the remote participants.
-    // We might need logic to identify WHO is the bot.
-    // For now, we'll traverse remote participants and look for one typical for a bot?
-    // Or just return the first one with audio?
-    // Pipecat usually establishes checking identity.
-
-    // For now, we return local tracks correctly.
     const localTracks = {
       audio: getTrack(local, "audio", Track.Source.Microphone),
       video: getTrack(local, "video", Track.Source.Camera),
@@ -442,16 +397,17 @@ export class LiveKitTransport extends Transport {
       screenAudio: getTrack(local, "audio", Track.Source.ScreenShareAudio),
     };
 
-    // Find bot tracks
-    // This is heuristics unless we have bot identity.
-    // Usually the backend transport is the "bot".
-    // LiveKit room might have multiple participants.
-    // We can look for a participant named "bot" or check assumptions.
-    // DailyTransport uses `this._botId`.
-
-    const botTracks = {};
-    // Simplification: use the first remote participant as bot if not specified otherwise
-    // Ideally we should handle participant-joined and identify the bot.
+    // Uses first remote participant as bot; no explicit bot identity API yet.
+    const remoteParticipants = Array.from(
+      this._room.remoteParticipants.values()
+    );
+    const botParticipant = remoteParticipants[0];
+    const botTracks = botParticipant
+      ? {
+          audio: getTrack(botParticipant, "audio", Track.Source.Microphone),
+          video: getTrack(botParticipant, "video", Track.Source.Camera),
+        }
+      : {};
 
     return { local: localTracks, bot: botTracks };
   }
@@ -463,7 +419,8 @@ export class LiveKitTransport extends Transport {
   }
 
   private attachEventListeners() {
-    if (!this._room) return;
+    if (this._listenersAttached) return;
+    this._listenersAttached = true;
 
     this._room
       .on(RoomEvent.DataReceived, this.handleDataReceived.bind(this))
@@ -488,22 +445,19 @@ export class LiveKitTransport extends Transport {
       )
       .on(RoomEvent.MediaDevicesError, this.handleMediaDevicesError.bind(this));
 
-    // Also handle device changes if available
-    navigator.mediaDevices.ondevicechange = () => {
-      this.updateAvailableDevices();
-    };
+    navigator.mediaDevices.addEventListener(
+      "devicechange",
+      this._deviceChangeHandler
+    );
   }
 
   private handleDataReceived(payload: Uint8Array) {
-    // Decode
     try {
       const decoder = new TextDecoder();
       const str = decoder.decode(payload);
-      const msg = JSON.parse(str); // Temporary cast to check type
-      // Check if it looks like RTVIMessage
+      const msg = JSON.parse(str);
       if (msg && typeof msg === "object" && "type" in msg) {
         this._onMessage(msg as RTVIMessage);
-        this.__onMessage?.(msg as RTVIMessage);
       }
     } catch (e) {
       logger.warn("Failed to parse data message", e);
