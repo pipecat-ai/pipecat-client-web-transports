@@ -22,60 +22,49 @@ import {
   RoomEvent,
   RoomOptions,
   Track,
-  DataPacket_Kind,
 } from "livekit-client";
 
-type ConnectionParam =
-  | {
-      authUrl: string;
-    }
-  | {
-      roomUrl: string;
-      roomToken: string;
-    };
+type LiveKitConnectParams = {
+  authUrl: string;
+  authMethod: "GET" | "POST";
+  authBody: Record<string, unknown>;
 
-export type LiveKitTransportConstructorOptions = RoomOptions & ConnectionParam;
-
-export interface LiveKitConnectParams extends RoomConnectOptions {
   url: string;
   token: string;
-  authUrl?: string;
-}
+
+  roomConnectionOptions: RoomConnectOptions;
+};
+
+export type LiveKitTransportConstructorOptions = RoomOptions;
 
 export class LiveKitTransport extends Transport {
   private _room: Room;
-  private _roomOptions: RoomOptions;
-  private _authUrl: string | null = null;
-  private _roomUrl: string | null = null;
-  private _roomToken: string | null = null;
-  protected _options!: PipecatClientOptions;
 
   private _selectedMic: MediaDeviceInfo | Record<string, never> = {};
   private _selectedCam: MediaDeviceInfo | Record<string, never> = {};
   private _selectedSpeaker: MediaDeviceInfo | Record<string, never> = {};
 
+  private _micEnabled: boolean = false;
+  private _camEnabled: boolean = false;
+
   protected _state: TransportState = "disconnected";
   protected _callbacks: RTVIEventCallbacks = {};
+  public __onMessage?: (msg: RTVIMessage) => void;
 
-  constructor(options: LiveKitTransportConstructorOptions) {
+  constructor(options: LiveKitTransportConstructorOptions = {}) {
     super();
-    if ("authUrl" in options) {
-      this._authUrl = options.authUrl;
-    } else {
-      this._roomToken = options.roomToken;
-      this._roomUrl = options.roomUrl;
-    }
-    this._roomOptions = options;
-    this._room = new Room(this._roomOptions);
+    this._room = new Room(options);
   }
 
   public initialize(
     options: PipecatClientOptions,
-    messageHandler: (ev: RTVIMessage) => void,
+    messageHandler: (ev: RTVIMessage) => void
   ): void {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
     this._onMessage = messageHandler;
+    this._micEnabled = options.enableMic ?? false;
+    this._camEnabled = options.enableCam ?? false;
 
     this.attachEventListeners();
 
@@ -130,7 +119,7 @@ export class LiveKitTransport extends Transport {
   }
 
   _validateConnectionParams(
-    connectParams: unknown,
+    connectParams: unknown
   ): LiveKitConnectParams | undefined {
     if (!connectParams || typeof connectParams !== "object") return undefined;
     return connectParams as LiveKitConnectParams;
@@ -141,43 +130,59 @@ export class LiveKitTransport extends Transport {
       throw new RTVIError("Transport instance not initialized");
     }
 
-    let url = this._roomUrl;
-    let token = this._roomToken;
-    const authUrl = this._authUrl;
+    const params = connectParams || ({} as Partial<LiveKitConnectParams>);
+    let { url, token } = params;
 
-    if (!url || !token) {
-      if (authUrl) {
-        try {
-          const res = await fetch(authUrl);
-          const json = await res.json();
-          url = json.url;
-          token = json.token;
-        } catch (e) {
-          logger.error("Failed to fetch LiveKit credentials from authUrl", e);
-          this.state = "error";
-          throw new TransportStartError("Failed to fetch credentials");
+    this.state = "connecting";
+    if (params.authUrl) {
+      try {
+        const options: RequestInit = {
+          method: params.authMethod ?? "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        };
+        if (options.method?.toUpperCase() == "POST") {
+          options.body = JSON.stringify(params.authBody ?? {});
         }
+        const res = await fetch(params.authUrl, options);
+        const json = await res.json();
+        url = json.url;
+        token = json.token;
+      } catch (e) {
+        logger.error("Failed to fetch LiveKit credentials from authUrl", e);
+        this.state = "error";
+        throw new TransportStartError("Failed to fetch credentials");
       }
     }
 
     if (!url || !token) {
       logger.error(
-        "LiveKit connection requires 'roomUrl' and 'roomToken' or 'authUrl'",
+        "LiveKit connection requires 'url' and 'token' or 'authUrl'"
       );
       this.state = "error";
       throw new TransportStartError("Missing url or token");
     }
 
-    this._roomUrl = url;
-    this._roomToken = token;
-
-    this.state = "connecting";
-
     try {
-      await this._room.connect(url, token, connectParams);
-      const enableMic = this._options.enableMic || false;
-      const enableCam = this._options.enableCam || false;
+      await this._room.connect(url, token, params.roomConnectionOptions);
+      const enableMic = this._micEnabled;
+      const enableCam = this._camEnabled;
       await this._room.localParticipant.setMicrophoneEnabled(enableMic);
+      if (enableMic) {
+        const trackPub = this._room.localParticipant.getTrackPublication(
+          Track.Source.Microphone
+        );
+        if (trackPub?.track?.mediaStreamTrack) {
+          const deviceId =
+            trackPub.track.mediaStreamTrack.getSettings().deviceId;
+          if (deviceId) {
+            const mics = await this.getAllMics();
+            const mic = mics.find((m) => m.deviceId === deviceId);
+            if (mic) this._selectedMic = mic;
+          }
+        }
+      }
       if (this._isMediaDeviceInfo(this._selectedMic)) {
         this._callbacks.onMicUpdated?.(this._selectedMic);
       }
@@ -253,7 +258,7 @@ export class LiveKitTransport extends Transport {
       })
       .catch((e) => {
         this._callbacks.onDeviceError?.(
-          new DeviceError(["mic"], "unknown", e.message),
+          new DeviceError(["mic"], "unknown", e.message)
         );
       });
   }
@@ -272,7 +277,7 @@ export class LiveKitTransport extends Transport {
       })
       .catch((e) => {
         this._callbacks.onDeviceError?.(
-          new DeviceError(["cam"], "unknown", e.message),
+          new DeviceError(["cam"], "unknown", e.message)
         );
       });
   }
@@ -291,7 +296,7 @@ export class LiveKitTransport extends Transport {
       })
       .catch((e) => {
         this._callbacks.onDeviceError?.(
-          new DeviceError(["speaker"], "unknown", e.message),
+          new DeviceError(["speaker"], "unknown", e.message)
         );
       });
   }
@@ -307,6 +312,7 @@ export class LiveKitTransport extends Transport {
   }
 
   enableMic(enable: boolean): void {
+    this._micEnabled = enable;
     this._room.localParticipant
       .setMicrophoneEnabled(enable)
       .then(() => {
@@ -315,7 +321,7 @@ export class LiveKitTransport extends Transport {
         if (enable) {
           // Try to find the active mic track to get the deviceId
           const trackPub = this._room.localParticipant.getTrackPublication(
-            Track.Source.Microphone,
+            Track.Source.Microphone
           );
           if (trackPub?.track?.mediaStreamTrack) {
             const deviceId =
@@ -343,18 +349,19 @@ export class LiveKitTransport extends Transport {
       .catch((e) => {
         logger.error("Failed to toggle mic", e);
         this._callbacks.onDeviceError?.(
-          new DeviceError(["mic"], "unknown", e.message),
+          new DeviceError(["mic"], "unknown", e.message)
         );
       });
   }
 
   enableCam(enable: boolean): void {
+    this._camEnabled = enable;
     this._room.localParticipant
       .setCameraEnabled(enable)
       .then(() => {
         if (enable) {
           const trackPub = this._room.localParticipant.getTrackPublication(
-            Track.Source.Camera,
+            Track.Source.Camera
           );
           if (trackPub?.track?.mediaStreamTrack) {
             const deviceId =
@@ -381,23 +388,23 @@ export class LiveKitTransport extends Transport {
       .catch((e) => {
         logger.error("Failed to toggle cam", e);
         this._callbacks.onDeviceError?.(
-          new DeviceError(["cam"], "unknown", e.message),
+          new DeviceError(["cam"], "unknown", e.message)
         );
       });
   }
 
   private _isMediaDeviceInfo(
-    device: MediaDeviceInfo | Record<string, never>,
+    device: MediaDeviceInfo | Record<string, never>
   ): device is MediaDeviceInfo {
     return (device as MediaDeviceInfo).deviceId !== undefined;
   }
 
   get isMicEnabled(): boolean {
-    return this._room.localParticipant.isMicrophoneEnabled;
+    return this._micEnabled;
   }
 
   get isCamEnabled(): boolean {
-    return this._room.localParticipant.isCameraEnabled;
+    return this._camEnabled;
   }
 
   get isSharingScreen(): boolean {
@@ -415,7 +422,7 @@ export class LiveKitTransport extends Transport {
     const getTrack = (
       p: LocalParticipant | RemoteParticipant,
       kind: string,
-      source: Track.Source,
+      source: Track.Source
     ) => {
       const pub = p.getTrackPublication(source);
       return pub?.track?.mediaStreamTrack;
@@ -449,8 +456,9 @@ export class LiveKitTransport extends Transport {
     return { local: localTracks, bot: botTracks };
   }
 
-  sendReadyMessage(): void {
+  async sendReadyMessage() {
     this.state = "ready";
+    await this._room.localParticipant.waitUntilActive();
     this.sendMessage(RTVIMessage.clientReady());
   }
 
@@ -463,20 +471,20 @@ export class LiveKitTransport extends Transport {
       .on(RoomEvent.TrackUnsubscribed, this.handleTrackUnsubscribed.bind(this))
       .on(
         RoomEvent.ParticipantConnected,
-        this.handleParticipantConnected.bind(this),
+        this.handleParticipantConnected.bind(this)
       )
       .on(
         RoomEvent.ParticipantDisconnected,
-        this.handleParticipantDisconnected.bind(this),
+        this.handleParticipantDisconnected.bind(this)
       )
       .on(RoomEvent.Disconnected, this.handleRoomDisconnected.bind(this))
       .on(
         RoomEvent.LocalTrackPublished,
-        this.handleLocalTrackPublished.bind(this),
+        this.handleLocalTrackPublished.bind(this)
       )
       .on(
         RoomEvent.LocalTrackUnpublished,
-        this.handleLocalTrackUnpublished.bind(this),
+        this.handleLocalTrackUnpublished.bind(this)
       )
       .on(RoomEvent.MediaDevicesError, this.handleMediaDevicesError.bind(this));
 
@@ -486,12 +494,7 @@ export class LiveKitTransport extends Transport {
     };
   }
 
-  private handleDataReceived(
-    payload: Uint8Array,
-    participant?: RemoteParticipant,
-    kind?: DataPacket_Kind,
-    topic?: string,
-  ) {
+  private handleDataReceived(payload: Uint8Array) {
     // Decode
     try {
       const decoder = new TextDecoder();
@@ -500,6 +503,7 @@ export class LiveKitTransport extends Transport {
       // Check if it looks like RTVIMessage
       if (msg && typeof msg === "object" && "type" in msg) {
         this._onMessage(msg as RTVIMessage);
+        this.__onMessage?.(msg as RTVIMessage);
       }
     } catch (e) {
       logger.warn("Failed to parse data message", e);
@@ -509,47 +513,60 @@ export class LiveKitTransport extends Transport {
   private handleTrackSubscribed(
     track: RemoteTrack,
     publication: RemoteTrackPublication,
-    participant: RemoteParticipant,
+    participant: RemoteParticipant
   ) {
     this._callbacks.onTrackStarted?.(
       track.mediaStreamTrack,
-      this.toParticipant(participant),
+      this.toParticipant(participant)
     );
   }
 
   private handleTrackUnsubscribed(
     track: RemoteTrack,
     publication: RemoteTrackPublication,
-    participant: RemoteParticipant,
+    participant: RemoteParticipant
   ) {
     if (track.mediaStreamTrack) {
       this._callbacks.onTrackStopped?.(
         track.mediaStreamTrack,
-        this.toParticipant(participant),
+        this.toParticipant(participant)
       );
     }
   }
 
   private handleLocalTrackPublished(
     publication: LocalTrackPublication,
-    participant: LocalParticipant,
+    participant: LocalParticipant
   ) {
     if (publication.track?.mediaStreamTrack) {
       this._callbacks.onTrackStarted?.(
         publication.track.mediaStreamTrack,
-        this.toParticipant(participant),
+        this.toParticipant(participant)
       );
+    }
+    if (publication.source === Track.Source.Microphone) {
+      const deviceId =
+        publication.track?.mediaStreamTrack?.getSettings().deviceId;
+      if (deviceId) {
+        this.getAllMics().then((mics) => {
+          const mic = mics.find((m) => m.deviceId === deviceId);
+          if (mic) {
+            this._selectedMic = mic;
+            this._callbacks.onMicUpdated?.(mic);
+          }
+        });
+      }
     }
   }
 
   private handleLocalTrackUnpublished(
     publication: LocalTrackPublication,
-    participant: LocalParticipant,
+    participant: LocalParticipant
   ) {
     if (publication.track?.mediaStreamTrack) {
       this._callbacks.onTrackStopped?.(
         publication.track.mediaStreamTrack,
-        this.toParticipant(participant),
+        this.toParticipant(participant)
       );
     }
   }
@@ -572,7 +589,7 @@ export class LiveKitTransport extends Transport {
 
   private handleMediaDevicesError(e: Error) {
     this._callbacks.onDeviceError?.(
-      new DeviceError(["cam", "mic"], "unknown", e.message),
+      new DeviceError(["cam", "mic"], "unknown", e.message)
     );
   }
 
