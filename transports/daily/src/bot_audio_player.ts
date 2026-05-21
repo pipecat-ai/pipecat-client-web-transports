@@ -17,6 +17,13 @@ export class BotAudioPlayer {
   private _wavPlayer: InstanceType<typeof WavStreamPlayer> | null = null;
   private _activationElement: HTMLAudioElement | null = null;
 
+  // Buffer tracking for silence-skip logic (mirrors Python _buffer_audio logic).
+  private _trueRate = 0;
+  private _minBufferSamples = 0; // 100 ms pre-buffer at true rate
+  private _totalSamplesAdded = 0;
+  private _playbackStartTime: number | null = null;
+  private _lastLogTime: number | null = null;
+
   /**
    * Start capturing and playing the bot's audio track.
    *
@@ -38,6 +45,12 @@ export class BotAudioPlayer {
     this._activationElement.srcObject = new MediaStream([track]);
     this._activationElement.volume = 0;
     await this._activationElement.play().catch(() => {});
+
+    this._trueRate = trueRate;
+    this._minBufferSamples = Math.ceil(trueRate * 0.1); // 100 ms pre-buffer
+    this._totalSamplesAdded = 0;
+    this._playbackStartTime = null;
+    this._lastLogTime = null;
 
     // Playback context at true rate. outputToSpeakers:false so audio only
     // flows to outputTrack — the caller's <audio> element plays it, avoiding
@@ -62,11 +75,36 @@ export class BotAudioPlayer {
       "capture_processor"
     );
 
-    // Each 128-sample render quantum arrives here as Int16 and is forwarded
-    // to WavStreamPlayer, which queues and plays it at the true rate.
+    // Each 128-sample render quantum arrives here as Int16. Silence frames
+    // injected by WebRTC are discarded when the buffer is healthy so they don't
+    // accumulate faster than the drain rate (speech arrives at 2x speed, so
+    // silence queues at 2x speed too). Below the pre-buffer threshold we keep
+    // silence so playback can start smoothly — mirrors Python _buffer_audio().
     this._captureNode.port.onmessage = (e: MessageEvent) => {
       if (e.data.event === "chunk") {
-        this._wavPlayer?.add16BitPCM(e.data.int16 as Int16Array, "bot");
+        const int16 = e.data.int16 as Int16Array;
+        const isSilent = e.data.isSilent as boolean;
+
+        if (isSilent) {
+          const buffered = this._estimatedBufferedSamples();
+          if (buffered >= this._minBufferSamples) {
+            this._maybeLogBufferStatus();
+            return; // buffer is healthy — discard silence so it can drain
+          }
+          // buffer is below pre-buffer threshold — keep silence to fill it
+        }
+
+        // Reset tracking when WavStreamPlayer drained and restarted between utterances.
+        if (!this._wavPlayer?.stream) {
+          this._totalSamplesAdded = 0;
+          this._playbackStartTime = null;
+        }
+        if (this._playbackStartTime === null) {
+          this._playbackStartTime = performance.now();
+        }
+        this._totalSamplesAdded += int16.length;
+        this._wavPlayer?.add16BitPCM(int16, "bot");
+        this._maybeLogBufferStatus();
       }
     };
 
@@ -77,7 +115,34 @@ export class BotAudioPlayer {
 
   /** Clear the playback queue, mimicking the avatar stopping mid-speech. */
   async interrupt(): Promise<void> {
+    const dropped = this._estimatedBufferedSamples();
+    if (dropped > 0) {
+      console.log(
+        `[BotAudioPlayer] Interrupt — dropped ~${dropped.toFixed(0)} samples (${(dropped / this._trueRate).toFixed(3)}s)`
+      );
+    }
+    this._totalSamplesAdded = 0;
+    this._playbackStartTime = null;
     await this._wavPlayer?.interrupt();
+  }
+
+  private _estimatedBufferedSamples(): number {
+    if (this._playbackStartTime === null || this._totalSamplesAdded === 0) return 0;
+    const elapsedMs = performance.now() - this._playbackStartTime;
+    const drained = (elapsedMs / 1000) * this._trueRate;
+    return Math.max(0, this._totalSamplesAdded - drained);
+  }
+
+  private _maybeLogBufferStatus(): void {
+    const now = performance.now();
+    if (this._lastLogTime === null || now - this._lastLogTime >= 1000) {
+      const buffered = this._estimatedBufferedSamples();
+      const bufferedSeconds = buffered / this._trueRate;
+      console.log(
+        `[BotAudioPlayer] Buffer: ~${buffered.toFixed(0)} samples (${bufferedSeconds.toFixed(3)}s)`
+      );
+      this._lastLogTime = now;
+    }
   }
 
   /** Tear down both audio contexts and release all resources. */
@@ -93,5 +158,7 @@ export class BotAudioPlayer {
     this._captureCtx = null;
     this._captureNode = null;
     this._wavPlayer = null;
+    this._totalSamplesAdded = 0;
+    this._playbackStartTime = null;
   }
 }
