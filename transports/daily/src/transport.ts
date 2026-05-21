@@ -58,9 +58,8 @@ export interface DailyTransportConstructorOptions extends DailyFactoryOptions {
 }
 
 export enum DailyRTVIMessageType {
-  AUDIO_BUFFERING_STARTED = "audio-buffering-started",
-  AUDIO_BUFFERING_STOPPED = "audio-buffering-stopped",
   AUDIO_FASTER_THAN_REALTIME = "audio.faster_than_realtime",
+  USER_STARTED_SPEAKING = "user-started-speaking",
 }
 
 export type DailyEventCallbacks = RTVIEventCallbacks &
@@ -681,7 +680,8 @@ export class DailyTransport extends Transport {
           }
           return; // transport-internal message, don't forward
         }
-        if (ev.data.type === "conversation.interrupt") {
+        if (ev.data.type === DailyRTVIMessageType.USER_STARTED_SPEAKING) {
+          console.log("User started speaking");
           void this._botAudioPlayer?.interrupt();
           // Fall through to also forward the message to the app
         }

@@ -23,6 +23,9 @@ export class BotAudioPlayer {
   private _totalSamplesAdded = 0;
   private _playbackStartTime: number | null = null;
   private _lastLogTime: number | null = null;
+  // Rotated after each interrupt so WavStreamPlayer's interruptedTrackIds
+  // blacklist doesn't block future utterances.
+  private _trackIdCounter = 0;
 
   /**
    * Start capturing and playing the bot's audio track.
@@ -103,7 +106,7 @@ export class BotAudioPlayer {
           this._playbackStartTime = performance.now();
         }
         this._totalSamplesAdded += int16.length;
-        this._wavPlayer?.add16BitPCM(int16, "bot");
+        this._wavPlayer?.add16BitPCM(int16, `bot-${this._trackIdCounter}`);
         this._maybeLogBufferStatus();
       }
     };
@@ -123,6 +126,7 @@ export class BotAudioPlayer {
     }
     this._totalSamplesAdded = 0;
     this._playbackStartTime = null;
+    this._trackIdCounter++; // new trackId escapes WavStreamPlayer's interruptedTrackIds blacklist
     await this._wavPlayer?.interrupt();
   }
 
