@@ -156,6 +156,8 @@ export class DailyTransport extends Transport {
     const { bufferLocalAudioUntilBotReady, fasterThanRealtime, ...dailyOpts } = opts;
     this._dailyFactoryOptions = dailyOpts;
     this._fasterThanRealtime = fasterThanRealtime ?? false;
+    console.log("Faster than realtime enabled:", this._fasterThanRealtime);
+
     // Enable device preference cookies by default
     if (
       typeof this._dailyFactoryOptions.dailyConfig
@@ -669,10 +671,12 @@ export class DailyTransport extends Transport {
             this._pendingBotTrack = null;
             this._pendingBotParticipant = null;
             void this._setupBotAudioPlayer(track).then(() => {
-              this._callbacks.onTrackStarted?.(
-                this._botOutputTrack ?? track,
-                participant ? dailyParticipantToParticipant(participant) : undefined
-              );
+              if (this._botOutputTrack) {
+                this._callbacks.onTrackStarted?.(
+                  this._botOutputTrack,
+                  participant ? dailyParticipantToParticipant(participant) : undefined
+                );
+              }
             });
           }
           return; // transport-internal message, don't forward
@@ -834,10 +838,14 @@ export class DailyTransport extends Transport {
         if (this._trueSampleRate && this._declaredSampleRate) {
           const participant = ev.participant ?? null;
           void this._setupBotAudioPlayer(ev.track).then(() => {
-            this._callbacks.onTrackStarted?.(
-              this._botOutputTrack ?? ev.track,
-              participant ? dailyParticipantToParticipant(participant) : undefined
-            );
+            if (this._botOutputTrack) {
+              this._callbacks.onTrackStarted?.(
+                this._botOutputTrack,
+                participant
+                  ? dailyParticipantToParticipant(participant)
+                  : undefined
+              );
+            }
           });
         } else {
           // Rates not yet received — defer until audio.faster_than_realtime arrives.

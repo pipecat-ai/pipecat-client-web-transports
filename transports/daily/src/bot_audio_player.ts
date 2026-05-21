@@ -15,6 +15,7 @@ export class BotAudioPlayer {
   private _captureCtx: AudioContext | null = null;
   private _captureNode: AudioWorkletNode | null = null;
   private _wavPlayer: InstanceType<typeof WavStreamPlayer> | null = null;
+  private _activationElement: HTMLAudioElement | null = null;
 
   /**
    * Start capturing and playing the bot's audio track.
@@ -29,6 +30,15 @@ export class BotAudioPlayer {
     declaredRate: number,
     trueRate: number
   ): Promise<MediaStreamTrack> {
+    // Chrome's WebRTC audio pipeline is dormant until the track is rendered in
+    // an <audio> element. Without this, createMediaStreamSource() receives
+    // silence. We attach the original track to a silent element to activate the
+    // pipeline without any audible output.
+    this._activationElement = new Audio();
+    this._activationElement.srcObject = new MediaStream([track]);
+    this._activationElement.volume = 0;
+    await this._activationElement.play().catch(() => {});
+
     // Playback context at true rate. outputToSpeakers:false so audio only
     // flows to outputTrack — the caller's <audio> element plays it, avoiding
     // double playback from both context.destination and the audio element.
@@ -72,6 +82,11 @@ export class BotAudioPlayer {
 
   /** Tear down both audio contexts and release all resources. */
   async stop(): Promise<void> {
+    if (this._activationElement) {
+      this._activationElement.pause();
+      this._activationElement.srcObject = null;
+      this._activationElement = null;
+    }
     this._captureNode?.port.postMessage({ event: "stop" });
     this._captureNode?.disconnect();
     await this._captureCtx?.close();
