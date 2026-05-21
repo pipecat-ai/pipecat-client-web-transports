@@ -35,6 +35,7 @@ import {
 } from "@pipecat-ai/client-js";
 
 import { MediaStreamRecorder } from "../../../lib/wavtools";
+import { BotAudioPlayer } from "./bot_audio_player";
 
 import packageJson from "../package.json";
 
@@ -47,11 +48,19 @@ export interface DailyConnectionEndpoint {
 
 export interface DailyTransportConstructorOptions extends DailyFactoryOptions {
   bufferLocalAudioUntilBotReady?: boolean;
+  /**
+   * When true, the transport intercepts the bot's audio track and plays it
+   * through a WavStreamPlayer running at the true sample rate. This is used
+   * together with Pipecat's audio_out_declared_sample_rate feature, which
+   * delivers audio faster-than-realtime over WebRTC.
+   */
+  fasterThanRealtime?: boolean;
 }
 
 export enum DailyRTVIMessageType {
   AUDIO_BUFFERING_STARTED = "audio-buffering-started",
   AUDIO_BUFFERING_STOPPED = "audio-buffering-stopped",
+  AUDIO_FASTER_THAN_REALTIME = "audio.faster_than_realtime",
 }
 
 export type DailyEventCallbacks = RTVIEventCallbacks &
@@ -130,13 +139,23 @@ export class DailyTransport extends Transport {
   private _audioQueue: ArrayBuffer[] = [];
   declare private _mediaStreamRecorder: MediaStreamRecorder;
 
+  // Faster-than-realtime audio playback
+  private _fasterThanRealtime: boolean = false;
+  private _trueSampleRate: number = 0;
+  private _declaredSampleRate: number = 0;
+  private _botAudioPlayer: BotAudioPlayer | null = null;
+  private _botOutputTrack: MediaStreamTrack | null = null;
+  private _pendingBotTrack: MediaStreamTrack | null = null;
+  private _pendingBotParticipant: DailyParticipant | null = null;
+
   constructor(opts: DailyTransportConstructorOptions = {}) {
     super();
 
     this._callbacks = {} as DailyEventCallbacks;
 
-    const { bufferLocalAudioUntilBotReady, ...dailyOpts } = opts;
+    const { bufferLocalAudioUntilBotReady, fasterThanRealtime, ...dailyOpts } = opts;
     this._dailyFactoryOptions = dailyOpts;
+    this._fasterThanRealtime = fasterThanRealtime ?? false;
     // Enable device preference cookies by default
     if (
       typeof this._dailyFactoryOptions.dailyConfig
@@ -377,7 +396,7 @@ export class DailyTransport extends Transport {
 
     if (bot) {
       tracks.bot = {
-        audio: bot?.tracks?.audio?.persistentTrack,
+        audio: this._botOutputTrack ?? bot?.tracks?.audio?.persistentTrack,
         video: bot?.tracks?.video?.persistentTrack,
       };
     }
@@ -608,7 +627,15 @@ export class DailyTransport extends Transport {
 
     this._audioQueue = [];
     this._currentAudioTrack = null;
+    this._pendingBotTrack = null;
+    this._pendingBotParticipant = null;
+    this._botOutputTrack = null;
     this.stopRecording();
+
+    if (this._botAudioPlayer) {
+      await this._botAudioPlayer.stop();
+      this._botAudioPlayer = null;
+    }
 
     await this._daily.leave();
   }
@@ -630,6 +657,31 @@ export class DailyTransport extends Transport {
   private handleAppMessage(ev: DailyEventObjectAppMessage) {
     // Bubble any messages with rtvi-ai label
     if (ev.data.label === "rtvi-ai") {
+      if (this._fasterThanRealtime) {
+        if (ev.data.type === DailyRTVIMessageType.AUDIO_FASTER_THAN_REALTIME) {
+          this._trueSampleRate = ev.data.data.true_sample_rate as number;
+          this._declaredSampleRate = ev.data.data.declared_sample_rate as number;
+          // Bot track arrived before rates were known — set up now and fire the
+          // deferred onTrackStarted with the correctly-pitched outputTrack.
+          if (this._pendingBotTrack) {
+            const track = this._pendingBotTrack;
+            const participant = this._pendingBotParticipant;
+            this._pendingBotTrack = null;
+            this._pendingBotParticipant = null;
+            void this._setupBotAudioPlayer(track).then(() => {
+              this._callbacks.onTrackStarted?.(
+                this._botOutputTrack ?? track,
+                participant ? dailyParticipantToParticipant(participant) : undefined
+              );
+            });
+          }
+          return; // transport-internal message, don't forward
+        }
+        if (ev.data.type === "conversation.interrupt") {
+          void this._botAudioPlayer?.interrupt();
+          // Fall through to also forward the message to the app
+        }
+      }
       this._onMessage({
         id: ev.data.id,
         type: ev.data.type,
@@ -771,6 +823,30 @@ export class DailyTransport extends Transport {
       if (ev.participant?.local && ev.track.kind === "audio") {
         void this.handleLocalAudioTrack(ev.track);
       }
+
+      if (
+        this._fasterThanRealtime &&
+        !ev.participant?.local &&
+        ev.track.kind === "audio"
+      ) {
+        // Rates already known — set up the player and fire onTrackStarted with
+        // the correctly-pitched outputTrack instead of the original.
+        if (this._trueSampleRate && this._declaredSampleRate) {
+          const participant = ev.participant ?? null;
+          void this._setupBotAudioPlayer(ev.track).then(() => {
+            this._callbacks.onTrackStarted?.(
+              this._botOutputTrack ?? ev.track,
+              participant ? dailyParticipantToParticipant(participant) : undefined
+            );
+          });
+        } else {
+          // Rates not yet received — defer until audio.faster_than_realtime arrives.
+          this._pendingBotTrack = ev.track;
+          this._pendingBotParticipant = ev.participant ?? null;
+        }
+        return; // onTrackStarted is fired asynchronously above (or deferred)
+      }
+
       this._callbacks.onTrackStarted?.(
         ev.track,
         ev.participant
@@ -778,6 +854,15 @@ export class DailyTransport extends Transport {
           : undefined
       );
     }
+  }
+
+  private async _setupBotAudioPlayer(track: MediaStreamTrack): Promise<void> {
+    this._botAudioPlayer = new BotAudioPlayer();
+    this._botOutputTrack = await this._botAudioPlayer.start(
+      track,
+      this._declaredSampleRate,
+      this._trueSampleRate
+    );
   }
 
   private handleTrackStopped(ev: DailyEventObjectTrack) {
