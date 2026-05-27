@@ -5,6 +5,13 @@ All notable changes to **Pipecat Websocket Transport** will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.5](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.6.4...websocket-transport-v1.6.5) (2026-05-27)
+
+
+### Miscellaneous Chores
+
+* Bump client-js dependency for all transports to 1.10.0 ([7cfe831](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/7cfe83100d4e9f2f598db5013833444fccd5257e))
+
 ## [1.6.4](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.6.3...websocket-transport-v1.6.4) (2026-05-15)
 
 
