@@ -16,7 +16,7 @@ Pipecat Transports are intended to be used in conjunction with a Pipecat web cli
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/small-webrtc)
 [![README](https://img.shields.io/badge/README-goldenrod)](/transports/small-webrtc-transport/README.md)
 [![Demo](https://img.shields.io/badge/Demo-forestgreen)](https://github.com/pipecat-ai/pipecat/tree/main/examples/p2p-webrtc)
-![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/small-webrtc-transport)
+[![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/small-webrtc-transport)](https://www.npmjs.com/package/@pipecat-ai/small-webrtc-transport)
 
 This Transport creates a peer-to-peer WebRTC connection between the client and the bot process. This Transport is the client-side counterpart to the Pipecat [SmallWebRTCTransport component](https://docs.pipecat.ai/server/services/transport/small-webrtc).
 
@@ -53,7 +53,7 @@ Typical media flow using a SmallWebRTCTransport:
 [![Docs](https://img.shields.io/badge/Documention-blue)](https://docs.pipecat.ai/client/js/transports/daily)
 [![README](https://img.shields.io/badge/README-goldenrod)](/transports/daily/README.md)
 [![Demo](https://img.shields.io/badge/Demo-forestgreen)](https://github.com/pipecat-ai/pipecat/tree/main/examples/simple-chatbot)
-![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/daily-transport)
+[![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/daily-transport)](https://www.npmjs.com/package/@pipecat-ai/daily-transport)
 
 This Transport uses the [Daily](https://daily.co) audio and video calling service to connect to a bot and stream media over a WebRTC connection. This Transport is the client-side counterpart to the Pipecat [DailyTransport component](https://docs.pipecat.ai/server/services/transport/daily).
 
@@ -83,11 +83,22 @@ Typical media flow using a DailyTransport:
                                                                                        
 ```
 
+### [WebSocketTransport](transports/websocket-transport/README.md)
+[![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/api-reference/client/js/transports/websocket)
+[![README](https://img.shields.io/badge/README-goldenrod)](transports/websocket-transport/README.md)
+[![Demo](https://img.shields.io/badge/Demo-forestgreen)](https://github.com/pipecat-ai/pipecat-examples/tree/main/websocket)
+[![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/websocket-transport)](https://www.npmjs.com/package/@pipecat-ai/websocket-transport)
+
+
+This transport enables a purely WebSocket based connection between clients and your Pipecat application. It implements bidirectional audio and video streaming using a WebSocket for real-time communication.
+
+It is intended for lightweight implementations, particularly for local development and testing. It expects your Pipecat server to include the corresponding server-side [WebSocketTransport](https://docs.pipecat.ai/api-reference/server/services/transport/websocket-server) implementation.
+
 ### [GeminiLiveWebSocketTransport](transports/gemini-live-websocket-transport/README.md)
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/gemini)
 [![README](https://img.shields.io/badge/README-goldenrod)](transports/gemini-live-websocket-transport/README.md)
 [![Demo](https://img.shields.io/badge/Demo-forestgreen)](examples/directToLLMTransports/README.md)
-![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/gemini-live-websocket-transport)
+[![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/gemini-live-websocket-transport)](https://www.npmjs.com/package/@pipecat-ai/gemini-live-websocket-transport)
 
 This Transport extends the [RealTimeWebSocketTransport](transports/realtime-websocket-transport/README) and connects directly to Gemini over a WebSocket connection using the Multimodal Live API. This type of transport is great for testing different services out without the need to build a server component. Just be aware that it is insecure since you will need to have access to your Gemini API Key client-side so not probably something you want to use in your production app.
 
@@ -109,7 +120,7 @@ Media flow using a GeminiLiveWebSocketTransport:
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/openai-webrtc)
 [![README](https://img.shields.io/badge/README-goldenrod)](transports/openai-realtime-webrtc-transport/README.md)
 [![Demo](https://img.shields.io/badge/Demo-forestgreen)](examples/directToLLMTransports/README.md)
-![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/openai-realtime-webrtc-transport)
+[![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/openai-realtime-webrtc-transport)](https://www.npmjs.com/package/@pipecat-ai/openai-realtime-webrtc-transport)
 
 This Transport connects directly to OpenAI over a WebRTC connection using the RealTime API. This type of transport is great for testing different services out without the need to build a server component. Just be aware that it is insecure since you will need to have access to your OpenAI API Key client-side so not probably something you want to use in your production app. It does not implement the Ephemeral Token process.
 
