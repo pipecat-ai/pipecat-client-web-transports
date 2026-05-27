@@ -5,6 +5,13 @@ All notable changes to **Pipecat GeminiLiveWebsocketTransport** will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/gemini-live-websocket-transport-v1.5.3...gemini-live-websocket-transport-v1.5.4) (2026-05-27)
+
+
+### Miscellaneous Chores
+
+* Bump client-js dependency for all transports to 1.10.0 ([7cfe831](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/7cfe83100d4e9f2f598db5013833444fccd5257e))
+
 ## [1.5.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/gemini-live-websocket-transport-v1.5.2...gemini-live-websocket-transport-v1.5.3) (2026-05-15)
 
 
