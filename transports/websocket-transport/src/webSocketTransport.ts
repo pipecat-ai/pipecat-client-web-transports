@@ -314,7 +314,7 @@ export class WebSocketTransport extends Transport {
 
   // Not implemented
   enableScreenShare(enable: boolean): void {
-    logger.error("enableScreenShare not implemented for WebSocketTransport");
+    logger.warn("enableScreenShare not implemented for WebSocketTransport");
     throw new UnsupportedFeatureError(
       "enableScreenShare",
       "webSocketTransport",
@@ -323,12 +323,12 @@ export class WebSocketTransport extends Transport {
   }
 
   public get isSharingScreen(): boolean {
-    logger.error("isSharingScreen not implemented for WebSocketTransport");
+    logger.warn("isSharingScreen not implemented for WebSocketTransport");
     return false;
   }
 
   enableCam(enable: boolean) {
-    logger.error("enableCam not implemented for WebSocketTransport");
+    logger.warn("enableCam not implemented for WebSocketTransport");
     throw new UnsupportedFeatureError(
       "enableCam",
       "webSocketTransport",
@@ -337,12 +337,12 @@ export class WebSocketTransport extends Transport {
   }
 
   get isCamEnabled(): boolean {
-    logger.error("isCamEnabled not implemented for WebSocketTransport");
+    logger.warn("isCamEnabled not implemented for WebSocketTransport");
     return false;
   }
 
   get selectedCam(): MediaDeviceInfo | Record<string, never> {
-    logger.error("selectedCam not implemented for WebSocketTransport");
+    logger.warn("selectedCam not implemented for WebSocketTransport");
     throw new UnsupportedFeatureError(
       "selectedCam",
       "webSocketTransport",
