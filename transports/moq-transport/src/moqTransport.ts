@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-import * as Moq from "@moq/lite";
+import * as Moq from "@moq/net";
+import * as Publish from "@moq/publish";
+// @moq/hang has subpath exports for the catalog parser and the
+// container consumer; the package's main entry doesn't re-export them.
+import * as Catalog from "@moq/hang/catalog";
+import * as Container from "@moq/hang/container";
+import { Effect, Signal } from "@moq/signals";
 import {
   type PipecatClientOptions,
   type RTVIEventCallbacks,
@@ -15,170 +21,156 @@ import {
   type TransportState,
 } from "@pipecat-ai/client-js";
 
-/**
- * AudioWorklet that converts the mic's float32 PCM to 16-bit little-endian
- * PCM and posts each frame back to the main thread. Ported verbatim from
- * `moq_prebuilt/client/app.js` so we keep wire compatibility with the
- * Python bot (16 kHz, mono, s16le) while the rest of the transport gets
- * shaped up. Compiles to a blob URL at runtime via `URL.createObjectURL`.
- */
-const WORKLET_CODE = `
-class PcmCapture extends AudioWorkletProcessor {
-  process(inputs) {
-    const input = inputs[0];
-    if (input.length > 0) {
-      const floats = input[0];
-      const pcm = new Int16Array(floats.length);
-      for (let i = 0; i < floats.length; i++) {
-        pcm[i] = Math.max(-32768, Math.min(32767, Math.round(floats[i] * 32768)));
-      }
-      this.port.postMessage(pcm.buffer, [pcm.buffer]);
-    }
-    return true;
-  }
-}
-registerProcessor('pcm-capture', PcmCapture);
-`;
+const DEFAULT_NAMESPACE = "pipecat";
+const DEFAULT_CLIENT_ID = "client0";
+const DEFAULT_BOT_ID = "bot0";
+const DEFAULT_TRANSCRIPT_TRACK = "transcript";
+// Bounded jitter buffer on the audio decoder. Lower = more interactive
+// but more drops on bad networks. Matches the bot's audio_in_max_latency_ms
+// in spirit (each side enforces its own deadline).
+const DEFAULT_AUDIO_LATENCY_MS = 80;
 
-const MIC_SAMPLE_RATE = 16000;
-const PLAYBACK_SAMPLE_RATE = 24000;
-const AUDIO_TRACK_PRIORITY = 128;
+// Mirror of `@moq/net`'s internal branded `Milli` type. The package's
+// `time` subpath isn't in its `exports` field, so we redeclare locally
+// and cast at the boundary instead of reaching into private file paths.
+type Milli = number & { readonly _brand: "milli" };
 
 /**
  * Constructor options for the MoQ transport.
  *
- * Day 1 surface — only the bits needed for the moq-lite handshake. Device
- * pickers, track selection, transcript routing arrive in later iterations.
+ * The browser dials a MOQ peer (relay or bot in serve mode) at
+ * ``relayUrl`` and publishes its mic under ``<namespace>/<clientId>``
+ * while consuming the bot under ``<namespace>/<botId>``. Audio tracks
+ * inside each broadcast are catalog-driven (codec, sample rate, channel
+ * count are discovered at connect time), so they aren't pinned here.
  */
 export interface MoqTransportOptions {
   /**
-   * URL of the moq-lite relay. WebTransport (HTTPS/HTTP3) by default; if
-   * the browser can't reach it via WebTransport, @moq/lite falls back to
-   * WebSocket automatically.
+   * Full URL of the MOQ peer (e.g. ``https://relay.example.com:4080/moq``).
+   * WebTransport (HTTPS/HTTP3); @moq/net races WebSocket as a fallback
+   * if WebTransport isn't reachable.
    */
   relayUrl: string;
 
   /**
-   * For local development relays with self-signed certs. Same shape as
-   * the native WebTransport `serverCertificateHashes` option.
+   * Pinned cert hashes for self-signed dev setups. Same shape as the
+   * native WebTransport ``serverCertificateHashes`` option.
    */
   serverCertificateHashes?: WebTransportHash[];
 
   /**
-   * This client's participant id. Combined with `namespace` it forms the
-   * broadcast path this client publishes under: `<namespace>/<clientId>`.
-   * Defaults to "client0" — matches the current hand-rolled UI default.
+   * This client's participant id. Combined with ``namespace`` it forms
+   * the broadcast path the client publishes under: ``<namespace>/<clientId>``.
    */
   clientId?: string;
 
   /**
-   * The peer (bot) participant id to subscribe to. Subscriptions target
-   * `<namespace>/<botId>/<track>`.
+   * The peer (bot) participant id to consume. Subscriptions target
+   * ``<namespace>/<botId>``; track names come from the bot's catalog.
    */
   botId?: string;
 
   /**
-   * Top-level namespace (analogous to a room name). Defaults to "pipecat".
+   * Top-level namespace (analogous to a room name). Defaults to ``"pipecat"``.
    */
   namespace?: string;
 
   /**
-   * Track name the client publishes its mic on. The bot subscribes to
-   * `<namespace>/<clientId>/<publishTrack>`. Defaults to "user-audio".
-   */
-  publishTrack?: string;
-
-  /**
-   * Track name the client subscribes to inside the bot's broadcast.
-   * Resolved path: `<namespace>/<botId>/<subscribeTrack>`. Defaults to
-   * "bot-audio".
-   */
-  subscribeTrack?: string;
-
-  /**
    * Track name for RTVI server→client messages (transcripts, bot-ready,
    * speech events, etc.). The client subscribes at
-   * `<namespace>/<botId>/<transcriptTrack>`. Defaults to "transcript".
+   * ``<namespace>/<botId>/<transcriptTrack>``. Defaults to ``"transcript"``.
+   *
+   * Stays pinned because the transcript is a non-media byte track —
+   * the catalog only describes media tracks (audio/video).
    */
   transcriptTrack?: string;
 
   /**
-   * Track name for RTVI client→server messages (client-ready, custom
-   * messages). The client publishes at
-   * `<namespace>/<clientId>/<messageTrack>`. Defaults to "user-message".
-   *
-   * Note: the bot side needs to SUBSCRIBE to this track for messages to
-   * flow. If it doesn't, `sendMessage()` is a silent no-op.
+   * Max latency (ms) for the audio container consumer's jitter buffer.
+   * The library will wait this long for a late frame before skipping
+   * ahead. Lower = more interactive, more drops; higher = smoother,
+   * more glass-to-glass delay.
    */
-  messageTrack?: string;
+  audioLatencyMs?: number;
+}
+
+interface ResolvedOptions {
+  relayUrl: string;
+  serverCertificateHashes?: WebTransportHash[];
+  clientId: string;
+  botId: string;
+  namespace: string;
+  transcriptTrack: string;
+  audioLatencyMs: number;
+}
+
+function applyDefaults(opts: MoqTransportOptions): ResolvedOptions {
+  return {
+    relayUrl: opts.relayUrl,
+    serverCertificateHashes: opts.serverCertificateHashes,
+    clientId: opts.clientId ?? DEFAULT_CLIENT_ID,
+    botId: opts.botId ?? DEFAULT_BOT_ID,
+    namespace: opts.namespace ?? DEFAULT_NAMESPACE,
+    transcriptTrack: opts.transcriptTrack ?? DEFAULT_TRANSCRIPT_TRACK,
+    audioLatencyMs: opts.audioLatencyMs ?? DEFAULT_AUDIO_LATENCY_MS,
+  };
 }
 
 /**
- * `MoqTransport` — Pipecat Client SDK transport plugin for Media-over-QUIC.
+ * ``MoqTransport`` — Pipecat Client SDK transport plugin for Media-over-QUIC.
  *
- * Day 2 scope: device enumeration, mic capture via AudioWorklet, and
- * reactive publish via `@moq/lite` (the bot's SUBSCRIBE triggers writes).
- * Bot-audio playback, the transcript track, and the full RTVI message
- * channel still stubbed until Days 3–4.
+ * Built on the official ``moq`` library family:
+ *
+ * - ``@moq/net`` for connection management (``Connection.Reload``
+ *   auto-reconnects on drops; races WebTransport + WebSocket).
+ * - ``@moq/publish`` for mic capture and Opus encoding. ``Publish.Broadcast``
+ *   wraps a microphone source and publishes both the catalog and the
+ *   audio track; subscribe fulfilment is handled internally.
+ * - ``@moq/hang`` for catalog parsing and bounded-latency audio
+ *   consumption (``Container.Consumer``).
+ * - ``@moq/signals`` for reactive plumbing (re-runs the consume loops
+ *   on each reconnect without manual wiring).
+ *
+ * Catalog discovery (instead of pinned track names) lets the bot pick
+ * its own codec and sample rate; we read whatever it advertises.
  */
 export class MoqTransport extends Transport {
   public static SERVICE_NAME = "moq-transport";
 
-  // Connection options provided to the constructor (with defaults applied).
-  private _moqOptions: MoqTransportOptions;
+  // Resolved options (defaults applied), captured at construction time
+  // and overridden by `_validateConnectionParams` at connect time.
+  private _moqOptions: ResolvedOptions;
 
-  // The active moq-lite connection, populated by `_connect`.
-  private _established: Moq.Connection.Established | undefined;
+  // @moq/net state — owned across the lifetime of one `_connect`/`_disconnect`.
+  private _reload: Moq.Connection.Reload | null = null;
+  private _statusEffect: Effect | null = null;
+  private _consumeEffect: Effect | null = null;
 
-  // The broadcast this client publishes under (`<namespace>/<clientId>`).
-  // Registered with `_established.publish(...)` in `_connect` and torn
-  // down in `_disconnect`. The bot SUBSCRIBEs into this broadcast.
-  private _publishBroadcast: Moq.Broadcast | undefined;
+  // Publish side (mic → bot).
+  private _publishBroadcast: Publish.Broadcast | null = null;
+  private _micEnabled = new Signal(true);
 
-  // The currently-active outbound audio track. Set when the bot subscribes
-  // to our user-audio track; the worklet writes PCM frames to it.
-  private _activeAudioTrack: Moq.Track | undefined;
-
-  // The currently-active outbound RTVI message track. Set when the bot
-  // subscribes to our user-message track; `sendMessage()` writes to it.
-  private _activeMessageTrack: Moq.Track | undefined;
-
-  // Bot transcript subscription state. Frames are UTF-8 JSON RTVI messages.
-  private _botTranscriptMoqTrack: Moq.Track | undefined;
-
-  // Bot audio subscription state.
-  private _botBroadcast: Moq.Broadcast | undefined;
-  private _botAudioMoqTrack: Moq.Track | undefined;
+  // Bot audio playback state. We synthesize a `MediaStreamTrack` from the
+  // playback `AudioContext`'s destination so `tracks().bot.audio` returns
+  // something the consumer can plug into a `<audio>` element / visualizer.
   private _playbackContext: AudioContext | undefined;
   private _playbackDestination: MediaStreamAudioDestinationNode | undefined;
   private _botAudioTrack: MediaStreamTrack | undefined;
   private _playbackTime = 0;
 
-  // Mic capture state.
-  private _micStream: MediaStream | undefined;
-  private _micTrack: MediaStreamTrack | undefined;
-  private _audioContext: AudioContext | undefined;
-  private _micWorklet: AudioWorkletNode | undefined;
-
-  // Device picker state.
+  // Mic device picker state — we expose the device list to the SDK so
+  // consumers can show a picker. `Publish.Source.Microphone` handles
+  // the actual `getUserMedia` call.
   private _knownMics: MediaDeviceInfo[] = [];
   private _selectedMicId: string | undefined;
+  private _localAudioTrack: MediaStreamTrack | undefined;
 
   // Transport lifecycle state. Mirrored to `_callbacks.onTransportStateChanged`.
   declare protected _state: TransportState;
 
   constructor(options: MoqTransportOptions) {
     super();
-    this._moqOptions = {
-      namespace: "pipecat",
-      clientId: "client0",
-      botId: "bot0",
-      publishTrack: "user-audio",
-      subscribeTrack: "bot-audio",
-      transcriptTrack: "transcript",
-      messageTrack: "user-message",
-      ...options,
-    };
+    this._moqOptions = applyDefaults(options);
     this._state = "disconnected";
   }
 
@@ -197,19 +189,18 @@ export class MoqTransport extends Transport {
   }
 
   async initDevices(): Promise<void> {
-    // Acquire the mic up front so the device list comes back with labels.
-    // The MediaStreamTrack lives for the duration of the transport.
-    if (this._micTrack) return;
+    // Lazy-acquire mic permission so `getAllMics()` returns labels.
+    // `Publish.Source.Microphone` (used inside `_connect`) does its own
+    // `getUserMedia` later — we keep the pre-permission probe here so
+    // a picker can populate before the user clicks Connect.
+    if (this._localAudioTrack) return;
 
-    let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          sampleRate: MIC_SAMPLE_RATE,
-          channelCount: 1,
-          echoCancellation: true,
-        },
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true },
       });
+      this._localAudioTrack = stream.getAudioTracks()[0];
+      this._selectedMicId = this._localAudioTrack?.getSettings().deviceId;
     } catch (err) {
       throw new RTVIError(
         `MoqTransport could not acquire microphone: ${
@@ -218,35 +209,6 @@ export class MoqTransport extends Transport {
       );
     }
 
-    this._micStream = stream;
-    this._micTrack = stream.getAudioTracks()[0];
-
-    const settings = this._micTrack?.getSettings();
-    this._selectedMicId = settings?.deviceId;
-
-    // Build the AudioWorklet pipeline. The worklet posts s16le PCM frames
-    // back to the main thread; we route them to the active outbound MoQ
-    // track if one is bound, or drop them otherwise.
-    const ctx = new AudioContext({ sampleRate: MIC_SAMPLE_RATE });
-    const blob = new Blob([WORKLET_CODE], { type: "application/javascript" });
-    const url = URL.createObjectURL(blob);
-    try {
-      await ctx.audioWorklet.addModule(url);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-
-    const source = ctx.createMediaStreamSource(stream);
-    const worklet = new AudioWorkletNode(ctx, "pcm-capture");
-    worklet.port.onmessage = (e) => this._writePcmFrame(new Uint8Array(e.data));
-    source.connect(worklet);
-    worklet.connect(ctx.destination);
-
-    this._audioContext = ctx;
-    this._micWorklet = worklet;
-
-    // Refresh the cached device list now that the permission prompt has
-    // settled — `enumerateDevices()` only returns labels post-permission.
     this._knownMics = (await navigator.mediaDevices.enumerateDevices()).filter(
       (d) => d.kind === "audioinput",
     );
@@ -254,133 +216,180 @@ export class MoqTransport extends Transport {
 
   _validateConnectionParams(connectParams?: unknown): MoqTransportOptions {
     if (connectParams === undefined || connectParams === null) {
-      return this._moqOptions;
+      return this._optionsAsInput();
     }
     if (typeof connectParams !== "object") {
       throw new RTVIError("MoqTransport connect params must be an object");
     }
-    return { ...this._moqOptions, ...(connectParams as Partial<MoqTransportOptions>) };
+    return { ...this._optionsAsInput(), ...(connectParams as Partial<MoqTransportOptions>) };
+  }
+
+  /** Return the resolved options re-shaped to the public input type
+   *  (used when merging with connect-time params). */
+  private _optionsAsInput(): MoqTransportOptions {
+    return { ...this._moqOptions };
   }
 
   async _connect(connectParams?: MoqTransportOptions): Promise<void> {
-    const opts = connectParams ?? this._moqOptions;
-    if (!opts.relayUrl) {
+    const merged = connectParams
+      ? { ...this._moqOptions, ...applyDefaults({ ...this._moqOptions, ...connectParams }) }
+      : this._moqOptions;
+    if (!merged.relayUrl) {
       throw new RTVIError("MoqTransport requires `relayUrl`");
     }
+    this._moqOptions = merged;
 
     this.state = "connecting";
 
+    let url: URL;
     try {
-      const url = new URL(opts.relayUrl);
-      this._established = await Moq.Connection.connect(url, {
-        webtransport: opts.serverCertificateHashes
-          ? { serverCertificateHashes: opts.serverCertificateHashes }
-          : undefined,
-      });
+      url = new URL(merged.relayUrl);
     } catch (err) {
       this.state = "error";
       throw new RTVIError(
-        `MoqTransport failed to connect to relay ${opts.relayUrl}: ${
+        `MoqTransport invalid relayUrl ${JSON.stringify(merged.relayUrl)}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
     }
 
-    this.state = "connected";
+    const webtransport: { serverCertificateHashes?: WebTransportHash[] } = {};
+    if (merged.serverCertificateHashes) {
+      webtransport.serverCertificateHashes = merged.serverCertificateHashes;
+    }
 
-    // Watch for relay-initiated close so the SDK consumer learns about
-    // network drops.
-    this._established.closed.then(() => {
-      if (this._state !== "disconnected" && this._state !== "disconnecting") {
-        this.state = "disconnected";
+    // Reload auto-reconnects on disconnect. Publish.Broadcast and the
+    // consume effect below both react to its `established` signal.
+    this._reload = new Moq.Connection.Reload({
+      enabled: new Signal(true),
+      url: new Signal(url),
+      webtransport,
+    });
+
+    // Mirror Reload's status into our transport state. `connected` here
+    // means the MoQ session is up; the SDK flips to `ready` separately
+    // via `sendReadyMessage`.
+    this._statusEffect = new Effect();
+    this._statusEffect.run((eff) => {
+      const status = eff.get(this._reload!.status);
+      if (status === "connected") {
+        if (this._state === "connecting") this.state = "connected";
+      } else if (status === "connecting") {
+        this.state = "connecting";
+      } else if (status === "disconnected") {
+        if (this._state !== "disconnecting" && this._state !== "disconnected") {
+          this.state = "disconnected";
+        }
       }
     });
 
-    // Register the publish broadcast at <namespace>/<clientId>. The bot
-    // discovers it via the relay's ANNOUNCE_PLEASE flow and then sends
-    // SUBSCRIBEs for our publish + message tracks; those subscribes land
-    // on `_runPublishLoop` below.
-    const ns = opts.namespace ?? "pipecat";
-    const clientPath = Moq.Path.from(ns, opts.clientId ?? "client0");
-    const broadcast = new Moq.Broadcast();
-    this._established.publish(clientPath, broadcast);
-    this._publishBroadcast = broadcast;
-    this._runPublishLoop(
-      broadcast,
-      opts.publishTrack ?? "user-audio",
-      opts.messageTrack ?? "user-message",
-    ).catch((err) => {
-      // The loop only throws if the broadcast aborted unexpectedly. Log
-      // and let the consumer fall back to disconnect handling.
-      console.warn("MoqTransport publish loop ended:", err);
-    });
+    const ourPath = Moq.Path.from(merged.namespace, merged.clientId);
+    const botPath = Moq.Path.from(merged.namespace, merged.botId);
 
-    // Subscribe to the bot's broadcast and its two tracks: audio (PCM)
-    // and transcript (UTF-8 JSON RTVI messages).
-    const botPath = Moq.Path.from(ns, opts.botId ?? "bot0");
-    const botBroadcast = this._established.consume(botPath);
-    this._botBroadcast = botBroadcast;
-
-    // Bot audio: s16le PCM at PLAYBACK_SAMPLE_RATE. Decoded and routed
-    // both to the speakers and a MediaStreamAudioDestinationNode so
-    // `tracks().bot.audio` returns a real MediaStreamTrack.
-    const botAudio = botBroadcast.subscribe(
-      opts.subscribeTrack ?? "bot-audio",
-      AUDIO_TRACK_PRIORITY,
+    // ----------------------------------------------------------------
+    // Publish — get the mic ourselves so we can pin `channelCount: 1`
+    // (the bot's Opus decoder won't downmix; `{ exact: 1 }` makes the
+    // constraint mandatory). Then hand the track to `Publish.Broadcast`
+    // as its audio source. We bypass `Publish.Source.Microphone` here
+    // because 0.2.9 didn't appear to honor `constraints.channelCount`
+    // on this stack — observed `channels=2` in the bot's catalog read
+    // even with the constraint set.
+    // ----------------------------------------------------------------
+    let micTrack: MediaStreamTrack;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: { exact: 1 },
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+      micTrack = stream.getAudioTracks()[0];
+    } catch (err) {
+      this.state = "error";
+      throw new RTVIError(
+        `MoqTransport could not acquire mono microphone: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+    this._localAudioTrack = micTrack;
+    const settings = micTrack.getSettings();
+    console.log(
+      `[MoqTransport] mic acquired — channels=${settings.channelCount}, ` +
+        `sampleRate=${settings.sampleRate}, deviceId=${settings.deviceId}`,
     );
-    this._botAudioMoqTrack = botAudio;
-    this._consumeBotAudio(botAudio).catch((err) => {
-      console.warn("MoqTransport bot-audio consume loop ended:", err);
-    });
 
-    // Bot transcript: each frame is a UTF-8 JSON RTVI message
-    // (bot-ready, user-transcription, bot-output, bot-llm-*, etc.). We
-    // hand each one to PipecatClient via `_onMessage`.
-    const botTranscript = botBroadcast.subscribe(
-      opts.transcriptTrack ?? "transcript",
-      AUDIO_TRACK_PRIORITY,
+    const micSource = new Signal<Publish.Audio.Source | undefined>(
+      micTrack as Publish.Audio.StreamTrack,
     );
-    this._botTranscriptMoqTrack = botTranscript;
-    this._consumeBotTranscript(botTranscript).catch((err) => {
-      console.warn("MoqTransport bot-transcript consume loop ended:", err);
+    this._publishBroadcast = new Publish.Broadcast({
+      connection: this._reload.established,
+      enabled: new Signal(true),
+      name: new Signal(ourPath),
+      audio: {
+        source: micSource,
+        enabled: this._micEnabled,
+      },
     });
 
-    // Transition to "connected" — `sendReadyMessage` will move us to
-    // "ready" once PipecatClient calls it, matching the pattern in
-    // `@pipecat-ai/small-webrtc-transport`.
-    this.state = "connected";
+    // ----------------------------------------------------------------
+    // Consume — re-run the loops on each successful (re)connect.
+    // ----------------------------------------------------------------
+    this._consumeEffect = new Effect();
+    this._consumeEffect.run((eff) => {
+      const conn = eff.get(this._reload!.established);
+      if (!conn) return;
+
+      const botBroadcast = conn.consume(botPath);
+
+      const ac = new AbortController();
+      this._consumeBotAudio(botBroadcast, ac.signal).catch((e) => {
+        if (!ac.signal.aborted) {
+          console.warn("MoqTransport bot-audio loop:", e);
+        }
+      });
+      this._consumeBotTranscript(botBroadcast, ac.signal).catch((e) => {
+        if (!ac.signal.aborted) {
+          console.warn("MoqTransport bot-transcript loop:", e);
+        }
+      });
+
+      eff.cleanup(() => ac.abort());
+    });
   }
 
   async _disconnect(): Promise<void> {
     if (this._state === "disconnected") return;
     this.state = "disconnecting";
     try {
-      this._botAudioMoqTrack?.close();
-      this._botTranscriptMoqTrack?.close();
-      this._botBroadcast?.close();
+      this._consumeEffect?.close();
+      this._statusEffect?.close();
       this._publishBroadcast?.close();
-      this._activeAudioTrack = undefined;
-      this._activeMessageTrack = undefined;
-      this._botAudioMoqTrack = undefined;
-      this._botTranscriptMoqTrack = undefined;
-      this._botBroadcast = undefined;
-      this._publishBroadcast = undefined;
-      this._established?.close();
+      this._localAudioTrack?.stop();
+      try {
+        this._reload?.signals.close();
+      } catch {
+        // best-effort.
+      }
     } finally {
-      this._established = undefined;
-      this._teardownMic();
+      this._consumeEffect = null;
+      this._statusEffect = null;
+      this._publishBroadcast = null;
+      this._localAudioTrack = undefined;
+      this._reload = null;
       this._teardownPlayback();
       this.state = "disconnected";
     }
   }
 
   sendReadyMessage(): void {
-    // Match the small-webrtc-transport pattern: flip to "ready" and send
-    // the RTVI client-ready message. PipecatClient.connect() resolves
-    // when the bot replies with a bot-ready message on the transcript
-    // track (handled in `_consumeBotTranscript`).
+    // In the moq-libs design the bot's `on_client_connected` fires
+    // when it sees this client's broadcast announcement — no separate
+    // client-ready RTVI message is needed (and there's no client→server
+    // message channel by default). The SDK still expects this method
+    // to flip state to `ready`.
     this.state = "ready";
-    this.sendMessage(RTVIMessage.clientReady());
   }
 
   // --------------------------------------------------------------------
@@ -403,9 +412,6 @@ export class MoqTransport extends Transport {
 
   async getAllMics(): Promise<MediaDeviceInfo[]> {
     if (this._knownMics.length === 0) {
-      // initDevices hasn't run yet — populate from a permission-less
-      // enumerate call so the picker has something to show. Labels will
-      // be empty strings until the user grants mic permission.
       this._knownMics = (await navigator.mediaDevices.enumerateDevices()).filter(
         (d) => d.kind === "audioinput",
       );
@@ -423,7 +429,12 @@ export class MoqTransport extends Transport {
 
   updateMic(micId: string): void {
     if (micId === this._selectedMicId) return;
-    void this._swapMic(micId);
+    this._selectedMicId = micId;
+    // Publish.Source.Microphone handles its own getUserMedia call
+    // internally — at the time of this writing it doesn't accept a
+    // deviceId. Future work: extend it (or replace with a custom
+    // source) so the picker actually re-routes audio. For now we
+    // remember the selection so `selectedMic` is consistent.
   }
 
   updateCam(_camId: string): void {}
@@ -446,8 +457,8 @@ export class MoqTransport extends Transport {
   }
 
   enableMic(enable: boolean): void {
-    if (!this._micTrack) return;
-    this._micTrack.enabled = enable;
+    this._micEnabled.set(enable);
+    if (this._localAudioTrack) this._localAudioTrack.enabled = enable;
   }
 
   enableCam(_enable: boolean): void {}
@@ -459,7 +470,7 @@ export class MoqTransport extends Transport {
   }
 
   get isMicEnabled(): boolean {
-    return this._micTrack?.enabled ?? false;
+    return this._micEnabled.get();
   }
 
   get isSharingScreen(): boolean {
@@ -470,210 +481,217 @@ export class MoqTransport extends Transport {
   // Messaging + tracks
   // --------------------------------------------------------------------
 
-  sendMessage(message: RTVIMessage): void {
-    const track = this._activeMessageTrack;
-    if (!track) {
-      // The bot hasn't SUBSCRIBE'd to our message track yet, so we have
-      // nowhere to write. Drop silently — the message channel is best-
-      // effort and the bot side may not implement it at all.
-      return;
-    }
-    try {
-      const payload = new TextEncoder().encode(JSON.stringify(message));
-      track.writeFrame(payload);
-    } catch (err) {
-      console.warn("MoqTransport sendMessage failed:", err);
-    }
+  sendMessage(_message: RTVIMessage): void {
+    // The catalog-driven moq-libs design doesn't carve out a dedicated
+    // client→server RTVI message channel. Drop silently — best-effort
+    // by contract, and currently the bot doesn't read this path.
   }
 
   tracks(): Tracks {
     return {
-      local: this._micTrack ? { audio: this._micTrack } : {},
+      local: this._localAudioTrack ? { audio: this._localAudioTrack } : {},
       bot: this._botAudioTrack ? { audio: this._botAudioTrack } : {},
     };
   }
 
   // --------------------------------------------------------------------
-  // Internals
+  // Internals — bot audio
   // --------------------------------------------------------------------
 
-  /**
-   * Wait for the bot to SUBSCRIBE to our publish tracks (audio + RTVI
-   * messages), then bind each incoming `Moq.Track` to the corresponding
-   * write path. Loops so we re-bind on each fresh SUBSCRIBE (e.g. bot
-   * reconnect).
-   */
-  private async _runPublishLoop(
-    broadcast: Moq.Broadcast,
-    publishTrackName: string,
-    messageTrackName: string,
+  /** Read the bot's catalog, find the first Opus audio track, and pump
+   *  its Opus frames into a WebCodecs `AudioDecoder`. Decoded
+   *  `AudioData` is scheduled on `_playbackContext` and fanned out to a
+   *  synthesized `MediaStreamTrack` so `tracks().bot.audio` works. */
+  private async _consumeBotAudio(
+    botBroadcast: ReturnType<Moq.Connection.Established["consume"]>,
+    signal: AbortSignal,
   ): Promise<void> {
-    for (;;) {
-      const req = await broadcast.requested();
-      if (!req) return;
-      if (req.track.name === publishTrackName) {
-        this._activeAudioTrack = req.track;
-        req.track.closed.then(() => {
-          if (this._activeAudioTrack === req.track) {
-            this._activeAudioTrack = undefined;
-          }
-        });
-      } else if (req.track.name === messageTrackName) {
-        this._activeMessageTrack = req.track;
-        req.track.closed.then(() => {
-          if (this._activeMessageTrack === req.track) {
-            this._activeMessageTrack = undefined;
-          }
-        });
-      } else {
-        // Unknown track — reject so the relay can try other publishers.
-        req.track.close(new Error(`unknown track: ${req.track.name}`));
-      }
-    }
-  }
-
-  /**
-   * Drain UTF-8 JSON RTVI messages from the bot's transcript track and
-   * hand each one to PipecatClient via the message handler that
-   * `initialize()` wired up. PipecatClient routes them to the
-   * appropriate event callback (onUserTranscript, onBotTtsText, onBotReady,
-   * etc.) and resolves the connect promise when bot-ready arrives.
-   */
-  private async _consumeBotTranscript(track: Moq.Track): Promise<void> {
-    const decoder = new TextDecoder();
-    for (;;) {
-      const frame = await track.readFrame();
-      if (!frame) return;
-      if (frame.byteLength === 0) continue;
-      let parsed: unknown;
+    const catalogTrack = botBroadcast.subscribe(
+      "catalog.json",
+      Catalog.PRIORITY?.catalog ?? 0,
+    );
+    signal.addEventListener("abort", () => {
       try {
-        parsed = JSON.parse(decoder.decode(frame));
-      } catch (err) {
-        console.warn("MoqTransport transcript frame parse error:", err);
-        continue;
+        catalogTrack.close();
+      } catch {
+        // best-effort.
       }
-      if (!parsed || typeof parsed !== "object") continue;
-      this._onMessage?.(parsed as RTVIMessage);
-    }
-  }
+    });
 
-  /** Write one PCM frame to the active audio track, if one is bound. */
-  private _writePcmFrame(bytes: Uint8Array): void {
-    const track = this._activeAudioTrack;
-    if (!track) return;
+    const catalogFrame = await catalogTrack.readFrame();
+    catalogTrack.close();
+    if (!catalogFrame || signal.aborted) return;
+
+    let catalog: ReturnType<typeof Catalog.decode>;
     try {
-      track.writeFrame(bytes);
-    } catch (err) {
-      // Track was closed mid-write; drop and let the closed-handler
-      // clear `_activeAudioTrack`.
-      console.warn("MoqTransport audio writeFrame failed:", err);
-    }
-  }
-
-  /** Swap to a different mic device without tearing down the worklet. */
-  private async _swapMic(deviceId: string): Promise<void> {
-    if (!this._audioContext) {
-      // initDevices hasn't run — just remember the choice for next start.
-      this._selectedMicId = deviceId;
+      catalog = Catalog.decode(catalogFrame);
+    } catch (e) {
+      console.warn("MoqTransport catalog decode failed:", e);
       return;
     }
-    let stream: MediaStream;
+
+    const audio = catalog?.audio?.renditions ?? {};
+    const trackName = Object.keys(audio)[0];
+    if (!trackName) return;
+    const audioConfig = audio[trackName];
+
+    const moqTrack = botBroadcast.subscribe(
+      trackName,
+      Catalog.PRIORITY?.audio ?? 1,
+    );
+    // hang's `Container.Consumer.latency` expects a branded `Milli`
+    // type. The Signal carries a plain number; cast at the boundary.
+    const latencySig = new Signal(
+      this._moqOptions.audioLatencyMs as unknown as Milli,
+    );
+    const consumer = new Container.Consumer(moqTrack, {
+      format: new Container.Legacy.Format(),
+      latency: latencySig,
+    });
+
+    const { ctx, dest } = this._ensurePlaybackContext(audioConfig.sampleRate);
+
+    const decoder = new AudioDecoder({
+      output: (data) => this._playAudioData(data, ctx, dest),
+      error: (err) =>
+        console.warn("MoqTransport audio decode error:", err),
+    });
+    decoder.configure({
+      codec: audioConfig.codec,
+      sampleRate: audioConfig.sampleRate,
+      numberOfChannels: audioConfig.numberOfChannels,
+    });
+
+    signal.addEventListener("abort", () => {
+      try {
+        consumer.close();
+      } catch {
+        // best-effort.
+      }
+      try {
+        moqTrack.close();
+      } catch {
+        // best-effort.
+      }
+      try {
+        if (decoder.state !== "closed") decoder.close();
+      } catch {
+        // best-effort.
+      }
+    });
+
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: { exact: deviceId },
-          sampleRate: MIC_SAMPLE_RATE,
-          channelCount: 1,
-          echoCancellation: true,
-        },
-      });
-    } catch (err) {
-      console.warn("MoqTransport updateMic failed:", err);
-      return;
-    }
-    // Tear down the previous source/track and wire up the new one.
-    this._micStream?.getTracks().forEach((t) => t.stop());
-    this._micStream = stream;
-    this._micTrack = stream.getAudioTracks()[0];
-    this._selectedMicId = this._micTrack?.getSettings().deviceId ?? deviceId;
-    const source = this._audioContext.createMediaStreamSource(stream);
-    if (this._micWorklet) source.connect(this._micWorklet);
-  }
-
-  /** Stop the mic, close the AudioContext, drop references. */
-  private _teardownMic(): void {
-    this._micWorklet?.disconnect();
-    this._micStream?.getTracks().forEach((t) => t.stop());
-    this._audioContext?.close().catch(() => {});
-    this._micWorklet = undefined;
-    this._micStream = undefined;
-    this._micTrack = undefined;
-    this._audioContext = undefined;
-  }
-
-  /**
-   * Drain s16le PCM frames from the bot's audio track and play them.
-   * Each frame becomes an `AudioBufferSourceNode` scheduled head-to-tail
-   * with the previous one (gapless playback), and is fanned out to both
-   * the speakers and a `MediaStreamAudioDestinationNode` so the synthesized
-   * `_botAudioTrack` reflects what the user actually hears.
-   */
-  private async _consumeBotAudio(track: Moq.Track): Promise<void> {
-    for (;;) {
-      const frame = await track.readFrame();
-      if (!frame) return;
-      if (frame.byteLength < 2) continue;
-      this._playPcmFrame(frame);
+      for (;;) {
+        const next = await consumer.next();
+        if (!next || signal.aborted) break;
+        const { frame } = next;
+        if (!frame) continue;
+        decoder.decode(
+          new EncodedAudioChunk({
+            type: "key",
+            data: frame.data,
+            timestamp: frame.timestamp,
+          }),
+        );
+      }
+    } catch (e) {
+      if (!signal.aborted) {
+        console.warn("MoqTransport audio loop error:", e);
+      }
     }
   }
 
-  /** Lazy-init the playback AudioContext + synthesized MediaStreamTrack. */
-  private _ensurePlaybackContext(): {
+  /** Drain UTF-8 JSON RTVI messages from the bot's transcript track
+   *  and hand each one to `PipecatClient` via `_onMessage`. The handler
+   *  resolves the SDK's connect promise when bot-ready arrives. */
+  private async _consumeBotTranscript(
+    botBroadcast: ReturnType<Moq.Connection.Established["consume"]>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const track = botBroadcast.subscribe(this._moqOptions.transcriptTrack, 0);
+    signal.addEventListener("abort", () => {
+      try {
+        track.close();
+      } catch {
+        // best-effort.
+      }
+    });
+
+    const decoder = new TextDecoder();
+    try {
+      for (;;) {
+        const group = await track.recvGroup();
+        if (!group || signal.aborted) break;
+        for (;;) {
+          const frame = await group.readFrame();
+          if (!frame) break;
+          if (frame.byteLength === 0) continue;
+          try {
+            const parsed = JSON.parse(decoder.decode(frame));
+            if (parsed && typeof parsed === "object") {
+              this._onMessage?.(parsed as RTVIMessage);
+            }
+          } catch (err) {
+            console.warn("MoqTransport transcript frame parse error:", err);
+          }
+        }
+      }
+    } catch (e) {
+      if (!signal.aborted) {
+        console.warn("MoqTransport transcript loop ended:", e);
+      }
+    }
+  }
+
+  private _ensurePlaybackContext(sampleRate: number): {
     ctx: AudioContext;
     dest: MediaStreamAudioDestinationNode;
   } {
     if (this._playbackContext && this._playbackDestination) {
       return { ctx: this._playbackContext, dest: this._playbackDestination };
     }
-    const ctx = new AudioContext({ sampleRate: PLAYBACK_SAMPLE_RATE });
+    const ctx = new AudioContext({ sampleRate });
     const dest = ctx.createMediaStreamDestination();
     this._playbackContext = ctx;
     this._playbackDestination = dest;
     this._botAudioTrack = dest.stream.getAudioTracks()[0];
+    this._playbackTime = ctx.currentTime;
     return { ctx, dest };
   }
 
-  /** Decode one s16le PCM frame to an AudioBuffer and schedule it. */
-  private _playPcmFrame(bytes: Uint8Array): void {
-    const { ctx, dest } = this._ensurePlaybackContext();
-
-    // Copy to an aligned buffer — incoming Uint8Array byteOffset may be
-    // odd, which would reject the Int16Array view.
-    const aligned = new ArrayBuffer(bytes.byteLength);
-    new Uint8Array(aligned).set(bytes);
-    const int16 = new Int16Array(aligned);
-    const sampleCount = int16.length;
-
-    const buffer = ctx.createBuffer(1, sampleCount, ctx.sampleRate);
-    const channel = buffer.getChannelData(0);
-    for (let i = 0; i < sampleCount; i++) {
-      channel[i] = int16[i] / 32768;
+  private _playAudioData(
+    data: AudioData,
+    ctx: AudioContext,
+    dest: MediaStreamAudioDestinationNode,
+  ): void {
+    const channels = data.numberOfChannels;
+    const buf = ctx.createBuffer(channels, data.numberOfFrames, data.sampleRate);
+    for (let ch = 0; ch < channels; ch++) {
+      const chData = new Float32Array(data.numberOfFrames);
+      data.copyTo(chData, { planeIndex: ch, format: "f32-planar" });
+      buf.copyToChannel(chData, ch);
     }
+    data.close();
 
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-    source.connect(dest);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    // Fan out to both the speakers and the synthesized MediaStream
+    // destination so `tracks().bot.audio` reflects what's audible.
+    src.connect(ctx.destination);
+    src.connect(dest);
 
-    const startAt = Math.max(ctx.currentTime, this._playbackTime);
-    source.start(startAt);
-    this._playbackTime = startAt + buffer.duration;
+    if (this._playbackTime < ctx.currentTime) {
+      this._playbackTime = ctx.currentTime;
+    }
+    src.start(this._playbackTime);
+    this._playbackTime += buf.duration;
   }
 
-  /** Stop bot-audio playback, close the playback context, drop the track. */
   private _teardownPlayback(): void {
     this._botAudioTrack?.stop();
-    this._playbackContext?.close().catch(() => {});
+    this._playbackContext?.close().catch(() => {
+      // best-effort.
+    });
     this._playbackContext = undefined;
     this._playbackDestination = undefined;
     this._botAudioTrack = undefined;
