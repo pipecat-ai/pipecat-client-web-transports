@@ -1,0 +1,13 @@
+diff --git a/package.json b/package.json
+index 046412c..0a97d1b 100644
+--- a/package.json
++++ b/package.json
+@@ -28,6 +28,7 @@
+     "typescript": "^5.5.4"
+   },
+   "peerDependencies": {
+-    "@daily-co/daily-js": "^0.90.0"
++    "@daily-co/daily-js": "^0.90.0",
++    "@pipecat-ai/client-js": "^1.10.0"
+   }
+ }
