@@ -5,6 +5,13 @@ All notable changes to **Pipecat Websocket Transport** will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.6](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.6.5...websocket-transport-v1.6.6) (2026-06-02)
+
+
+### Bug Fixes
+
+* log a warning instead of an error for unsupported features ([3cae2f2](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/3cae2f2e241ed3518b0915cf19adf7f050aeb0aa))
+
 ## [1.6.5](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.6.4...websocket-transport-v1.6.5) (2026-05-27)
 
 
