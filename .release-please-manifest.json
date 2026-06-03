@@ -1,7 +1,7 @@
 {
   "transports/daily": "1.6.6",
   "transports/gemini-live-websocket-transport": "1.5.4",
-  "transports/openai-realtime-webrtc-transport": "1.5.4",
+  "transports/openai-realtime-webrtc-transport": "1.5.5",
   "transports/small-webrtc-transport": "1.10.3",
   "transports/websocket-transport": "1.6.7"
 }
