@@ -126,7 +126,8 @@ export class WebSocketTransport extends Transport {
 
     this._wsUrl = connectParams?.wsUrl ?? connectParams?.ws_url ?? this._wsUrl;
     if (connectParams?.token) {
-      this._wsUrl = `${this._wsUrl}?token=${encodeURIComponent(connectParams.token)}`;
+      const separator = this._wsUrl!.includes("?") ? "&" : "?";
+      this._wsUrl = `${this._wsUrl}${separator}token=${encodeURIComponent(connectParams.token)}`;
     }
     if (!this._wsUrl) {
       logger.error("No url provided for connection");
