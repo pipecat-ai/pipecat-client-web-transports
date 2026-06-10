@@ -31,6 +31,10 @@ export default defineConfig({
         "../transports/gemini-live-websocket-transport/src/index.ts",
         import.meta.url
       ).pathname,
+      "@pipecat-ai/moq-transport": new URL(
+        "../transports/moq-transport/src/index.ts",
+        import.meta.url
+      ).pathname,
     },
   },
 });

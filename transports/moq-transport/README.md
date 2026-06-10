@@ -1,43 +1,105 @@
-# `@pipecat-ai/moq-transport`
+# MoQ (Media over QUIC) Transport
 
-Media-over-QUIC transport plugin for the
-[Pipecat JavaScript client SDK](https://github.com/pipecat-ai/pipecat-client-web).
-Lets a `PipecatClient` talk to a Pipecat MoQ bot over a moq-lite relay using
-WebTransport (with a WebSocket fallback).
+[![Docs](https://img.shields.io/badge/documentation-blue)](https://docs.pipecat.ai/client/js/transports)
+![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/moq-transport)
 
-> **Status: pre-alpha.** Day 1 scaffold — lifecycle wiring only. Device
-> handling, media tracks, and RTVI message routing land in subsequent
-> iterations. See
-> [`moq_prebuilt/PLAN-moq-transport-package.md`](https://github.com/pipecat-ai/pipecat/blob/main/moq_prebuilt/PLAN-moq-transport-package.md)
-> in the `pipecat-ai/pipecat` repo for the full plan.
+Media-over-QUIC transport package for use with `@pipecat-ai/client-js`.
 
-## Install
+## Installation
 
-```bash
-npm install @pipecat-ai/moq-transport @pipecat-ai/client-js
+```bash copy
+npm install \
+@pipecat-ai/client-js \
+@pipecat-ai/moq-transport
 ```
+
+## Overview
+
+The `MoqTransport` class connects a `PipecatClient` to a Pipecat MoQ bot, either through a MoQ relay or directly to a bot running in serve mode. It publishes the local microphone as an Opus broadcast and consumes the bot's broadcast — both audio and a server→client RTVI message track — using catalog discovery, so codec and sample rate are negotiated at connect time rather than pinned in code.
+
+Connection management uses WebTransport with a WebSocket fallback (raced by `@moq/net`), with auto-reconnect via `Connection.Reload`.
+
+## Features
+
+- 🎤 Microphone capture and Opus publish (`@moq/publish`)
+- 📡 WebTransport with WebSocket fallback and auto-reconnect (`@moq/net`)
+- 🎧 Catalog-driven bot audio playback with bounded-latency jitter buffering (`@moq/hang`)
+- 💬 Server→client RTVI messages over a dedicated transcript track
+- 🔐 `serverCertificateHashes` pinning for self-signed dev relays
 
 ## Usage
 
-```ts
+### Basic Setup
+
+```javascript
 import { PipecatClient } from "@pipecat-ai/client-js";
 import { MoqTransport } from "@pipecat-ai/moq-transport";
 
 const transport = new MoqTransport({
-  relayUrl: "https://localhost:4080/",
-  // For self-signed dev relays, pin via cert hash:
-  // serverCertificateHashes: [{ algorithm: "sha-256", value: hashBytes }],
+  relayUrl: "https://relay.example.com:4080/moq",
 });
 
-const client = new PipecatClient({ transport, callbacks: { /* ... */ } });
-await client.connect();
+const pcClient = new PipecatClient({
+  transport,
+  callbacks: {
+    // Event handlers
+  },
+});
+
+await pcClient.connect();
 ```
 
-## Underlying packages
+### Self-signed dev relay
 
-- [`@moq/lite`](https://www.npmjs.com/package/@moq/lite) — WebTransport + relay subscriptions.
-- [`@moq/publish`](https://www.npmjs.com/package/@moq/publish) — mic capture + audio publish.
+```javascript
+const transport = new MoqTransport({
+  relayUrl: "https://localhost:4080/moq",
+  serverCertificateHashes: [
+    { algorithm: "sha-256", value: certHashBytes },
+  ],
+});
+```
+
+### Configuration Options
+
+```typescript
+interface MoqTransportOptions {
+  relayUrl: string;                              // Required: full URL of the MoQ peer
+  serverCertificateHashes?: WebTransportHash[];  // Optional: pinned cert hashes for self-signed dev setups
+  clientId?: string;                             // Optional: this client's participant id (default "client0")
+  botId?: string;                                // Optional: peer (bot) participant id to consume (default "bot0")
+  namespace?: string;                            // Optional: top-level namespace / room name (default "pipecat")
+  transcriptTrack?: string;                      // Optional: track name for server→client RTVI messages (default "transcript")
+  audioLatencyMs?: number;                       // Optional: jitter buffer max latency in ms (default 80)
+}
+```
+
+Broadcast paths are derived as `<namespace>/<clientId>` (publish) and `<namespace>/<botId>` (subscribe). Audio track names inside each broadcast are discovered from the bot's catalog, so they aren't configured directly.
+
+### Handling Events
+
+The transport implements the various [Pipecat event handlers](https://docs.pipecat.ai/client/js/api-reference/callbacks). Check out the docs or samples for more info.
+
+## API Reference
+
+### States
+
+The transport can be in one of these states:
+- "disconnected"
+- "initialized"
+- "connecting"
+- "connected"
+- "ready"
+- "disconnecting"
+- "error"
+
+## Error Handling
+
+The transport includes error handling for:
+- Microphone acquisition failures (`initDevices`, `_connect`)
+- Invalid `relayUrl`
+- WebTransport / WebSocket connection failures (surfaced via `@moq/net` auto-reconnect)
+- Catalog decode and audio decode errors (logged; the consume loop continues)
 
 ## License
-
-BSD-2-Clause.
+BSD-2 Clause
