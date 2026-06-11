@@ -5,6 +5,14 @@ All notable changes to **Pipecat Websocket Transport** will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.6.7...websocket-transport-v1.7.0) (2026-06-11)
+
+
+### Features
+
+* support optional auth token in connection params ([c9504c8](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c9504c8b28f01a990a8a116ec26d62322f6c9b9c))
+* support optional auth token in connection params ([2977621](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/2977621395afc97e402e7ef1067e21f432d127bc))
+
 ## [1.6.7](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.6.6...websocket-transport-v1.6.7) (2026-06-03)
 
 
