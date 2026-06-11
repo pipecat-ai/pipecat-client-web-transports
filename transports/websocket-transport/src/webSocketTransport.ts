@@ -20,6 +20,7 @@ export type WebSocketTransportOptions = {
   /** @deprecated Use wsUrl instead */
   ws_url?: string;
   wsUrl?: string;
+  token?: string;
 };
 
 export interface WebSocketTransportConstructorOptions
@@ -104,6 +105,12 @@ export class WebSocketTransport extends Transport {
             `Invalid type for wsUrl: expected string, got ${typeof val}`
           );
         }
+      } else if (camelKey === "token") {
+        if (typeof val !== "string") {
+          throw new RTVIError(
+            `Invalid type for token: expected string, got ${typeof val}`
+          );
+        }
       } else {
         throw new RTVIError(`Unrecognized connection parameter: ${key}.`);
       }
@@ -118,6 +125,10 @@ export class WebSocketTransport extends Transport {
     this.state = "connecting";
 
     this._wsUrl = connectParams?.wsUrl ?? connectParams?.ws_url ?? this._wsUrl;
+    if (connectParams?.token) {
+      const separator = this._wsUrl!.includes("?") ? "&" : "?";
+      this._wsUrl = `${this._wsUrl}${separator}token=${encodeURIComponent(connectParams.token)}`;
+    }
     if (!this._wsUrl) {
       logger.error("No url provided for connection");
       this.state = "error";
