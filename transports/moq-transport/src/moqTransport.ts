@@ -6,10 +6,7 @@
 
 import * as Moq from "@moq/net";
 import * as Publish from "@moq/publish";
-// @moq/hang has subpath exports for the catalog parser and the
-// container consumer; the package's main entry doesn't re-export them.
-import * as Catalog from "@moq/hang/catalog";
-import * as Container from "@moq/hang/container";
+import * as Watch from "@moq/watch";
 import { Effect, Signal } from "@moq/signals";
 import {
   type PipecatClientOptions,
@@ -29,11 +26,13 @@ const DEFAULT_TRANSCRIPT_TRACK = "transcript";
 // but more drops on bad networks. Matches the bot's audio_in_max_latency_ms
 // in spirit (each side enforces its own deadline).
 const DEFAULT_AUDIO_LATENCY_MS = 80;
-
-// Mirror of `@moq/net`'s internal branded `Milli` type. The package's
-// `time` subpath isn't in its `exports` field, so we redeclare locally
-// and cast at the boundary instead of reaching into private file paths.
-type Milli = number & { readonly _brand: "milli" };
+// Latency ceiling for buffered TTS playback (ms). A finite cap (vs
+// uncapped) because the player's group/jitter buffer needs a concrete
+// maximum span to retain before dropping. The bot paces its writes a
+// little under this (~25s, see the Python transport's
+// `audio_out_max_buffer_ms`) so the producer self-limits below this drop
+// ceiling and the player never actually has to drop.
+const DEFAULT_AUDIO_BUFFER_MAX_MS = 30 * 1000;
 
 /**
  * Constructor options for the MoQ transport.
@@ -86,12 +85,32 @@ export interface MoqTransportOptions {
   transcriptTrack?: string;
 
   /**
-   * Max latency (ms) for the audio container consumer's jitter buffer.
-   * The library will wait this long for a late frame before skipping
-   * ahead. Lower = more interactive, more drops; higher = smoother,
-   * more glass-to-glass delay.
+   * Latency floor (ms) — the jitter buffer the player keeps before
+   * playback. Lower = more interactive, more drops; higher = smoother,
+   * more glass-to-glass delay. Maps to ``@moq/watch`` ``Sync.latencyMin``.
    */
   audioLatencyMs?: number;
+
+  /**
+   * Latency ceiling for buffered playback (``@moq/watch`` ``Sync.latencyMax``).
+   *
+   * The bot writes TTS audio faster than real-time with future-dated
+   * timestamps; the player buffers it and plays at the encoded pace
+   * instead of skipping ahead. This sets how much it's allowed to build
+   * up before re-anchoring:
+   *
+   * - a number (default: 30 s) — cap the buffer at that many ms. The
+   *   player retains up to this much faster-than-real-time audio before
+   *   dropping; an interruption (``user-started-speaking``) flushes early
+   *   via ``reset()``. A finite cap is required: it's the concrete maximum
+   *   span the player's group/jitter buffer holds. The bot paces a little
+   *   under this so it never actually overruns the cap.
+   * - ``"none"`` — uncapped. Avoid: the container consumer needs a finite
+   *   ceiling, so uncapped falls back to the floor and skips ahead.
+   * - ``"real-time"`` — collapse to the floor (minimize latency, the old
+   *   skip-ahead behavior; only useful with a live, real-time publisher).
+   */
+  audioBufferMaxMs?: number | "none" | "real-time";
 }
 
 interface ResolvedOptions {
@@ -102,6 +121,7 @@ interface ResolvedOptions {
   namespace: string;
   transcriptTrack: string;
   audioLatencyMs: number;
+  audioBufferMaxMs: number | "none" | "real-time";
 }
 
 function applyDefaults(opts: MoqTransportOptions): ResolvedOptions {
@@ -113,6 +133,7 @@ function applyDefaults(opts: MoqTransportOptions): ResolvedOptions {
     namespace: opts.namespace ?? DEFAULT_NAMESPACE,
     transcriptTrack: opts.transcriptTrack ?? DEFAULT_TRANSCRIPT_TRACK,
     audioLatencyMs: opts.audioLatencyMs ?? DEFAULT_AUDIO_LATENCY_MS,
+    audioBufferMaxMs: opts.audioBufferMaxMs ?? DEFAULT_AUDIO_BUFFER_MAX_MS,
   };
 }
 
@@ -150,13 +171,22 @@ export class MoqTransport extends Transport {
   private _publishBroadcast: Publish.Broadcast | null = null;
   private _micEnabled = new Signal(true);
 
-  // Bot audio playback state. We synthesize a `MediaStreamTrack` from the
-  // playback `AudioContext`'s destination so `tracks().bot.audio` returns
-  // something the consumer can plug into a `<audio>` element / visualizer.
-  private _playbackContext: AudioContext | undefined;
-  private _playbackDestination: MediaStreamAudioDestinationNode | undefined;
+  // Bot audio playback via @moq/watch (buffered playback, PR #1620).
+  // The watch chain (Broadcast -> Audio.Source -> Decoder -> Emitter)
+  // decodes Opus into an AudioWorklet-backed ring buffer and plays it at
+  // the encoded pace; `Sync.latencyMax` lets faster-than-real-time TTS
+  // build up a buffer instead of the player skipping ahead, and
+  // `reset()` flushes that buffer on interruption.
+  private _botBroadcast: Watch.Broadcast | null = null;
+  private _botSync: Watch.Sync | null = null;
+  private _botAudioSource: Watch.Audio.Source | null = null;
+  private _botAudioDecoder: Watch.Audio.Decoder | null = null;
+  private _botAudioEmitter: Watch.Audio.Emitter | null = null;
+  private _botAudioEffect: Effect | null = null;
+  // Tapped off the decoder's worklet so `tracks().bot.audio` returns a
+  // `MediaStreamTrack` the consumer can plug into a visualizer.
   private _botAudioTrack: MediaStreamTrack | undefined;
-  private _playbackTime = 0;
+  private _botMsDest: MediaStreamAudioDestinationNode | undefined;
 
   // Mic device picker state — we expose the device list to the SDK so
   // consumers can show a picker. `Publish.Source.Microphone` handles
@@ -334,7 +364,15 @@ export class MoqTransport extends Transport {
     });
 
     // ----------------------------------------------------------------
-    // Consume — re-run the loops on each successful (re)connect.
+    // Consume bot audio via @moq/watch. The watch Broadcast reacts to
+    // the connection signal itself (`reload: true`), so this is set up
+    // once rather than per-reconnect.
+    // ----------------------------------------------------------------
+    this._setupBotAudio(botPath);
+
+    // ----------------------------------------------------------------
+    // Consume the transcript (raw RTVI byte track) — re-run on each
+    // successful (re)connect.
     // ----------------------------------------------------------------
     this._consumeEffect = new Effect();
     this._consumeEffect.run((eff) => {
@@ -344,11 +382,6 @@ export class MoqTransport extends Transport {
       const botBroadcast = conn.consume(botPath);
 
       const ac = new AbortController();
-      this._consumeBotAudio(botBroadcast, ac.signal).catch((e) => {
-        if (!ac.signal.aborted) {
-          console.warn("MoqTransport bot-audio loop:", e);
-        }
-      });
       this._consumeBotTranscript(botBroadcast, ac.signal).catch((e) => {
         if (!ac.signal.aborted) {
           console.warn("MoqTransport bot-transcript loop:", e);
@@ -366,6 +399,7 @@ export class MoqTransport extends Transport {
       this._consumeEffect?.close();
       this._statusEffect?.close();
       this._publishBroadcast?.close();
+      this._teardownBotAudio();
       this._localAudioTrack?.stop();
       try {
         this._reload?.signals.close();
@@ -378,7 +412,6 @@ export class MoqTransport extends Transport {
       this._publishBroadcast = null;
       this._localAudioTrack = undefined;
       this._reload = null;
-      this._teardownPlayback();
       this.state = "disconnected";
     }
   }
@@ -498,108 +531,105 @@ export class MoqTransport extends Transport {
   // Internals — bot audio
   // --------------------------------------------------------------------
 
-  /** Read the bot's catalog, find the first Opus audio track, and pump
-   *  its Opus frames into a WebCodecs `AudioDecoder`. Decoded
-   *  `AudioData` is scheduled on `_playbackContext` and fanned out to a
-   *  synthesized `MediaStreamTrack` so `tracks().bot.audio` works. */
-  private async _consumeBotAudio(
-    botBroadcast: ReturnType<Moq.Connection.Established["consume"]>,
-    signal: AbortSignal,
-  ): Promise<void> {
-    const catalogTrack = botBroadcast.subscribe(
-      "catalog.json",
-      Catalog.PRIORITY?.catalog ?? 0,
-    );
-    signal.addEventListener("abort", () => {
-      try {
-        catalogTrack.close();
-      } catch {
-        // best-effort.
-      }
-    });
-
-    const catalogFrame = await catalogTrack.readFrame();
-    catalogTrack.close();
-    if (!catalogFrame || signal.aborted) return;
-
-    let catalog: ReturnType<typeof Catalog.decode>;
-    try {
-      catalog = Catalog.decode(catalogFrame);
-    } catch (e) {
-      console.warn("MoqTransport catalog decode failed:", e);
-      return;
-    }
-
-    const audio = catalog?.audio?.renditions ?? {};
-    const trackName = Object.keys(audio)[0];
-    if (!trackName) return;
-    const audioConfig = audio[trackName];
-
-    const moqTrack = botBroadcast.subscribe(
-      trackName,
-      Catalog.PRIORITY?.audio ?? 1,
-    );
-    // hang's `Container.Consumer.latency` expects a branded `Milli`
-    // type. The Signal carries a plain number; cast at the boundary.
-    const latencySig = new Signal(
-      this._moqOptions.audioLatencyMs as unknown as Milli,
-    );
-    const consumer = new Container.Consumer(moqTrack, {
-      format: new Container.Legacy.Format(),
-      latency: latencySig,
-    });
-
-    const { ctx, dest } = this._ensurePlaybackContext(audioConfig.sampleRate);
-
-    const decoder = new AudioDecoder({
-      output: (data) => this._playAudioData(data, ctx, dest),
-      error: (err) =>
-        console.warn("MoqTransport audio decode error:", err),
-    });
-    decoder.configure({
-      codec: audioConfig.codec,
-      sampleRate: audioConfig.sampleRate,
-      numberOfChannels: audioConfig.numberOfChannels,
-    });
-
-    signal.addEventListener("abort", () => {
-      try {
-        consumer.close();
-      } catch {
-        // best-effort.
-      }
-      try {
-        moqTrack.close();
-      } catch {
-        // best-effort.
-      }
-      try {
-        if (decoder.state !== "closed") decoder.close();
-      } catch {
-        // best-effort.
-      }
-    });
-
-    try {
-      for (;;) {
-        const next = await consumer.next();
-        if (!next || signal.aborted) break;
-        const { frame } = next;
-        if (!frame) continue;
-        decoder.decode(
-          new EncodedAudioChunk({
-            type: "key",
-            data: frame.data,
-            timestamp: frame.timestamp,
-          }),
-        );
-      }
-    } catch (e) {
-      if (!signal.aborted) {
-        console.warn("MoqTransport audio loop error:", e);
-      }
-    }
+  /** The `Sync.latencyMax` value derived from `audioBufferMaxMs`.
+   *  `"none"` -> `undefined` (uncapped buffering). Must be carried in a
+   *  Signal because the Sync constructor treats a bare `undefined` prop
+   *  as "real-time" (minimize); a Signal holding `undefined` is uncapped. */
+  private _botLatencyMax(): Signal<Watch.Latency | undefined> {
+    const v = this._moqOptions.audioBufferMaxMs;
+    const value: Watch.Latency | undefined =
+      v === "none" ? undefined : (v as unknown as Watch.Latency);
+    return new Signal<Watch.Latency | undefined>(value);
   }
+
+  /** Set up buffered bot-audio playback with @moq/watch:
+   *  Broadcast -> Audio.Source -> Decoder -> Emitter, driven by a Sync
+   *  configured for buffered (latencyMax) playback. The decoder's worklet
+   *  output is tapped into a `MediaStreamDestination` so `tracks().bot.audio`
+   *  exposes a `MediaStreamTrack` for visualizers. */
+  private _setupBotAudio(botPath: Moq.Path.Valid): void {
+    const established = this._reload!.established;
+
+    const broadcast = new Watch.Broadcast({
+      connection: established,
+      enabled: new Signal(true),
+      name: new Signal(botPath),
+      // reload defaults to false: subscribe as soon as the connection is
+      // established (matching the old `conn.consume(botPath)`), rather
+      // than waiting for a broadcast announcement we don't wire up here.
+      reload: new Signal(false),
+    });
+
+    const sync = new Watch.Sync({
+      latencyMin: this._moqOptions.audioLatencyMs as unknown as Watch.Latency,
+      latencyMax: this._botLatencyMax(),
+      connection: established,
+    });
+
+    const source = new Watch.Audio.Source(sync, { broadcast });
+    const decoder = new Watch.Audio.Decoder(source);
+    // The Emitter plays to the speakers and, via `paused`/`muted`, drives
+    // `decoder.enabled` so the track actually downloads + decodes.
+    const emitter = new Watch.Audio.Emitter(decoder, { volume: 1 });
+
+    // Tap the decoder's worklet into a MediaStream for `tracks().bot.audio`.
+    const effect = new Effect();
+    effect.run((eff) => {
+      const ctx = eff.get(decoder.context);
+      const root = eff.get(decoder.root);
+      if (!ctx || !root) return;
+
+      const msDest = ctx.createMediaStreamDestination();
+      root.connect(msDest);
+      this._botMsDest = msDest;
+      this._botAudioTrack = msDest.stream.getAudioTracks()[0];
+
+      eff.cleanup(() => {
+        try {
+          root.disconnect(msDest);
+        } catch {
+          // best-effort.
+        }
+        this._botAudioTrack = undefined;
+        this._botMsDest = undefined;
+      });
+    });
+
+    this._botBroadcast = broadcast;
+    this._botSync = sync;
+    this._botAudioSource = source;
+    this._botAudioDecoder = decoder;
+    this._botAudioEmitter = emitter;
+    this._botAudioEffect = effect;
+  }
+
+  /** Flush buffered bot audio and re-anchor playback at an utterance
+   *  boundary. Called on interruption (`user-started-speaking`) so the
+   *  already-buffered TTS for the previous utterance stops immediately
+   *  instead of draining: re-anchor the sync reference and flush the
+   *  decoder's ring buffer. */
+  private _resetBotAudio(): void {
+    this._botSync?.reset();
+    this._botAudioDecoder?.reset();
+  }
+
+  private _teardownBotAudio(): void {
+    this._botAudioEffect?.close();
+    this._botAudioEmitter?.close();
+    this._botAudioDecoder?.close();
+    this._botAudioSource?.close();
+    this._botSync?.close();
+    this._botBroadcast?.close();
+    this._botAudioEffect = null;
+    this._botAudioEmitter = null;
+    this._botAudioDecoder = null;
+    this._botAudioSource = null;
+    this._botSync = null;
+    this._botBroadcast = null;
+    this._botAudioTrack = undefined;
+    this._botMsDest = undefined;
+  }
+
 
   /** Drain UTF-8 JSON RTVI messages from the bot's transcript track
    *  and hand each one to `PipecatClient` via `_onMessage`. The handler
@@ -629,6 +659,13 @@ export class MoqTransport extends Transport {
           try {
             const parsed = JSON.parse(decoder.decode(frame));
             if (parsed && typeof parsed === "object") {
+              // Interruption: the user started talking, so flush the
+              // already-buffered TTS for the bot's previous utterance
+              // instead of letting it drain. With the bot no longer
+              // pacing its writes, that buffer can be seconds long.
+              if ((parsed as RTVIMessage).type === "user-started-speaking") {
+                this._resetBotAudio();
+              }
               this._onMessage?.(parsed as RTVIMessage);
             }
           } catch (err) {
@@ -643,58 +680,4 @@ export class MoqTransport extends Transport {
     }
   }
 
-  private _ensurePlaybackContext(sampleRate: number): {
-    ctx: AudioContext;
-    dest: MediaStreamAudioDestinationNode;
-  } {
-    if (this._playbackContext && this._playbackDestination) {
-      return { ctx: this._playbackContext, dest: this._playbackDestination };
-    }
-    const ctx = new AudioContext({ sampleRate });
-    const dest = ctx.createMediaStreamDestination();
-    this._playbackContext = ctx;
-    this._playbackDestination = dest;
-    this._botAudioTrack = dest.stream.getAudioTracks()[0];
-    this._playbackTime = ctx.currentTime;
-    return { ctx, dest };
-  }
-
-  private _playAudioData(
-    data: AudioData,
-    ctx: AudioContext,
-    dest: MediaStreamAudioDestinationNode,
-  ): void {
-    const channels = data.numberOfChannels;
-    const buf = ctx.createBuffer(channels, data.numberOfFrames, data.sampleRate);
-    for (let ch = 0; ch < channels; ch++) {
-      const chData = new Float32Array(data.numberOfFrames);
-      data.copyTo(chData, { planeIndex: ch, format: "f32-planar" });
-      buf.copyToChannel(chData, ch);
-    }
-    data.close();
-
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    // Fan out to both the speakers and the synthesized MediaStream
-    // destination so `tracks().bot.audio` reflects what's audible.
-    src.connect(ctx.destination);
-    src.connect(dest);
-
-    if (this._playbackTime < ctx.currentTime) {
-      this._playbackTime = ctx.currentTime;
-    }
-    src.start(this._playbackTime);
-    this._playbackTime += buf.duration;
-  }
-
-  private _teardownPlayback(): void {
-    this._botAudioTrack?.stop();
-    this._playbackContext?.close().catch(() => {
-      // best-effort.
-    });
-    this._playbackContext = undefined;
-    this._playbackDestination = undefined;
-    this._botAudioTrack = undefined;
-    this._playbackTime = 0;
-  }
 }
