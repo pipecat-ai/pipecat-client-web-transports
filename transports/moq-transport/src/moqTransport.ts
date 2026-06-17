@@ -27,6 +27,13 @@ const DEFAULT_TRANSCRIPT_TRACK = "transcript";
 // but more drops on bad networks. Matches the bot's audio_in_max_latency_ms
 // in spirit (each side enforces its own deadline).
 const DEFAULT_AUDIO_LATENCY_MS = 80;
+// Latency ceiling for buffered TTS playback (ms). A finite cap (vs
+// uncapped) because the player's group/jitter buffer needs a concrete
+// maximum span to retain before dropping. The bot paces its writes a
+// little under this (~25s, see the Python transport's
+// `audio_out_max_buffer_ms`) so the producer self-limits below this drop
+// ceiling and the player never actually has to drop.
+const DEFAULT_AUDIO_BUFFER_MAX_MS = 30 * 1000;
 // Sample rate we pin on the publish-side Opus encoder. Opus only supports
 // {8, 12, 16, 24, 48} kHz; 48 kHz is the upstream default and what most
 // browsers report as the mic's native rate. The bot reads this from our
@@ -86,11 +93,32 @@ export interface MoqTransportOptions {
   transcriptTrack?: string;
 
   /**
-   * Max latency (ms) for the audio jitter buffer. The library will wait
-   * this long for a late frame before skipping ahead. Lower = more
-   * interactive, more drops; higher = smoother, more glass-to-glass delay.
+   * Latency floor (ms) — the jitter buffer the player keeps before
+   * playback. Lower = more interactive, more drops; higher = smoother,
+   * more glass-to-glass delay. Maps to ``@moq/watch`` ``Sync.latencyMin``.
    */
   audioLatencyMs?: number;
+
+  /**
+   * Latency ceiling for buffered playback (``@moq/watch`` ``Sync.latencyMax``).
+   *
+   * The bot writes TTS audio faster than real-time with future-dated
+   * timestamps; the player buffers it and plays at the encoded pace
+   * instead of skipping ahead. This sets how much it's allowed to build
+   * up before re-anchoring:
+   *
+   * - a number (default: 30 s) — cap the buffer at that many ms. The
+   *   player retains up to this much faster-than-real-time audio before
+   *   dropping; an interruption (``user-started-speaking``) flushes early
+   *   via ``reset()``. A finite cap is required: it's the concrete maximum
+   *   span the player's group/jitter buffer holds. The bot paces a little
+   *   under this so it never actually overruns the cap.
+   * - ``"none"`` — uncapped. Avoid: the container consumer needs a finite
+   *   ceiling, so uncapped falls back to the floor and skips ahead.
+   * - ``"real-time"`` — collapse to the floor (minimize latency, the old
+   *   skip-ahead behavior; only useful with a live, real-time publisher).
+   */
+  audioBufferMaxMs?: number | "none" | "real-time";
 
   /**
    * Sample rate (Hz) the client publishes its mic audio at. Must be one
@@ -117,6 +145,7 @@ interface ResolvedOptions {
   namespace: string;
   transcriptTrack: string;
   audioLatencyMs: number;
+  audioBufferMaxMs: number | "none" | "real-time";
   audioSampleRate: number;
 }
 
@@ -129,6 +158,7 @@ function applyDefaults(opts: MoqTransportOptions): ResolvedOptions {
     namespace: opts.namespace ?? DEFAULT_NAMESPACE,
     transcriptTrack: opts.transcriptTrack ?? DEFAULT_TRANSCRIPT_TRACK,
     audioLatencyMs: opts.audioLatencyMs ?? DEFAULT_AUDIO_LATENCY_MS,
+    audioBufferMaxMs: opts.audioBufferMaxMs ?? DEFAULT_AUDIO_BUFFER_MAX_MS,
     audioSampleRate: opts.audioSampleRate ?? DEFAULT_AUDIO_SAMPLE_RATE,
   };
 }
@@ -173,15 +203,19 @@ export class MoqTransport extends Transport {
   // options at connect time.
   private _audioSampleRate = new Signal<number | undefined>(undefined);
 
-  // Watch side (bot → playback).
+  // Watch side (bot → playback). Buffered playback via @moq/watch:
+  // Broadcast -> Audio.Source -> Decoder -> Emitter, with `Sync.latencyMax`
+  // letting faster-than-real-time TTS build up instead of the player
+  // skipping ahead, and `reset()` flushing the buffer on interruption.
   private _watchBroadcast: Watch.Broadcast | null = null;
+  private _sync: Watch.Sync | null = null;
   private _audioSource: Watch.Audio.Source | null = null;
   private _audioDecoder: Watch.Audio.Decoder | null = null;
   private _audioEmitter: Watch.Audio.Emitter | null = null;
 
   // Synthesized `MediaStreamTrack` for the bot, so `tracks().bot.audio`
   // returns something a `<audio>` element / visualizer can consume.
-  // Wired from `Watch.Audio.Decoder.root` (an `AudioNode`) into a
+  // Tapped off `Watch.Audio.Decoder.root` (an `AudioNode`) into a
   // `MediaStreamAudioDestinationNode`.
   private _botAudioTrack: MediaStreamTrack | undefined;
 
@@ -356,8 +390,11 @@ export class MoqTransport extends Transport {
     // tracking; Audio.Source picks the active audio rendition;
     // Audio.Decoder runs the WebCodecs decode loop and feeds an
     // AudioWorklet ring buffer; Audio.Emitter routes that to the
-    // speakers. We also tap Decoder.root → MediaStreamAudioDestinationNode
-    // so tracks().bot.audio returns a MediaStreamTrack.
+    // speakers. `Sync.latencyMax` lets faster-than-real-time TTS build
+    // up a buffer instead of the player skipping ahead; `reset()`
+    // (invoked on `user-started-speaking`) flushes it on interruption.
+    // We also tap Decoder.root → MediaStreamAudioDestinationNode so
+    // tracks().bot.audio returns a MediaStreamTrack.
     //
     // `catalogFormat: "hang"` is pinned because the pipecat bot publishes
     // a hang-format catalog (camelCase `sampleRate`). The auto-detector
@@ -374,10 +411,10 @@ export class MoqTransport extends Transport {
 
     const sync = new Watch.Sync({
       connection: this._reload.established,
-      latency: new Signal<Watch.Latency>(
-        merged.audioLatencyMs as Moq.Time.Milli,
-      ),
+      latencyMin: merged.audioLatencyMs as unknown as Watch.Latency,
+      latencyMax: this._botLatencyMax(merged.audioBufferMaxMs),
     });
+    this._sync = sync;
     this._audioSource = new Watch.Audio.Source(sync, {
       broadcast: this._watchBroadcast,
     });
@@ -455,6 +492,7 @@ export class MoqTransport extends Transport {
       this._audioEmitter?.close();
       this._audioDecoder?.close();
       this._audioSource?.close();
+      this._sync?.close();
       this._watchBroadcast?.close();
       this._publishBroadcast?.close();
       this._microphone?.close();
@@ -464,6 +502,7 @@ export class MoqTransport extends Transport {
       this._audioEmitter = null;
       this._audioDecoder = null;
       this._audioSource = null;
+      this._sync = null;
       this._watchBroadcast = null;
       this._publishBroadcast = null;
       this._microphone = null;
@@ -592,8 +631,37 @@ export class MoqTransport extends Transport {
       const message = await consumer.next();
       if (!message || signal.aborted) break;
       if (typeof message === "object") {
+        // Interruption: the user started talking, so flush the
+        // already-buffered TTS for the bot's previous utterance instead
+        // of letting it drain. With the bot writing faster than
+        // real-time, that buffer can be seconds long.
+        if (message.type === "user-started-speaking") {
+          this._resetBotAudio();
+        }
         this._onMessage?.(message);
       }
     }
+  }
+
+  /** The `Sync.latencyMax` value derived from `audioBufferMaxMs`.
+   *  `"none"` -> `undefined` (uncapped buffering). Must be carried in a
+   *  Signal because the Sync constructor treats a bare `undefined` prop
+   *  as "real-time" (minimize); a Signal holding `undefined` is uncapped. */
+  private _botLatencyMax(
+    v: number | "none" | "real-time",
+  ): Signal<Watch.Latency | undefined> {
+    const value: Watch.Latency | undefined =
+      v === "none" ? undefined : (v as unknown as Watch.Latency);
+    return new Signal<Watch.Latency | undefined>(value);
+  }
+
+  /** Flush buffered bot audio and re-anchor playback at an utterance
+   *  boundary. Called on interruption (`user-started-speaking`) so the
+   *  already-buffered TTS for the previous utterance stops immediately
+   *  instead of draining: re-anchor the sync reference and flush the
+   *  decoder's ring buffer. */
+  private _resetBotAudio(): void {
+    this._sync?.reset();
+    this._audioDecoder?.reset();
   }
 }

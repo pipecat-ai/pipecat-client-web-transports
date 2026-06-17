@@ -36,7 +36,7 @@
     "@moq/net": "^0.1.4",
     "@moq/publish": "^0.2.14",
     "@moq/signals": "^0.1.8",
-    "@moq/watch": "^0.2.16"
+    "@moq/watch": "^0.2.17"
   },
   "description": "Pipecat Media-over-QUIC (MoQ) Transport Package",
   "author": "Daily.co",
