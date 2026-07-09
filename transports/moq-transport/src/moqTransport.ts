@@ -95,30 +95,29 @@ export interface MoqTransportOptions {
   /**
    * Latency floor (ms) — the jitter buffer the player keeps before
    * playback. Lower = more interactive, more drops; higher = smoother,
-   * more glass-to-glass delay. Maps to ``@moq/watch`` ``Sync.latencyMin``.
+   * more glass-to-glass delay. Maps to the `min` bound of the
+   * ``@moq/watch`` ``Sync.latency`` range.
    */
   audioLatencyMs?: number;
 
   /**
-   * Latency ceiling for buffered playback (``@moq/watch`` ``Sync.latencyMax``).
+   * Latency ceiling for buffered playback (the `max` bound of the
+   * ``@moq/watch`` ``Sync.latency`` range).
    *
    * The bot writes TTS audio faster than real-time with future-dated
    * timestamps; the player buffers it and plays at the encoded pace
-   * instead of skipping ahead. This sets how much it's allowed to build
-   * up before re-anchoring:
+   * instead of skipping ahead. This sets how much it's allowed to
+   * build up before re-anchoring:
    *
    * - a number (default: 30 s) — cap the buffer at that many ms. The
    *   player retains up to this much faster-than-real-time audio before
    *   dropping; an interruption (``user-started-speaking``) flushes early
-   *   via ``reset()``. A finite cap is required: it's the concrete maximum
-   *   span the player's group/jitter buffer holds. The bot paces a little
-   *   under this so it never actually overruns the cap.
-   * - ``"none"`` — uncapped. Avoid: the container consumer needs a finite
-   *   ceiling, so uncapped falls back to the floor and skips ahead.
+   *   via ``reset()``. The bot paces a little under this so it never
+   *   actually overruns the cap.
    * - ``"real-time"`` — collapse to the floor (minimize latency, the old
    *   skip-ahead behavior; only useful with a live, real-time publisher).
    */
-  audioBufferMaxMs?: number | "none" | "real-time";
+  audioBufferMaxMs?: number | "real-time";
 
   /**
    * Sample rate (Hz) the client publishes its mic audio at. Must be one
@@ -145,7 +144,7 @@ interface ResolvedOptions {
   namespace: string;
   transcriptTrack: string;
   audioLatencyMs: number;
-  audioBufferMaxMs: number | "none" | "real-time";
+  audioBufferMaxMs: number | "real-time";
   audioSampleRate: number;
 }
 
@@ -409,10 +408,19 @@ export class MoqTransport extends Transport {
       catalogFormat: new Signal<Watch.CatalogFormat>("hang"),
     });
 
+    // Latency range: floor = interactive jitter buffer (audioLatencyMs),
+    // ceiling = how much faster-than-real-time TTS the player will hold
+    // before dropping (audioBufferMaxMs). A number-typed max opens the
+    // buffer; "real-time" collapses to the floor (skip-ahead behavior).
     const sync = new Watch.Sync({
       connection: this._reload.established,
-      latencyMin: merged.audioLatencyMs as unknown as Watch.Latency,
-      latencyMax: this._botLatencyMax(merged.audioBufferMaxMs),
+      latency: new Signal<Watch.Latency>({
+        min: merged.audioLatencyMs as Moq.Time.Milli,
+        max:
+          merged.audioBufferMaxMs === "real-time"
+            ? "real-time"
+            : (merged.audioBufferMaxMs as Moq.Time.Milli),
+      }),
     });
     this._sync = sync;
     this._audioSource = new Watch.Audio.Source(sync, {
@@ -641,18 +649,6 @@ export class MoqTransport extends Transport {
         this._onMessage?.(message);
       }
     }
-  }
-
-  /** The `Sync.latencyMax` value derived from `audioBufferMaxMs`.
-   *  `"none"` -> `undefined` (uncapped buffering). Must be carried in a
-   *  Signal because the Sync constructor treats a bare `undefined` prop
-   *  as "real-time" (minimize); a Signal holding `undefined` is uncapped. */
-  private _botLatencyMax(
-    v: number | "none" | "real-time",
-  ): Signal<Watch.Latency | undefined> {
-    const value: Watch.Latency | undefined =
-      v === "none" ? undefined : (v as unknown as Watch.Latency);
-    return new Signal<Watch.Latency | undefined>(value);
   }
 
   /** Flush buffered bot audio and re-anchor playback at an utterance

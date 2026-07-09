@@ -31,12 +31,12 @@
     "@pipecat-ai/client-js": "~1.10.0"
   },
   "dependencies": {
-    "@moq/hang": "^0.2.9",
-    "@moq/json": "^0.0.2",
-    "@moq/net": "^0.1.4",
-    "@moq/publish": "^0.2.14",
-    "@moq/signals": "^0.1.8",
-    "@moq/watch": "^0.2.17"
+    "@moq/hang": "^0.2.12",
+    "@moq/json": "^0.1.1",
+    "@moq/net": "^0.1.6",
+    "@moq/publish": "^0.2.16",
+    "@moq/signals": "^0.1.10",
+    "@moq/watch": "^0.2.18"
   },
   "description": "Pipecat Media-over-QUIC (MoQ) Transport Package",
   "author": "Daily.co",
