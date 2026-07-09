@@ -175,8 +175,23 @@ function applyDefaults(opts: MoqTransportOptions): ResolvedOptions {
  *   the catalog, ``Watch.Audio.Source`` picks a rendition, and
  *   ``Watch.Audio.Decoder`` + ``Watch.Audio.Emitter`` drive an
  *   ``AudioWorklet`` with a ring buffer (loss-tolerant, low-latency).
- * - ``@moq/json`` for the transcript track (snapshot + JSON Merge Patch).
+ * - ``@moq/json`` for the transcript tracks (snapshot + JSON Merge Patch).
  * - ``@moq/signals`` for reactive plumbing.
+ *
+ * Two transcript tracks flow in opposite directions, both named
+ * ``transcript`` (or whatever the shared ``transcriptTrack`` option is
+ * set to) on their respective broadcasts:
+ *
+ * - Bot → client: bot publishes RTVI events (``bot-output``,
+ *   ``bot-transcription``, ``bot-started-speaking``, ``metrics``, …);
+ *   client subscribes and delivers to ``PipecatClient`` via ``_onMessage``.
+ * - Client → bot: ``sendMessage`` writes each RTVI message on the client's
+ *   own transcript track; the bot's Python transport
+ *   (``pipecat.transports.moq.transport``) subscribes and dispatches them
+ *   through ``RTVIProcessor`` the same way any other transport does. This
+ *   is what carries ``client-ready`` for protocol-version negotiation,
+ *   typed text input, function-call results, and any other client→server
+ *   RTVI traffic.
  */
 export class MoqTransport extends Transport {
   public static SERVICE_NAME = "moq-transport";
@@ -192,6 +207,11 @@ export class MoqTransport extends Transport {
   // Publish side (mic → bot).
   private _publishBroadcast: Publish.Broadcast | null = null;
   private _microphone: Publish.Source.Microphone | null = null;
+  // RTVI JSON side-channel from client → bot, symmetric with the bot's
+  // outbound `transcript` track. Fan-out `Json.Producer` seeded via
+  // `Publish.Broadcast.publishTrack`; `sendMessage` writes to it and the
+  // bot's `_forward_peer_transcript` on the Python side drains it.
+  private _transcriptOut: Json.Producer<RTVIMessage> | null = null;
   private _micEnabled = new Signal(true);
   private _micConstraints = new Signal<MediaTrackConstraints | undefined>(
     undefined,
@@ -369,6 +389,20 @@ export class MoqTransport extends Transport {
       },
     });
 
+    // Client-side transcript: `sendMessage` writes each RTVI message
+    // through this fan-out producer, and every bot subscription
+    // (only one, in the normal single-bot flow) sees the stream via
+    // `.serve`. The bot subscribes to this track by its name — same
+    // convention as the bot's own transcript track — so no catalog
+    // entry is needed.
+    this._transcriptOut = new Json.Producer<RTVIMessage>();
+    this._publishBroadcast.publishTrack(
+      merged.transcriptTrack,
+      (track, effect) => {
+        this._transcriptOut?.serve(track, effect);
+      },
+    );
+
     // Log the mic settings the browser actually granted, so we can see
     // when a UA ignores the constraint (e.g. macOS often pins 48k
     // regardless of `sampleRate.ideal`).
@@ -502,6 +536,7 @@ export class MoqTransport extends Transport {
       this._audioSource?.close();
       this._sync?.close();
       this._watchBroadcast?.close();
+      this._transcriptOut?.finish();
       this._publishBroadcast?.close();
       this._microphone?.close();
       this._signals?.close();
@@ -512,6 +547,7 @@ export class MoqTransport extends Transport {
       this._audioSource = null;
       this._sync = null;
       this._watchBroadcast = null;
+      this._transcriptOut = null;
       this._publishBroadcast = null;
       this._microphone = null;
       this._signals = null;
@@ -521,12 +557,12 @@ export class MoqTransport extends Transport {
   }
 
   sendReadyMessage(): void {
-    // In the moq-libs design the bot's `on_client_connected` fires
-    // when it sees this client's broadcast announcement — no separate
-    // client-ready RTVI message is needed (and there's no client→server
-    // message channel by default). The SDK still expects this method
-    // to flip state to `ready`.
+    // Flip transport state to `ready` and dispatch the RTVI `client-ready`
+    // message on the client→bot transcript track so the bot's RTVIProcessor
+    // can negotiate protocol version. Mirrors the pattern used by
+    // small-webrtc-transport and daily-transport.
     this.state = "ready";
+    this.sendMessage(RTVIMessage.clientReady());
   }
 
   // --------------------------------------------------------------------
@@ -608,10 +644,18 @@ export class MoqTransport extends Transport {
   // Messaging + tracks
   // --------------------------------------------------------------------
 
-  sendMessage(_message: RTVIMessage): void {
-    // The catalog-driven moq-libs design doesn't carve out a dedicated
-    // client→server RTVI message channel. Drop silently — best-effort
-    // by contract, and currently the bot doesn't read this path.
+  sendMessage(message: RTVIMessage): void {
+    if (!this._transcriptOut) {
+      console.warn(
+        "[MoqTransport] sendMessage called before connect; dropping",
+        message,
+      );
+      return;
+    }
+    // `Json.Producer.update` writes a snapshot/delta on the transcript
+    // track. RTVI messages carry a unique `id` per message so successive
+    // .update() calls are always seen as changed values, never no-ops.
+    this._transcriptOut.update(message);
   }
 
   tracks(): Tracks {
