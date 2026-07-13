@@ -22,7 +22,7 @@ import {
 const DEFAULT_NAMESPACE = "pipecat";
 const DEFAULT_CLIENT_ID = "client0";
 const DEFAULT_BOT_ID = "bot0";
-const DEFAULT_TRANSCRIPT_TRACK = "transcript";
+const DEFAULT_TRANSCRIPT_TRACK = "transcript.json.z";
 // Bounded jitter buffer on the audio decoder. Lower = more interactive
 // but more drops on bad networks. Matches the bot's audio_in_max_latency_ms
 // in spirit (each side enforces its own deadline).
@@ -85,10 +85,14 @@ export interface MoqTransportOptions {
   /**
    * Track name for RTVI server→client messages (transcripts, bot-ready,
    * speech events, etc.). The client subscribes at
-   * ``<namespace>/<botId>/<transcriptTrack>``. Defaults to ``"transcript"``.
+   * ``<namespace>/<botId>/<transcriptTrack>``. Defaults to
+   * ``"transcript.json.z"``.
    *
-   * Stays pinned because the transcript is a non-media byte track —
-   * the catalog only describes media tracks (audio/video).
+   * Stays pinned because the transcript is a ``@moq/json`` stream track
+   * (an ordered, lossless append-log, wire-compatible with the bot's Rust
+   * ``moq_json::stream``), not a catalog rendition — the catalog only
+   * describes media tracks (audio/video). The ``.z`` suffix marks that the
+   * stream is compressed.
    */
   transcriptTrack?: string;
 
@@ -175,12 +179,15 @@ function applyDefaults(opts: MoqTransportOptions): ResolvedOptions {
  *   the catalog, ``Watch.Audio.Source`` picks a rendition, and
  *   ``Watch.Audio.Decoder`` + ``Watch.Audio.Emitter`` drive an
  *   ``AudioWorklet`` with a ring buffer (loss-tolerant, low-latency).
- * - ``@moq/json`` for the transcript tracks (snapshot + JSON Merge Patch).
+ * - ``@moq/json`` for the transcript tracks — the ``Stream`` mode: an
+ *   ordered, lossless append-log (wire-compatible with the bot's Rust
+ *   ``moq_json::stream``), so no RTVI event is dropped. Not the snapshot
+ *   mode, which collapses to the latest value.
  * - ``@moq/signals`` for reactive plumbing.
  *
  * Two transcript tracks flow in opposite directions, both named
- * ``transcript`` (or whatever the shared ``transcriptTrack`` option is
- * set to) on their respective broadcasts:
+ * ``transcript.json.z`` (or whatever the shared ``transcriptTrack`` option
+ * is set to) on their respective broadcasts:
  *
  * - Bot → client: bot publishes RTVI events (``bot-output``,
  *   ``bot-transcription``, ``bot-started-speaking``, ``metrics``, …);
@@ -208,10 +215,16 @@ export class MoqTransport extends Transport {
   private _publishBroadcast: Publish.Broadcast | null = null;
   private _microphone: Publish.Source.Microphone | null = null;
   // RTVI JSON side-channel from client → bot, symmetric with the bot's
-  // outbound `transcript` track. Fan-out `Json.Producer` seeded via
-  // `Publish.Broadcast.publishTrack`; `sendMessage` writes to it and the
-  // bot's `_forward_peer_transcript` on the Python side drains it.
-  private _transcriptOut: Json.Producer<RTVIMessage> | null = null;
+  // outbound `transcript` track. Published as a lossless `@moq/json`
+  // append-stream (compression on); `sendMessage` appends each RTVI
+  // message and the bot's `_forward_peer_transcript` on the Python side
+  // drains it. The stream Producer binds to a single track with no
+  // built-in fan-out, and `publishTrack` serves each subscriber its own
+  // track, so we hold one Producer per subscription (`_transcriptOut`)
+  // and replay the message log (`_transcriptLog`) into each — so a bot
+  // that subscribes late still gets every message, in order.
+  private _transcriptOut: Set<Json.Stream.Producer<RTVIMessage>> | null = null;
+  private _transcriptLog: RTVIMessage[] | null = null;
   private _micEnabled = new Signal(true);
   private _micConstraints = new Signal<MediaTrackConstraints | undefined>(
     undefined,
@@ -389,17 +402,28 @@ export class MoqTransport extends Transport {
       },
     });
 
-    // Client-side transcript: `sendMessage` writes each RTVI message
-    // through this fan-out producer, and every bot subscription
-    // (only one, in the normal single-bot flow) sees the stream via
-    // `.serve`. The bot subscribes to this track by its name — same
-    // convention as the bot's own transcript track — so no catalog
-    // entry is needed.
-    this._transcriptOut = new Json.Producer<RTVIMessage>();
+    // Client-side transcript: `sendMessage` appends each RTVI message to
+    // a lossless JSON append-stream. `publishTrack` hands us a fresh track
+    // per subscription (only one, in the normal single-bot flow), so we
+    // spin up a `Json.Stream.Producer` per subscriber and replay the
+    // message log into it — a bot that subscribes after we've already sent
+    // messages still gets the full log, in order. The bot subscribes to
+    // this track by its name — same convention as the bot's own transcript
+    // track — so no catalog entry is needed.
+    this._transcriptLog = [];
+    this._transcriptOut = new Set<Json.Stream.Producer<RTVIMessage>>();
     this._publishBroadcast.publishTrack(
       merged.transcriptTrack,
       (track, effect) => {
-        this._transcriptOut?.serve(track, effect);
+        const producer = new Json.Stream.Producer<RTVIMessage>(track, {
+          compression: true,
+        });
+        for (const msg of this._transcriptLog ?? []) producer.append(msg);
+        this._transcriptOut?.add(producer);
+        effect.cleanup(() => {
+          this._transcriptOut?.delete(producer);
+          producer.finish();
+        });
       },
     );
 
@@ -501,15 +525,17 @@ export class MoqTransport extends Transport {
       );
     });
 
-    // Transcript — snapshot + delta JSON over a single track. We
-    // re-subscribe on each (re)connect; @moq/json.Consumer rebuilds the
-    // value from each group's snapshot frame and yields per-update.
+    // Transcript — a lossless JSON append-stream over a single track. We
+    // re-subscribe on each (re)connect; @moq/json's stream Consumer yields
+    // every appended record in order, losslessly.
     this._signals.run((eff) => {
       const conn = eff.get(this._reload!.established);
       if (!conn) return;
       const botBroadcast = conn.consume(botPath);
       const track = botBroadcast.subscribe(merged.transcriptTrack, 0);
-      const consumer = new Json.Consumer<RTVIMessage>(track);
+      const consumer = new Json.Stream.Consumer<RTVIMessage>(track, {
+        compression: true,
+      });
       const ac = new AbortController();
       this._drainTranscript(consumer, ac.signal).catch((e) => {
         if (!ac.signal.aborted) {
@@ -536,7 +562,10 @@ export class MoqTransport extends Transport {
       this._audioSource?.close();
       this._sync?.close();
       this._watchBroadcast?.close();
-      this._transcriptOut?.finish();
+      if (this._transcriptOut) {
+        for (const producer of this._transcriptOut) producer.finish();
+        this._transcriptOut.clear();
+      }
       this._publishBroadcast?.close();
       this._microphone?.close();
       this._signals?.close();
@@ -548,6 +577,7 @@ export class MoqTransport extends Transport {
       this._sync = null;
       this._watchBroadcast = null;
       this._transcriptOut = null;
+      this._transcriptLog = null;
       this._publishBroadcast = null;
       this._microphone = null;
       this._signals = null;
@@ -645,17 +675,18 @@ export class MoqTransport extends Transport {
   // --------------------------------------------------------------------
 
   sendMessage(message: RTVIMessage): void {
-    if (!this._transcriptOut) {
+    if (!this._transcriptOut || !this._transcriptLog) {
       console.warn(
         "[MoqTransport] sendMessage called before connect; dropping",
         message,
       );
       return;
     }
-    // `Json.Producer.update` writes a snapshot/delta on the transcript
-    // track. RTVI messages carry a unique `id` per message so successive
-    // .update() calls are always seen as changed values, never no-ops.
-    this._transcriptOut.update(message);
+    // Append to the lossless stream. Keep a log too, so a bot that
+    // subscribes after this point is replayed every message in order
+    // (see the `publishTrack` serve callback above).
+    this._transcriptLog.push(message);
+    for (const producer of this._transcriptOut) producer.append(message);
   }
 
   tracks(): Tracks {
@@ -672,11 +703,11 @@ export class MoqTransport extends Transport {
   // Internals — transcript
   // --------------------------------------------------------------------
 
-  /** Pull RTVI messages off the @moq/json consumer and hand each one
-   *  to `PipecatClient` via `_onMessage`. The handler resolves the
+  /** Pull RTVI messages off the @moq/json stream consumer and hand each
+   *  one to `PipecatClient` via `_onMessage`. The handler resolves the
    *  SDK's connect promise when bot-ready arrives. */
   private async _drainTranscript(
-    consumer: Json.Consumer<RTVIMessage>,
+    consumer: Json.Stream.Consumer<RTVIMessage>,
     signal: AbortSignal,
   ): Promise<void> {
     for (;;) {
