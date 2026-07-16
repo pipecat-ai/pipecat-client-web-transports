@@ -1,0 +1,46 @@
+{
+  "name": "@pipecat-ai/moq-transport",
+  "version": "0.0.1",
+  "license": "BSD-2-Clause",
+  "main": "dist/index.js",
+  "module": "dist/index.module.js",
+  "types": "dist/index.d.ts",
+  "source": "src/index.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pipecat-ai/pipecat-client-web-transports.git"
+  },
+  "files": [
+    "dist",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "parcel build --no-cache",
+    "dev": "parcel watch",
+    "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0"
+  },
+  "devDependencies": {
+    "@pipecat-ai/client-js": "^1.13.0",
+    "@types/node": "^22.9.0",
+    "eslint": "9.39.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-simple-import-sort": "^12.1.1"
+  },
+  "peerDependencies": {
+    "@pipecat-ai/client-js": "~1.13.0"
+  },
+  "dependencies": {
+    "@moq/hang": "^0.2.12",
+    "@moq/json": "^0.1.2",
+    "@moq/net": "^0.1.6",
+    "@moq/publish": "^0.2.16",
+    "@moq/signals": "^0.1.10",
+    "@moq/watch": "^0.2.18"
+  },
+  "description": "Pipecat Media-over-QUIC (MoQ) Transport Package",
+  "author": "Daily.co",
+  "bugs": {
+    "url": "https://github.com/pipecat-ai/pipecat-client-web-transports/issues"
+  }
+}
