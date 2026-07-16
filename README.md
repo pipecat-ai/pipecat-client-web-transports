@@ -3,7 +3,7 @@
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/transport)
 [![Discord](https://img.shields.io/discord/1239284677165056021)](https://discord.gg/pipecat)
 
-A mono-repo to house the various supported Transport options to be used with the pipecat-client-web library. Currently, there are four transports: `small-webrtc-transport`, `daily-transport`, `gemini-live-websocket-transport`, and `openai-realtime-webrtc-transport`.
+A mono-repo to house the various supported Transport options to be used with the pipecat-client-web library. Currently, there are six transports: `small-webrtc-transport`, `daily-transport`, `websocket-transport`, `gemini-live-websocket-transport`, `openai-realtime-webrtc-transport`, and `moq-transport`.
 
 ## Documentation
 
@@ -21,8 +21,8 @@ Pipecat Transports are intended to be used in conjunction with a Pipecat web cli
 This Transport creates a peer-to-peer WebRTC connection between the client and the bot process. This Transport is the client-side counterpart to the Pipecat [SmallWebRTCTransport component](https://docs.pipecat.ai/server/services/transport/small-webrtc).
 
 This is the simplest low-latency audio/video transport for Pipecat. This transport is recommended for local development and demos. Things to be aware of:
-  - This transport is a direct connection between the client and the bot process. If you need multiple clients to connect to the same bot, you will need to use a different transport.
-  - For production usage at scale, a distributed WebRTC network that can do edge/mesh routing, has session-level observability and metrics, and can offload recording and other auxiliary services is often useful.
+- This transport is a direct connection between the client and the bot process. If you need multiple clients to connect to the same bot, you will need to use a different transport.
+- For production usage at scale, a distributed WebRTC network that can do edge/mesh routing, has session-level observability and metrics, and can offload recording and other auxiliary services is often useful.
 
 Typical media flow using a SmallWebRTCTransport:
 ```
@@ -136,6 +136,41 @@ Media flow using a OpenAIRealTimeWebRTCTransport:
   │  └───────────────────────────────┘  │                │              │  
   │                                     │                └──────────────┘  
   └─────────────────────────────────────┘                                  
+```
+
+### [MoqTransport](/transports/moq-transport/README.md)
+
+[![Docs](https://img.shields.io/badge/documentation-blue)](https://docs.pipecat.ai/client/js/transports)
+[![README](https://img.shields.io/badge/README-goldenrod)](/transports/moq-transport/README.md)
+[![Demo](https://img.shields.io/badge/Demo-forestgreen)](https://github.com/pipecat-ai/voice-ui-kit/tree/main/examples/01-console)
+[![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/moq-transport)](https://www.npmjs.com/package/@pipecat-ai/moq-transport)
+
+This Transport uses [Media over QUIC (MoQ)](https://quic.video/) to connect to a bot, either through a MoQ relay or directly to a bot running in serve mode. This Transport is the client-side counterpart to the Pipecat MoQ transport component (`pipecat.transports.moq.transport`).
+
+Typical media flow using a MoqTransport:
+```
+                                                                                       
+                                       ┌────────────────────────────────────────────┐  
+                                       │                                            │  
+  ┌───────────────────┐                │                 Server       ┌─────────┐   │  
+  │                   │                │                              │Pipecat  │   │  
+  │      Client       │  RTVI Messages │                              │Pipeline │   │  
+  │                   │       &        │                              │         │   │  
+  │ ┌──────────────┐  │  WebTransport  │  ┌──────────────┐    media   │ ┌─────┐ │   │  
+  │ │ MoqTransport │◄─┼────────────────┼─►│ MoqTransport ┼────────────┼─► STT │ │   │  
+  │ └──────────────┘  │                │  └───────▲──────┘     in     │ └──┬──┘ │   │  
+  │                   │                │          │                   │    │    │   │  
+  └───────────────────┘                │          │                   │ ┌──▼──┐ │   │  
+                                       │          │                   │ │ LLM │ │   │  
+                                       │          │                   │ └──┬──┘ │   │  
+                                       │          │                   │    │    │   │  
+                                       │          │                   │ ┌──▼──┐ │   │  
+                                       │          │     media         │ │ TTS │ │   │  
+                                       │          └───────────────────┼─┴─────┘ │   │  
+                                       │                 out          └─────────┘   │  
+                                       │                                            │  
+                                       └────────────────────────────────────────────┘  
+                                                                                       
 ```
 
 ## Local Development
