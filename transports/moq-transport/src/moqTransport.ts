@@ -167,6 +167,37 @@ function applyDefaults(opts: MoqTransportOptions): ResolvedOptions {
 }
 
 /**
+ * Shape of the bot's `/start` response when it's running the MoQ transport
+ * (``pipecat.transports.moq.transport``). The bot nests its config under
+ * ``moq`` so a single `/start` endpoint can serve multiple transport types
+ * — apps pass this straight to ``PipecatClient.connect()`` with no
+ * transport-specific glue on the app side.
+ */
+interface MoqStartResponse {
+  moq?: {
+    relayUrl: string;
+    certHash: string | null;
+    namespace: string;
+    clientId: string;
+    botId: string;
+    transcriptTrack: string;
+  };
+}
+
+function isMoqStartResponse(value: object): value is MoqStartResponse {
+  return "moq" in value;
+}
+
+/** Decode the bot's base64 SHA-256 cert hash into the ArrayBuffer shape
+ *  ``WebTransport.serverCertificateHashes`` expects. */
+function decodeCertHash(b64: string): ArrayBuffer {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+/**
  * ``MoqTransport`` — Pipecat Client SDK transport plugin for Media-over-QUIC.
  *
  * Built on the official ``moq`` library family:
@@ -295,6 +326,28 @@ export class MoqTransport extends Transport {
     }
     if (typeof connectParams !== "object") {
       throw new RTVIError("MoqTransport connect params must be an object");
+    }
+    // The bot's `/start` response is `{ moq: {...} }`, not already-shaped
+    // `MoqTransportOptions` — unwrap and decode it here so apps can pass
+    // the raw response straight through with no transport-specific glue.
+    if (isMoqStartResponse(connectParams)) {
+      const { moq } = connectParams;
+      if (!moq) {
+        throw new RTVIError(
+          "MoqTransport connect params did not include `moq` config (server may not be running with `-t moq`)",
+        );
+      }
+      return {
+        ...this._optionsAsInput(),
+        relayUrl: moq.relayUrl,
+        clientId: moq.clientId,
+        botId: moq.botId,
+        namespace: moq.namespace,
+        transcriptTrack: moq.transcriptTrack,
+        serverCertificateHashes: moq.certHash
+          ? [{ algorithm: "sha-256", value: decodeCertHash(moq.certHash) }]
+          : undefined,
+      };
     }
     return { ...this._optionsAsInput(), ...(connectParams as Partial<MoqTransportOptions>) };
   }

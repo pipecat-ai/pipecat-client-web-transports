@@ -216,4 +216,61 @@ describe("MoqTransport — characterization", () => {
     });
     expect(t.state).toBe("disconnected");
   });
+
+  test("_validateConnectionParams() unwraps a raw bot /start response (`{ moq: {...} }`)", () => {
+    const certHashBytes = new Uint8Array([1, 2, 3, 4]);
+    const certHashB64 = btoa(String.fromCharCode(...certHashBytes));
+
+    const resolved = transport._validateConnectionParams({
+      moq: {
+        relayUrl: "https://relay.example/moq",
+        certHash: certHashB64,
+        namespace: "demo",
+        clientId: "alice",
+        botId: "rosey",
+        transcriptTrack: "rtvi",
+      },
+    });
+
+    expect(resolved.relayUrl).toBe("https://relay.example/moq");
+    expect(resolved.namespace).toBe("demo");
+    expect(resolved.clientId).toBe("alice");
+    expect(resolved.botId).toBe("rosey");
+    expect(resolved.transcriptTrack).toBe("rtvi");
+    expect(resolved.serverCertificateHashes).toHaveLength(1);
+    expect(resolved.serverCertificateHashes?.[0].algorithm).toBe("sha-256");
+    expect(
+      new Uint8Array(resolved.serverCertificateHashes?.[0].value as ArrayBuffer),
+    ).toEqual(certHashBytes);
+  });
+
+  test("_validateConnectionParams() treats a null certHash as no cert pinning", () => {
+    const resolved = transport._validateConnectionParams({
+      moq: {
+        relayUrl: "https://relay.example/moq",
+        certHash: null,
+        namespace: "pipecat",
+        clientId: "client0",
+        botId: "bot0",
+        transcriptTrack: "transcript.json.z",
+      },
+    });
+
+    expect(resolved.serverCertificateHashes).toBeUndefined();
+  });
+
+  test("_validateConnectionParams() throws when `moq` is present but empty (server not running -t moq)", () => {
+    expect(() =>
+      transport._validateConnectionParams({ moq: undefined }),
+    ).toThrow(/moq/i);
+  });
+
+  test("_validateConnectionParams() still accepts already-shaped MoqTransportOptions", () => {
+    const resolved = transport._validateConnectionParams({
+      clientId: "bob",
+    });
+
+    expect(resolved.clientId).toBe("bob");
+    expect(resolved.relayUrl).toBe("https://relay.example/moq");
+  });
 });
