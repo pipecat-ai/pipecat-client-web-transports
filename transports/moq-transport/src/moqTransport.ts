@@ -562,10 +562,10 @@ export class MoqTransport extends Transport {
       this._audioSource?.close();
       this._sync?.close();
       this._watchBroadcast?.close();
-      if (this._transcriptOut) {
-        for (const producer of this._transcriptOut) producer.finish();
-        this._transcriptOut.clear();
-      }
+      // Each producer's own effect.cleanup (registered in the `publishTrack`
+      // callback above) already calls producer.finish() when this cascades
+      // through the broadcast's internal effect scope — no need to also
+      // finish them explicitly here.
       this._publishBroadcast?.close();
       this._microphone?.close();
       this._signals?.close();
