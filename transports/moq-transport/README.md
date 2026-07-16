@@ -15,7 +15,7 @@ npm install \
 
 ## Overview
 
-The `MoqTransport` class connects a `PipecatClient` to a Pipecat MoQ bot, either through a MoQ relay or directly to a bot running in serve mode. It publishes the local microphone as an Opus broadcast and consumes the bot's broadcast — both audio and a server→client RTVI message track — using catalog discovery, so codec and sample rate are negotiated at connect time rather than pinned in code.
+The `MoqTransport` class connects a `PipecatClient` to a Pipecat MoQ bot, either through a MoQ relay or directly to a bot running in serve mode. It publishes the local microphone as an Opus broadcast and consumes the bot's broadcast — both audio and a bot→client RTVI message track — using catalog discovery, so codec and sample rate are negotiated at connect time rather than pinned in code. RTVI messages also flow client→bot over a matching transcript track on the client's own broadcast, carrying `client-ready`, typed text input, function-call results, and other client→server RTVI traffic.
 
 Connection management uses WebTransport with a WebSocket fallback (raced by `@moq/net`), with auto-reconnect via `Connection.Reload`.
 
@@ -23,8 +23,8 @@ Connection management uses WebTransport with a WebSocket fallback (raced by `@mo
 
 - 🎤 Microphone capture and Opus publish (`@moq/publish`)
 - 📡 WebTransport with WebSocket fallback and auto-reconnect (`@moq/net`)
-- 🎧 Catalog-driven bot audio playback with bounded-latency jitter buffering (`@moq/hang`)
-- 💬 Server→client RTVI messages over a dedicated transcript track
+- 🎧 Catalog-driven bot audio playback with bounded-latency jitter buffering (`@moq/watch`)
+- 💬 Bidirectional RTVI messages over dedicated transcript tracks (`@moq/json`) — bot→client events/transcripts, and client→bot messages like `client-ready`
 - 🔐 `serverCertificateHashes` pinning for self-signed dev relays
 
 ## Usage
@@ -69,8 +69,10 @@ interface MoqTransportOptions {
   clientId?: string;                             // Optional: this client's participant id (default "client0")
   botId?: string;                                // Optional: peer (bot) participant id to consume (default "bot0")
   namespace?: string;                            // Optional: top-level namespace / room name (default "pipecat")
-  transcriptTrack?: string;                      // Optional: track name for server→client RTVI messages (default "transcript")
-  audioLatencyMs?: number;                       // Optional: jitter buffer max latency in ms (default 80)
+  transcriptTrack?: string;                      // Optional: track name for the bidirectional RTVI transcript channel (default "transcript.json.z")
+  audioLatencyMs?: number;                       // Optional: jitter buffer floor latency in ms (default 80)
+  audioBufferMaxMs?: number | "real-time";       // Optional: buffered-playback latency ceiling in ms, or "real-time" to collapse to the floor (default 30000)
+  audioSampleRate?: number;                      // Optional: mic publish sample rate in Hz; one of 8000/12000/16000/24000/48000 (default 48000)
 }
 ```
 

@@ -169,7 +169,13 @@ describe("MoqTransport — characterization", () => {
     expect(transport.tracks().local.audio).toBeUndefined();
   });
 
-  test("sendMessage() is a no-op by design (no client→server RTVI channel)", () => {
+  test("sendMessage() before connect drops the message with a warning (no-op, not a throw)", () => {
+    // There IS a real client→bot RTVI channel once connected (sendMessage
+    // appends to the transcript stream — see the class docstring and
+    // sendReadyMessage(), which relies on it to deliver `client-ready`).
+    // Pre-connect, `_transcriptOut`/`_transcriptLog` are still null, so
+    // sendMessage() takes the early-return guard and just warns; this test
+    // locks in only that guard, not the connected-state behavior.
     expect(() =>
       transport.sendMessage({
         id: "x",
