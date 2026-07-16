@@ -5,12 +5,18 @@ All notable changes to **Pipecat OpenAIRealTimeWebRTCTransport** will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.7](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/openai-realtime-webrtc-transport-v1.5.6...openai-realtime-webrtc-transport-v1.5.7) (2026-07-16)
+
+
+### Miscellaneous Chores
+
+* Bump client-js dependency for all transports to 1.13.0
+
 ## [1.5.6](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/openai-realtime-webrtc-transport-v1.5.5...openai-realtime-webrtc-transport-v1.5.6) (2026-06-19)
 
 
 ### Miscellaneous Chores
 
-* Bump client-js dependency for all transports to 1.12.0 ([781e0dd](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/781e0dd9621f16a00a87308b02174d941400a624))
 * Bump client-js dependency for all transports to 1.12.0 ([ef7a2c3](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/ef7a2c30f3082d5433e8b0c0423e732a13e5a95f))
 
 ## [1.5.5](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/openai-realtime-webrtc-transport-v1.5.4...openai-realtime-webrtc-transport-v1.5.5) (2026-06-03)
@@ -18,7 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Miscellaneous Chores
 
-* Bump client-js dependency for all transports to 1.11.0 ([67ccb57](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/67ccb57ea8f5f8b7e7424788e2c3cafa863ff08f))
 * Bump client-js dependency for all transports to 1.11.0 ([8a38dab](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/8a38dab477191d4ce2bc31e9f4f40b49da921771))
 
 ## [1.5.4](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/openai-realtime-webrtc-transport-v1.5.3...openai-realtime-webrtc-transport-v1.5.4) (2026-05-27)
