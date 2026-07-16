@@ -10,6 +10,7 @@ on:
         options:
           - daily
           - gemini-live-websocket-transport
+          - moq-transport
           - openai-realtime-webrtc-transport
           - small-webrtc-transport
           - websocket-transport
