@@ -2,6 +2,7 @@
 
 [![Docs](https://img.shields.io/badge/documentation-blue)](https://docs.pipecat.ai/client/js/transports)
 ![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/moq-transport)
+[![Demo](https://img.shields.io/badge/Demo-forestgreen)](https://github.com/pipecat-ai/voice-ui-kit/tree/main/examples/01-console)
 
 Media-over-QUIC transport package for use with `@pipecat-ai/client-js`.
 
@@ -77,6 +78,23 @@ interface MoqTransportOptions {
 ```
 
 Broadcast paths are derived as `<namespace>/<clientId>` (publish) and `<namespace>/<botId>` (subscribe). Audio track names inside each broadcast are discovered from the bot's catalog, so they aren't configured directly.
+
+### Connecting via a bot `/start` endpoint
+
+If your `/start` endpoint returns the bot's MoQ config nested under a `moq` key (the shape the bot's `pipecat.transports.moq.transport` returns), pass that response straight to `connect()` / `PipecatClient.startBotAndConnect()` — `MoqTransport` unwraps it (including base64-decoding `certHash` into `serverCertificateHashes`) in `_validateConnectionParams`, no app-side transform needed:
+
+```json
+{
+  "moq": {
+    "relayUrl": "https://relay.example.com:4080/moq",
+    "certHash": "base64-encoded-sha-256-or-null",
+    "namespace": "pipecat",
+    "clientId": "client0",
+    "botId": "bot0",
+    "transcriptTrack": "transcript.json.z"
+  }
+}
+```
 
 ### Handling Events
 
