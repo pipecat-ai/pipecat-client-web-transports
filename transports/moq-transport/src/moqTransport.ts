@@ -636,6 +636,16 @@ export class MoqTransport extends Transport {
       this._signals = null;
       this._reload = null;
       this.state = "disconnected";
+      // Fire the SDK's disconnected callback. `state = "disconnected"`
+      // above already triggers `onTransportStateChanged`, but the SDK
+      // wires UI teardown (voice-ui-kit's connection-state hook, the
+      // `Disconnected` event, message-dispatcher cleanup) through
+      // `onDisconnected` — without this call the transport goes idle
+      // but the UI stays stuck in "connected" and never restores its
+      // "Connect" button. Matches the pattern used by
+      // small-webrtc-transport, openai-realtime-webrtc-transport, and
+      // gemini-live-websocket-transport.
+      this._callbacks?.onDisconnected?.();
     }
   }
 
@@ -766,16 +776,30 @@ export class MoqTransport extends Transport {
     for (;;) {
       const message = await consumer.next();
       if (!message || signal.aborted) break;
-      if (typeof message === "object") {
-        // Interruption: the user started talking, so flush the
-        // already-buffered TTS for the bot's previous utterance instead
-        // of letting it drain. With the bot writing faster than
-        // real-time, that buffer can be seconds long.
-        if (message.type === "user-started-speaking") {
-          this._resetBotAudio();
-        }
-        this._onMessage?.(message);
+      if (typeof message !== "object") continue;
+      // Intra-transport shutdown signal from the bot: bot is about to
+      // close its MoQ session. Disable auto-reconnect, tear down the
+      // audio decoder + subscribers on our side while WebTransport is
+      // still healthy — without this the connection just vanishes
+      // underneath Chrome's WebCodecs decoder and can crash the
+      // renderer. Not an RTVI event; don't forward it to `_onMessage`.
+      const label = (message as { label?: string }).label;
+      const type = (message as { type?: string }).type;
+      if (label === "moq-transport" && type === "session-ending") {
+        console.log("[MoqTransport] bot signaled session-ending — closing cleanly");
+        // Fire-and-forget; we're returning from the drain loop right
+        // after, and _disconnect() aborts the consumer that owns us.
+        void this._disconnect();
+        return;
       }
+      // Interruption: the user started talking, so flush the
+      // already-buffered TTS for the bot's previous utterance instead
+      // of letting it drain. With the bot writing faster than
+      // real-time, that buffer can be seconds long.
+      if (type === "user-started-speaking") {
+        this._resetBotAudio();
+      }
+      this._onMessage?.(message);
     }
   }
 
