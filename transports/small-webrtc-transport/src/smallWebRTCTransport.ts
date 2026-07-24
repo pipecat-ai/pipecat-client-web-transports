@@ -975,7 +975,7 @@ export class SmallWebRTCTransport extends Transport {
     this._canSendIceCandidates = false;
 
     if (this._connectFailed) {
-      this._connectFailed();
+      this._connectFailed(new TransportStartError());
     }
     this._connectFailed = null;
     this._connectResolved = null;
