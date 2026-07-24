@@ -145,6 +145,12 @@ export class DailyMediaManager extends MediaManager {
         (async () => {
           this._connectResolve = resolve;
           await this.initialize();
+          // Without a recorder, handleTrackStarted never fires to resolve this
+          // promise, so resolve here once initialization is complete.
+          if (this._connectResolve && !this._mediaStreamRecorder) {
+            this._connectResolve();
+            this._connectResolve = null;
+          }
         })();
       });
     }
