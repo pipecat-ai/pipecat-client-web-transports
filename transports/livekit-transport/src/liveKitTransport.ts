@@ -2,7 +2,6 @@ import {
   DeviceError,
   Participant,
   PipecatClientOptions,
-  RTVIEventCallbacks,
   RTVIMessage,
   Tracks,
   Transport,
@@ -22,16 +21,12 @@ import {
   RoomOptions,
   Track,
 } from "livekit-client";
+import packageJson from "../package.json";
 
-type LiveKitConnectParams = {
-  authUrl: string;
-  authMethod: "GET" | "POST";
-  authBody: Record<string, unknown>;
-
+export type LiveKitConnectParams = {
   url: string;
   token: string;
-
-  roomConnectionOptions: RoomConnectOptions;
+  roomConnectionOptions?: RoomConnectOptions;
 };
 
 export type LiveKitTransportConstructorOptions = RoomOptions;
@@ -48,9 +43,6 @@ export class LiveKitTransport extends Transport {
   private _listenersAttached: boolean = false;
   private _deviceChangeHandler = () => this.updateAvailableDevices();
 
-  protected _state: TransportState = "disconnected";
-  protected _callbacks: RTVIEventCallbacks = {};
-
   constructor(options: LiveKitTransportConstructorOptions = {}) {
     super();
     this._room = new Room(options);
@@ -63,13 +55,13 @@ export class LiveKitTransport extends Transport {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
     this._onMessage = messageHandler;
-    this._micEnabled = options.enableMic ?? false;
+    this._micEnabled = options.enableMic ?? true;
     this._camEnabled = options.enableCam ?? false;
 
     this.attachEventListeners();
 
     this.state = "disconnected";
-    logger.debug("[LiveKit Transport] Initialized");
+    logger.debug("[LiveKit Transport] Initialized", packageJson.version);
   }
 
   get state(): TransportState {
@@ -86,21 +78,50 @@ export class LiveKitTransport extends Transport {
   async initDevices(): Promise<void> {
     this.state = "initializing";
 
-    // In LiveKit, we can pre-warm devices or just enumerate
-    // We'll enumerate first
-    await this.updateAvailableDevices();
+    if (this._micEnabled || this._camEnabled) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: this._micEnabled,
+          video: this._camEnabled,
+        });
 
-    // Enable devices based on options if needed, but usually this happens on connect or explicitly
-    // For now, we just mark as initialized
+        await this.updateAvailableDevices();
+
+        const audioTrack = stream.getAudioTracks()[0];
+        if (audioTrack) {
+          const deviceId = audioTrack.getSettings().deviceId;
+          const mics = await this.getAllMics();
+          const mic = mics.find((m) => m.deviceId === deviceId);
+          if (mic) {
+            this._selectedMic = mic;
+            this._callbacks.onMicUpdated?.(mic);
+          }
+          audioTrack.stop();
+        }
+
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          const deviceId = videoTrack.getSettings().deviceId;
+          const cams = await this.getAllCams();
+          const cam = cams.find((c) => c.deviceId === deviceId);
+          if (cam) {
+            this._selectedCam = cam;
+            this._callbacks.onCamUpdated?.(cam);
+          }
+          videoTrack.stop();
+        }
+      } catch (e) {
+        logger.warn("[LiveKit Transport] Could not initialize devices", e);
+        await this.updateAvailableDevices();
+      }
+    } else {
+      await this.updateAvailableDevices();
+    }
+
     this.state = "initialized";
   }
 
   private async updateAvailableDevices() {
-    // LiveKit helper for listing devices
-    // Note: LiveKit's Room doesn't strictly expose enumerateDevices directly as a static helper in all versions,
-    // but we can use navigator.mediaDevices directly or Room.getLocalDevices helper if available.
-    // We will use navigator.mediaDevices standard API for enumeration as it is robust.
-
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const cams = devices.filter((d) => d.kind === "videoinput");
@@ -110,9 +131,6 @@ export class LiveKitTransport extends Transport {
       this._callbacks.onAvailableCamsUpdated?.(cams);
       this._callbacks.onAvailableMicsUpdated?.(mics);
       this._callbacks.onAvailableSpeakersUpdated?.(speakers);
-
-      // We can't easily know "selected" device without querying the Room's LocalParticipant or active device
-      // But initially none is selected until we start tracks.
     } catch (e) {
       logger.error("Error enumerating devices", e);
     }
@@ -122,80 +140,35 @@ export class LiveKitTransport extends Transport {
     connectParams: unknown
   ): LiveKitConnectParams | undefined {
     if (!connectParams || typeof connectParams !== "object") return undefined;
-    return connectParams as LiveKitConnectParams;
+    const p = connectParams as LiveKitConnectParams;
+    if (!p.url || !p.token) {
+      throw new Error("LiveKit connection requires 'url' and 'token'");
+    }
+    return p;
   }
 
   async _connect(connectParams?: LiveKitConnectParams): Promise<void> {
-    const params = connectParams || ({} as Partial<LiveKitConnectParams>);
-    let { url, token } = params;
+    if (!connectParams?.url || !connectParams?.token) {
+      this.state = "error";
+      throw new TransportStartError("LiveKit connection requires 'url' and 'token'");
+    }
 
     this.state = "connecting";
-    if (params.authUrl) {
-      try {
-        const options: RequestInit = {
-          method: params.authMethod ?? "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        };
-        if (options.method?.toUpperCase() == "POST") {
-          options.body = JSON.stringify(params.authBody ?? {});
-        }
-        const res = await fetch(params.authUrl, options);
-        const json = await res.json();
-        url = json.url;
-        token = json.token;
-      } catch (e) {
-        logger.error("Failed to fetch LiveKit credentials from authUrl", e);
-        this.state = "error";
-        throw new TransportStartError("Failed to fetch credentials");
-      }
-    }
-
-    if (!url || !token) {
-      logger.error(
-        "LiveKit connection requires 'url' and 'token' or 'authUrl'"
-      );
-      this.state = "error";
-      throw new TransportStartError("Missing url or token");
-    }
 
     try {
-      await this._room.connect(url, token, params.roomConnectionOptions);
-      const enableMic = this._micEnabled;
-      const enableCam = this._camEnabled;
-      await this._room.localParticipant.setMicrophoneEnabled(enableMic);
-      if (enableMic) {
-        const trackPub = this._room.localParticipant.getTrackPublication(
-          Track.Source.Microphone
-        );
-        if (trackPub?.track?.mediaStreamTrack) {
-          const deviceId =
-            trackPub.track.mediaStreamTrack.getSettings().deviceId;
-          if (deviceId) {
-            const mics = await this.getAllMics();
-            const mic = mics.find((m) => m.deviceId === deviceId);
-            if (mic) this._selectedMic = mic;
-          }
-        }
-      }
-      if (this._isMediaDeviceInfo(this._selectedMic)) {
-        this._callbacks.onMicUpdated?.(this._selectedMic);
-      }
-      await this._room.localParticipant.setCameraEnabled(enableCam);
-      if (this._isMediaDeviceInfo(this._selectedCam)) {
-        this._callbacks.onCamUpdated?.(this._selectedCam);
-      }
+      await this._room.connect(
+        connectParams.url,
+        connectParams.token,
+        connectParams.roomConnectionOptions
+      );
     } catch (e) {
       logger.error("Failed to connect to LiveKit room", e);
       this.state = "error";
       throw new TransportStartError();
     }
 
-    if (this._abortController?.signal.aborted) {
-      await this._room.disconnect();
-      return;
-    }
+    await this._room.localParticipant.setMicrophoneEnabled(this._micEnabled);
+    await this._room.localParticipant.setCameraEnabled(this._camEnabled);
 
     this.state = "connected";
     this._callbacks.onConnected?.();
@@ -213,15 +186,10 @@ export class LiveKitTransport extends Transport {
   }
 
   sendMessage(message: RTVIMessage): void {
-    if (!this._room || (this.state !== "connected" && this.state !== "ready")) {
-      logger.warn("Cannot send message, not connected");
-      return;
-    }
     const str = JSON.stringify(message);
     const encoder = new TextEncoder();
     const data = encoder.encode(str);
 
-    // Publish to room
     this._room.localParticipant.publishData(data, { reliable: true });
   }
 
@@ -242,6 +210,7 @@ export class LiveKitTransport extends Transport {
   }
 
   async updateMic(micId: string): Promise<void> {
+    if ((this._selectedMic as MediaDeviceInfo).deviceId === micId) return;
     try {
       await this._room.switchActiveDevice("audioinput", micId);
       const mics = await this.getAllMics();
@@ -258,6 +227,7 @@ export class LiveKitTransport extends Transport {
   }
 
   async updateCam(camId: string): Promise<void> {
+    if ((this._selectedCam as MediaDeviceInfo).deviceId === camId) return;
     try {
       await this._room.switchActiveDevice("videoinput", camId);
       const cams = await this.getAllCams();
@@ -274,6 +244,8 @@ export class LiveKitTransport extends Transport {
   }
 
   async updateSpeaker(speakerId: string): Promise<void> {
+    if ((this._selectedSpeaker as MediaDeviceInfo).deviceId === speakerId)
+      return;
     try {
       await this._room.switchActiveDevice("audiooutput", speakerId);
       const speakers = await this.getAllSpeakers();
@@ -313,11 +285,14 @@ export class LiveKitTransport extends Transport {
           if (deviceId) {
             const mics = await this.getAllMics();
             const mic = mics.find((m) => m.deviceId === deviceId);
-            if (mic) this._selectedMic = mic;
+            if (
+              mic &&
+              (this._selectedMic as MediaDeviceInfo).deviceId !== mic.deviceId
+            ) {
+              this._selectedMic = mic;
+              this._callbacks.onMicUpdated?.(mic);
+            }
           }
-        }
-        if (this._isMediaDeviceInfo(this._selectedMic)) {
-          this._callbacks.onMicUpdated?.(this._selectedMic);
         }
       })
       .catch((e) => {
@@ -342,11 +317,14 @@ export class LiveKitTransport extends Transport {
           if (deviceId) {
             const cams = await this.getAllCams();
             const cam = cams.find((c) => c.deviceId === deviceId);
-            if (cam) this._selectedCam = cam;
+            if (
+              cam &&
+              (this._selectedCam as MediaDeviceInfo).deviceId !== cam.deviceId
+            ) {
+              this._selectedCam = cam;
+              this._callbacks.onCamUpdated?.(cam);
+            }
           }
-        }
-        if (this._isMediaDeviceInfo(this._selectedCam)) {
-          this._callbacks.onCamUpdated?.(this._selectedCam);
         }
       })
       .catch((e) => {
@@ -355,12 +333,6 @@ export class LiveKitTransport extends Transport {
           new DeviceError(["cam"], "unknown", e.message)
         );
       });
-  }
-
-  private _isMediaDeviceInfo(
-    device: MediaDeviceInfo | Record<string, never>
-  ): device is MediaDeviceInfo {
-    return (device as MediaDeviceInfo).deviceId !== undefined;
   }
 
   get isMicEnabled(): boolean {
@@ -397,7 +369,6 @@ export class LiveKitTransport extends Transport {
       screenAudio: getTrack(local, "audio", Track.Source.ScreenShareAudio),
     };
 
-    // Uses first remote participant as bot; no explicit bot identity API yet.
     const remoteParticipants = Array.from(
       this._room.remoteParticipants.values()
     );
@@ -527,7 +498,6 @@ export class LiveKitTransport extends Transport {
 
   private handleParticipantConnected(participant: RemoteParticipant) {
     this._callbacks.onParticipantJoined?.(this.toParticipant(participant));
-    // Potential bot identification logic here
   }
 
   private handleParticipantDisconnected(participant: RemoteParticipant) {
