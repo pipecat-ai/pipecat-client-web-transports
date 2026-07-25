@@ -86,8 +86,6 @@ Typical media flow using a DailyTransport:
 
 ```
 
-<<<<<<< HEAD
-
 ### [WebSocketTransport](transports/websocket-transport/README.md)
 
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/api-reference/client/js/transports/websocket)
@@ -97,7 +95,7 @@ Typical media flow using a DailyTransport:
 
 This transport enables a purely WebSocket based connection between clients and your Pipecat application. It implements bidirectional audio and video streaming using a WebSocket for real-time communication.
 
-# It is intended for lightweight implementations, particularly for local development and testing. It expects your Pipecat server to include the corresponding server-side [WebSocketTransport](https://docs.pipecat.ai/api-reference/server/services/transport/websocket-server) implementation.
+It is intended for lightweight implementations, particularly for local development and testing. It expects your Pipecat server to include the corresponding server-side [WebSocketTransport](https://docs.pipecat.ai/api-reference/server/services/transport/websocket-server) implementation.
 
 ### [LiveKitTransport](/transports/livekit-transport/README.md)
 
@@ -105,7 +103,7 @@ This transport enables a purely WebSocket based connection between clients and y
 [![README](https://img.shields.io/badge/README-goldenrod)](/transports/livekit-transport/README.md)
 ![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/livekit-transport)
 
-This Transport uses the [LiveKit](https://livekit.io) real-time communication platform to connect to a bot and stream media over a WebRTC connection. LiveKit provides a scalable, distributed WebRTC infrastructure with features like edge routing, session observability, and recording capabilities.
+This Transport uses the [LiveKit](https://livekit.io) real-time communication platform to connect to a bot and stream media over a WebRTC connection. This Transport is the client-side counterpart to the Pipecat [LiveKitTransport component](https://docs.pipecat.ai/server/services/transport/livekit).
 
 Typical media flow using a LiveKitTransport:
 
@@ -133,8 +131,6 @@ Typical media flow using a LiveKitTransport:
                                        └────────────────────────────────────────────┘
 
 ```
-
-> > > > > > > e6ded27 (feat: add livekit transport)
 
 ### [GeminiLiveWebSocketTransport](transports/gemini-live-websocket-transport/README.md)
 
