@@ -181,8 +181,6 @@ export class LiveKitTransport extends Transport {
       throw new TransportStartError();
     }
 
-    if (this._abortController?.signal.aborted) return;
-
     if (this._localAudioTrack) {
       await this._room.localParticipant.publishTrack(this._localAudioTrack);
     } else if (this._micEnabled) {
@@ -193,6 +191,14 @@ export class LiveKitTransport extends Transport {
       await this._room.localParticipant.publishTrack(this._localVideoTrack);
     } else if (this._camEnabled) {
       await this._room.localParticipant.setCameraEnabled(true);
+    }
+
+    // room.connect() and the publish awaits above are all points at which a
+    // concurrent disconnect() may have aborted us and already set state to
+    // "disconnected". Guard here so we don't clobber that back to "connected".
+    if (this._abortController?.signal.aborted) {
+      await this._room.disconnect();
+      return;
     }
 
     this.state = "connected";
