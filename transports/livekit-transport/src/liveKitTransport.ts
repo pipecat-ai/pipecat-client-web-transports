@@ -1,7 +1,10 @@
 import {
+  DeviceArray,
   DeviceError,
+  DeviceErrorType,
   Participant,
   PipecatClientOptions,
+  RTVI_MESSAGE_LABEL,
   RTVIMessage,
   Tracks,
   Transport,
@@ -14,6 +17,7 @@ import {
   LocalParticipant,
   LocalTrackPublication,
   LocalVideoTrack,
+  MediaDeviceFailure,
   RemoteParticipant,
   RemoteTrack,
   RemoteTrackPublication,
@@ -164,7 +168,9 @@ export class LiveKitTransport extends Transport {
   async _connect(connectParams?: LiveKitConnectParams): Promise<void> {
     if (!connectParams?.url || !connectParams?.token) {
       this.state = "error";
-      throw new TransportStartError("LiveKit connection requires 'url' and 'token'");
+      throw new TransportStartError(
+        "LiveKit connection requires 'url' and 'token'"
+      );
     }
 
     this.state = "connecting";
@@ -460,7 +466,13 @@ export class LiveKitTransport extends Transport {
       const decoder = new TextDecoder();
       const str = decoder.decode(payload);
       const msg = JSON.parse(str);
-      if (msg && typeof msg === "object" && "type" in msg) {
+      // Only bubble RTVI messages; ignore any other data on the channel.
+      if (
+        msg &&
+        typeof msg === "object" &&
+        "type" in msg &&
+        msg.label === RTVI_MESSAGE_LABEL
+      ) {
         this._onMessage(msg as RTVIMessage);
       }
     } catch (e) {
@@ -502,18 +514,36 @@ export class LiveKitTransport extends Transport {
         this.toParticipant(participant)
       );
     }
+
+    const deviceId =
+      publication.track?.mediaStreamTrack?.getSettings().deviceId;
+    if (!deviceId) return;
+
+    // Sync the selected input device when a capture track is published (e.g.
+    // via setMicrophoneEnabled/setCameraEnabled on the connect-without-
+    // initDevices path). Screen-share sources are not selectable devices.
     if (publication.source === Track.Source.Microphone) {
-      const deviceId =
-        publication.track?.mediaStreamTrack?.getSettings().deviceId;
-      if (deviceId) {
-        this.getAllMics().then((mics) => {
-          const mic = mics.find((m) => m.deviceId === deviceId);
-          if (mic) {
-            this._selectedMic = mic;
-            this._callbacks.onMicUpdated?.(mic);
-          }
-        });
-      }
+      this.getAllMics().then((mics) => {
+        const mic = mics.find((m) => m.deviceId === deviceId);
+        if (
+          mic &&
+          (this._selectedMic as MediaDeviceInfo).deviceId !== deviceId
+        ) {
+          this._selectedMic = mic;
+          this._callbacks.onMicUpdated?.(mic);
+        }
+      });
+    } else if (publication.source === Track.Source.Camera) {
+      this.getAllCams().then((cams) => {
+        const cam = cams.find((c) => c.deviceId === deviceId);
+        if (
+          cam &&
+          (this._selectedCam as MediaDeviceInfo).deviceId !== deviceId
+        ) {
+          this._selectedCam = cam;
+          this._callbacks.onCamUpdated?.(cam);
+        }
+      });
     }
   }
 
@@ -544,10 +574,40 @@ export class LiveKitTransport extends Transport {
     }
   }
 
-  private handleMediaDevicesError(e: Error) {
+  private handleMediaDevicesError(e: Error, kind?: MediaDeviceKind) {
+    const devices: DeviceArray = [];
+    if (kind === "audioinput") devices.push("mic");
+    else if (kind === "videoinput") devices.push("cam");
+    else if (kind === "audiooutput") devices.push("speaker");
+    else {
+      // No kind reported: fall back to LiveKit's last per-device errors to
+      // work out which capture actually failed, defaulting to both.
+      const lp = this._room.localParticipant;
+      if (lp.lastMicrophoneError) devices.push("mic");
+      if (lp.lastCameraError) devices.push("cam");
+      if (devices.length === 0) devices.push("cam", "mic");
+    }
+
     this._callbacks.onDeviceError?.(
-      new DeviceError(["cam", "mic"], "unknown", e.message)
+      new DeviceError(
+        devices,
+        this.toDeviceErrorType(MediaDeviceFailure.getFailure(e)),
+        e.message
+      )
     );
+  }
+
+  private toDeviceErrorType(failure?: MediaDeviceFailure): DeviceErrorType {
+    switch (failure) {
+      case MediaDeviceFailure.PermissionDenied:
+        return "permissions";
+      case MediaDeviceFailure.NotFound:
+        return "not-found";
+      case MediaDeviceFailure.DeviceInUse:
+        return "in-use";
+      default:
+        return "unknown";
+    }
   }
 
   private toParticipant(p: LocalParticipant | RemoteParticipant): Participant {
