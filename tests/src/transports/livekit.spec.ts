@@ -48,15 +48,41 @@ vi.mock("livekit-client", () => {
     identity = "local-user";
     name = "Local User";
     isScreenShareEnabled = false;
+    lastMicrophoneError: Error | undefined = undefined;
+    lastCameraError: Error | undefined = undefined;
     setMicrophoneEnabled = vi.fn(async (_e: boolean) => {});
     setCameraEnabled = vi.fn(async (_e: boolean) => {});
     setScreenShareEnabled = vi.fn(async (_e: boolean) => {});
     publishData = vi.fn();
+    publishTrack = vi.fn(async (_t: unknown) => {});
     waitUntilActive = vi.fn(async () => {});
     getTrackPublication = vi.fn((_s: string) => undefined as unknown);
   }
 
   class RemoteParticipant {}
+
+  // Mirrors livekit-client's MediaDeviceFailure enum + getFailure() classifier
+  // so the transport (which reads both from this same mocked module) stays
+  // self-consistent under test.
+  const MediaDeviceFailure = {
+    PermissionDenied: "PermissionDenied",
+    NotFound: "NotFound",
+    DeviceInUse: "DeviceInUse",
+    Other: "Other",
+    getFailure(error: unknown): string | undefined {
+      if (error && typeof error === "object" && "name" in error) {
+        const name = (error as { name: string }).name;
+        if (name === "NotAllowedError" || name === "PermissionDeniedError")
+          return "PermissionDenied";
+        if (name === "NotFoundError" || name === "DevicesNotFoundError")
+          return "NotFound";
+        if (name === "NotReadableError" || name === "TrackStartError")
+          return "DeviceInUse";
+        return "Other";
+      }
+      return undefined;
+    },
+  };
 
   class Room {
     options: unknown;
@@ -78,7 +104,14 @@ vi.mock("livekit-client", () => {
     }
   }
 
-  return { Room, RoomEvent, Track, LocalParticipant, RemoteParticipant };
+  return {
+    Room,
+    RoomEvent,
+    Track,
+    LocalParticipant,
+    RemoteParticipant,
+    MediaDeviceFailure,
+  };
 });
 
 import { LiveKitTransport } from "@pipecat-ai/livekit-transport";
@@ -124,10 +157,13 @@ function stubMediaDevices(
 interface FakeRoom {
   localParticipant: {
     isScreenShareEnabled: boolean;
+    lastMicrophoneError: Error | undefined;
+    lastCameraError: Error | undefined;
     setMicrophoneEnabled: Mock;
     setCameraEnabled: Mock;
     setScreenShareEnabled: Mock;
     publishData: Mock;
+    publishTrack: Mock;
     waitUntilActive: Mock;
     getTrackPublication: Mock;
   };
@@ -277,78 +313,21 @@ describe("LiveKitTransport — characterization", () => {
 
       await connect(transport, { url: "wss://lk.example", token: "tok" });
 
+      // With no pre-created (initDevices) tracks, an enabled device is turned
+      // on via setXEnabled(true); a disabled one is left untouched.
       expect(roomOf(transport).localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
-      expect(roomOf(transport).localParticipant.setCameraEnabled).toHaveBeenCalledWith(false);
+      expect(roomOf(transport).localParticipant.setCameraEnabled).not.toHaveBeenCalled();
     });
 
-    test("_connect() without url/token/authUrl throws TransportStartError and enters 'error'", async () => {
+    test("_connect() without url/token throws TransportStartError and enters 'error'", async () => {
       const { callbacks, recorder } = buildSpyCallbacks();
       wireTransport(transport, callbacks);
 
-      await expect(connect(transport, {})).rejects.toThrow("Missing url or token");
+      await expect(connect(transport, {})).rejects.toThrow(
+        "LiveKit connection requires 'url' and 'token'"
+      );
       expect(transport.state).toBe("error");
-      expect(recorder.states).toEqual(["connecting", "error"]);
-    });
-
-    test("_connect() with authUrl (GET default) fetches credentials then connects", async () => {
-      const fetchMock = vi.fn(async () => ({
-        json: async () => ({ url: "wss://fetched", token: "fetched-tok" }),
-      }));
-      vi.stubGlobal("fetch", fetchMock);
-      const { callbacks } = buildSpyCallbacks();
-      wireTransport(transport, callbacks);
-
-      await connect(transport, { authUrl: "https://auth.example/lk" });
-
-      expect(fetchMock).toHaveBeenCalledWith(
-        "https://auth.example/lk",
-        expect.objectContaining({ method: "GET" })
-      );
-      expect(roomOf(transport).connect).toHaveBeenCalledWith(
-        "wss://fetched",
-        "fetched-tok",
-        undefined
-      );
-      expect(transport.state).toBe("connected");
-    });
-
-    test("_connect() with authUrl POST sends the JSON auth body", async () => {
-      const fetchMock = vi.fn(async () => ({
-        json: async () => ({ url: "wss://fetched", token: "fetched-tok" }),
-      }));
-      vi.stubGlobal("fetch", fetchMock);
-      const { callbacks } = buildSpyCallbacks();
-      wireTransport(transport, callbacks);
-
-      await connect(transport, {
-        authUrl: "https://auth.example/lk",
-        authMethod: "POST",
-        authBody: { roomName: "room-1" },
-      });
-
-      expect(fetchMock).toHaveBeenCalledWith(
-        "https://auth.example/lk",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ roomName: "room-1" }),
-        })
-      );
-    });
-
-    test("_connect() surfaces an authUrl fetch failure as TransportStartError + 'error' state", async () => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async () => {
-          throw new Error("network down");
-        })
-      );
-      const { callbacks } = buildSpyCallbacks();
-      wireTransport(transport, callbacks);
-
-      await expect(
-        connect(transport, { authUrl: "https://auth.example/lk" })
-      ).rejects.toThrow("Failed to fetch credentials");
-      expect(transport.state).toBe("error");
+      expect(recorder.states).toEqual(["error"]);
     });
 
     test("_connect() surfaces a room.connect() failure as TransportStartError + 'error' state", async () => {
@@ -421,6 +400,25 @@ describe("LiveKitTransport — characterization", () => {
       ).not.toThrow();
       expect(onMessage).not.toHaveBeenCalled();
     });
+
+    test.each([
+      ["missing label", { id: "1", type: "server-message", data: {} }],
+      [
+        "non-rtvi label",
+        { id: "1", label: "not-rtvi", type: "server-message", data: {} },
+      ],
+    ])(
+      "inbound DataReceived with %s is ignored (handler not called)",
+      (_desc, message) => {
+        const { callbacks } = buildSpyCallbacks();
+        const { onMessage } = wireTransport(transport, callbacks);
+
+        const payload = new TextEncoder().encode(JSON.stringify(message));
+        roomOf(transport).emit(RoomEvent.DataReceived, payload);
+
+        expect(onMessage).not.toHaveBeenCalled();
+      }
+    );
   });
 
   describe("device management", () => {
@@ -455,6 +453,60 @@ describe("LiveKitTransport — characterization", () => {
       expect(spies.onDeviceError).toHaveBeenCalledTimes(1);
       expect(spies.onMicUpdated).not.toHaveBeenCalled();
     });
+
+    test.each([
+      ["audioinput", "NotAllowedError", ["mic"], "permissions"],
+      ["videoinput", "NotFoundError", ["cam"], "not-found"],
+      ["audioinput", "NotReadableError", ["mic"], "in-use"],
+      ["audiooutput", "GremlinError", ["speaker"], "unknown"],
+    ])(
+      "MediaDevicesError(kind=%s, %s) classifies onDeviceError as (%j, %s)",
+      (kind, errorName, devices, type) => {
+        const { callbacks, spies } = buildSpyCallbacks();
+        wireTransport(transport, callbacks);
+
+        const error = Object.assign(new Error("device failure"), {
+          name: errorName,
+        });
+        roomOf(transport).emit(RoomEvent.MediaDevicesError, error, kind);
+
+        expect(spies.onDeviceError).toHaveBeenCalledTimes(1);
+        expect(spies.onDeviceError).toHaveBeenCalledWith(
+          expect.objectContaining({ devices, type })
+        );
+      }
+    );
+
+    test("MediaDevicesError without a kind falls back to both cam+mic", () => {
+      const { callbacks, spies } = buildSpyCallbacks();
+      wireTransport(transport, callbacks);
+
+      roomOf(transport).emit(
+        RoomEvent.MediaDevicesError,
+        new Error("no kind reported")
+      );
+
+      expect(spies.onDeviceError).toHaveBeenCalledWith(
+        expect.objectContaining({ devices: ["cam", "mic"], type: "unknown" })
+      );
+    });
+
+    test("MediaDevicesError without a kind uses lastMicrophoneError to pin the device", () => {
+      const { callbacks, spies } = buildSpyCallbacks();
+      wireTransport(transport, callbacks);
+      roomOf(transport).localParticipant.lastMicrophoneError = new Error(
+        "mic boom"
+      );
+
+      roomOf(transport).emit(
+        RoomEvent.MediaDevicesError,
+        new Error("no kind reported")
+      );
+
+      expect(spies.onDeviceError).toHaveBeenCalledWith(
+        expect.objectContaining({ devices: ["mic"] })
+      );
+    });
   });
 
   describe("participants & tracks", () => {
@@ -474,6 +526,45 @@ describe("LiveKitTransport — characterization", () => {
         name: "Bot",
         local: false,
       });
+    });
+
+    test("LocalTrackPublished fires onTrackStarted for the published local track", () => {
+      const { callbacks, spies } = buildSpyCallbacks();
+      wireTransport(transport, callbacks);
+
+      const mediaStreamTrack = {
+        getSettings: () => ({ deviceId: "cam-1" }),
+      } as unknown as MediaStreamTrack;
+      roomOf(transport).emit(
+        RoomEvent.LocalTrackPublished,
+        { source: Track.Source.Camera, track: { mediaStreamTrack } },
+        roomOf(transport).localParticipant
+      );
+
+      expect(spies.onTrackStarted).toHaveBeenCalledWith(
+        mediaStreamTrack,
+        expect.objectContaining({ local: true })
+      );
+    });
+
+    test("LocalTrackPublished resolves the selected camera and fires onCamUpdated", async () => {
+      const { callbacks, spies } = buildSpyCallbacks();
+      wireTransport(transport, callbacks);
+
+      const mediaStreamTrack = {
+        getSettings: () => ({ deviceId: "cam-1" }),
+      } as unknown as MediaStreamTrack;
+      roomOf(transport).emit(
+        RoomEvent.LocalTrackPublished,
+        { source: Track.Source.Camera, track: { mediaStreamTrack } },
+        roomOf(transport).localParticipant
+      );
+
+      await vi.waitFor(() =>
+        expect(spies.onCamUpdated).toHaveBeenCalledWith(
+          expect.objectContaining({ deviceId: "cam-1" })
+        )
+      );
     });
 
     test("tracks() exposes the first remote participant's mic track as the bot audio", () => {

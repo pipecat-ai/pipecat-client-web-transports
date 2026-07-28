@@ -225,6 +225,13 @@ export class LiveKitTransport extends Transport {
   }
 
   sendMessage(message: RTVIMessage): void {
+    if (
+      !this._room ||
+      (this.state !== "connected" && this.state !== "ready")
+    ) {
+      logger.warn("Cannot send message, not connected");
+      return;
+    }
     const str = JSON.stringify(message);
     const encoder = new TextEncoder();
     const data = encoder.encode(str);
