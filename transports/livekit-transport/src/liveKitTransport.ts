@@ -10,8 +10,10 @@ import {
   logger,
 } from "@pipecat-ai/client-js";
 import {
+  LocalAudioTrack,
   LocalParticipant,
   LocalTrackPublication,
+  LocalVideoTrack,
   RemoteParticipant,
   RemoteTrack,
   RemoteTrackPublication,
@@ -20,6 +22,8 @@ import {
   RoomEvent,
   RoomOptions,
   Track,
+  createLocalAudioTrack,
+  createLocalVideoTrack,
 } from "livekit-client";
 import packageJson from "../package.json";
 
@@ -42,6 +46,8 @@ export class LiveKitTransport extends Transport {
   private _camEnabled: boolean = false;
   private _listenersAttached: boolean = false;
   private _deviceChangeHandler = () => this.updateAvailableDevices();
+  private _localAudioTrack?: LocalAudioTrack;
+  private _localVideoTrack?: LocalVideoTrack;
 
   constructor(options: LiveKitTransportConstructorOptions = {}) {
     super();
@@ -78,43 +84,51 @@ export class LiveKitTransport extends Transport {
   async initDevices(): Promise<void> {
     this.state = "initializing";
 
-    if (this._micEnabled || this._camEnabled) {
+    if (this._micEnabled) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: this._micEnabled,
-          video: this._camEnabled,
-        });
-
+        this._localAudioTrack = await createLocalAudioTrack();
         await this.updateAvailableDevices();
-
-        const audioTrack = stream.getAudioTracks()[0];
-        if (audioTrack) {
-          const deviceId = audioTrack.getSettings().deviceId;
-          const mics = await this.getAllMics();
-          const mic = mics.find((m) => m.deviceId === deviceId);
-          if (mic) {
-            this._selectedMic = mic;
-            this._callbacks.onMicUpdated?.(mic);
-          }
-          audioTrack.stop();
+        const deviceId =
+          this._localAudioTrack.mediaStreamTrack.getSettings().deviceId;
+        const mics = await this.getAllMics();
+        const mic = mics.find((m) => m.deviceId === deviceId);
+        if (mic) {
+          this._selectedMic = mic;
+          this._callbacks.onMicUpdated?.(mic);
         }
-
-        const videoTrack = stream.getVideoTracks()[0];
-        if (videoTrack) {
-          const deviceId = videoTrack.getSettings().deviceId;
-          const cams = await this.getAllCams();
-          const cam = cams.find((c) => c.deviceId === deviceId);
-          if (cam) {
-            this._selectedCam = cam;
-            this._callbacks.onCamUpdated?.(cam);
-          }
-          videoTrack.stop();
-        }
+        this._callbacks.onTrackStarted?.(
+          this._localAudioTrack.mediaStreamTrack,
+          { id: "local", name: "", local: true }
+        );
       } catch (e) {
-        logger.warn("[LiveKit Transport] Could not initialize devices", e);
+        logger.warn("[LiveKit Transport] Could not initialize mic", e);
         await this.updateAvailableDevices();
       }
-    } else {
+    }
+
+    if (this._camEnabled) {
+      try {
+        this._localVideoTrack = await createLocalVideoTrack();
+        if (!this._micEnabled) await this.updateAvailableDevices();
+        const deviceId =
+          this._localVideoTrack.mediaStreamTrack.getSettings().deviceId;
+        const cams = await this.getAllCams();
+        const cam = cams.find((c) => c.deviceId === deviceId);
+        if (cam) {
+          this._selectedCam = cam;
+          this._callbacks.onCamUpdated?.(cam);
+        }
+        this._callbacks.onTrackStarted?.(
+          this._localVideoTrack.mediaStreamTrack,
+          { id: "local", name: "", local: true }
+        );
+      } catch (e) {
+        logger.warn("[LiveKit Transport] Could not initialize cam", e);
+        if (!this._micEnabled) await this.updateAvailableDevices();
+      }
+    }
+
+    if (!this._micEnabled && !this._camEnabled) {
       await this.updateAvailableDevices();
     }
 
@@ -167,8 +181,19 @@ export class LiveKitTransport extends Transport {
       throw new TransportStartError();
     }
 
-    await this._room.localParticipant.setMicrophoneEnabled(this._micEnabled);
-    await this._room.localParticipant.setCameraEnabled(this._camEnabled);
+    if (this._abortController?.signal.aborted) return;
+
+    if (this._localAudioTrack) {
+      await this._room.localParticipant.publishTrack(this._localAudioTrack);
+    } else if (this._micEnabled) {
+      await this._room.localParticipant.setMicrophoneEnabled(true);
+    }
+
+    if (this._localVideoTrack) {
+      await this._room.localParticipant.publishTrack(this._localVideoTrack);
+    } else if (this._camEnabled) {
+      await this._room.localParticipant.setCameraEnabled(true);
+    }
 
     this.state = "connected";
     this._callbacks.onConnected?.();
@@ -181,6 +206,8 @@ export class LiveKitTransport extends Transport {
       this._deviceChangeHandler
     );
     await this._room.disconnect();
+    this._localAudioTrack = undefined;
+    this._localVideoTrack = undefined;
     this.state = "disconnected";
     this._callbacks.onDisconnected?.();
   }
