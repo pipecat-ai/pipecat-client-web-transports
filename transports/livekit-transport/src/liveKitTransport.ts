@@ -52,6 +52,7 @@ export class LiveKitTransport extends Transport {
   private _deviceChangeHandler = () => this.updateAvailableDevices();
   private _localAudioTrack?: LocalAudioTrack;
   private _localVideoTrack?: LocalVideoTrack;
+  private _botId: string = "";
 
   constructor(options: LiveKitTransportConstructorOptions = {}) {
     super();
@@ -220,6 +221,7 @@ export class LiveKitTransport extends Transport {
     await this._room.disconnect();
     this._localAudioTrack = undefined;
     this._localVideoTrack = undefined;
+    this._botId = "";
     this.state = "disconnected";
     this._callbacks.onDisconnected?.();
   }
@@ -415,10 +417,9 @@ export class LiveKitTransport extends Transport {
       screenAudio: getTrack(local, "audio", Track.Source.ScreenShareAudio),
     };
 
-    const remoteParticipants = Array.from(
-      this._room.remoteParticipants.values()
-    );
-    const botParticipant = remoteParticipants[0];
+    const botParticipant = this._botId
+      ? this._room.remoteParticipants.get(this._botId)
+      : undefined;
     const botTracks = botParticipant
       ? {
           audio: getTrack(botParticipant, "audio", Track.Source.Microphone),
@@ -568,13 +569,26 @@ export class LiveKitTransport extends Transport {
 
   private handleParticipantConnected(participant: RemoteParticipant) {
     this._callbacks.onParticipantJoined?.(this.toParticipant(participant));
+
+    // Mirrors the other transports: the first remote participant to join is
+    // treated as the bot for onBotConnected/onBotDisconnected purposes.
+    if (!this._botId) {
+      this._botId = participant.identity;
+      this._callbacks.onBotConnected?.(this.toParticipant(participant));
+    }
   }
 
   private handleParticipantDisconnected(participant: RemoteParticipant) {
     this._callbacks.onParticipantLeft?.(this.toParticipant(participant));
+
+    if (participant.identity === this._botId) {
+      this._botId = "";
+      this._callbacks.onBotDisconnected?.(this.toParticipant(participant));
+    }
   }
 
   private handleRoomDisconnected() {
+    this._botId = "";
     if (this.state !== "disconnected") {
       this.state = "disconnected";
       this._callbacks.onDisconnected?.();

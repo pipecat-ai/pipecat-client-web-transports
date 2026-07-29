@@ -567,21 +567,54 @@ describe("LiveKitTransport — characterization", () => {
       );
     });
 
-    test("tracks() exposes the first remote participant's mic track as the bot audio", () => {
+    test("tracks() exposes the bot participant's mic track as the bot audio", () => {
       const { callbacks } = buildSpyCallbacks();
       wireTransport(transport, callbacks);
 
       const botTrack = {} as MediaStreamTrack;
-      roomOf(transport).remoteParticipants.set("bot-1", {
+      const bot = {
         identity: "bot-1",
         name: "Bot",
         getTrackPublication: (s: string) =>
           s === Track.Source.Microphone
             ? { track: { mediaStreamTrack: botTrack } }
             : undefined,
-      });
+      };
+      roomOf(transport).remoteParticipants.set("bot-1", bot);
+      roomOf(transport).emit(RoomEvent.ParticipantConnected, bot);
 
       expect(transport.tracks().bot?.audio).toBe(botTrack);
+    });
+
+    test("first ParticipantConnected fires onBotConnected; its ParticipantDisconnected fires onBotDisconnected", () => {
+      const { callbacks, spies } = buildSpyCallbacks();
+      wireTransport(transport, callbacks);
+
+      const bot = { identity: "bot-1", name: "Bot" };
+      const otherHuman = { identity: "human-1", name: "Human" };
+
+      roomOf(transport).emit(RoomEvent.ParticipantConnected, bot);
+      expect(spies.onBotConnected).toHaveBeenCalledTimes(1);
+      expect(spies.onBotConnected).toHaveBeenCalledWith({
+        id: "bot-1",
+        name: "Bot",
+        local: false,
+      });
+
+      // A second participant joining is not re-treated as the bot.
+      roomOf(transport).emit(RoomEvent.ParticipantConnected, otherHuman);
+      expect(spies.onBotConnected).toHaveBeenCalledTimes(1);
+
+      roomOf(transport).emit(RoomEvent.ParticipantDisconnected, otherHuman);
+      expect(spies.onBotDisconnected).not.toHaveBeenCalled();
+
+      roomOf(transport).emit(RoomEvent.ParticipantDisconnected, bot);
+      expect(spies.onBotDisconnected).toHaveBeenCalledTimes(1);
+      expect(spies.onBotDisconnected).toHaveBeenCalledWith({
+        id: "bot-1",
+        name: "Bot",
+        local: false,
+      });
     });
   });
 
