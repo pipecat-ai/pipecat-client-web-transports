@@ -578,12 +578,22 @@ export class MoqTransport extends Transport {
       );
     });
 
-    // Transcript — a lossless JSON append-stream over a single track. We
-    // re-subscribe on each (re)connect; @moq/json's stream Consumer yields
-    // every appended record in order, losslessly.
+    // Transcript — a lossless JSON append-stream over a single track,
+    // re-subscribed on every (re-)announce. @moq/json's stream Consumer
+    // yields every appended record in order, losslessly.
+    //
+    // Gated on the announcement rather than the connection, because
+    // subscribing to a path nobody publishes yet gets the stream reset:
+    // a bot started in response to our own announcement necessarily
+    // appears after us. `Watch.Broadcast` gates itself this way for the
+    // catalog and audio; this track goes straight through `@moq/net`, so
+    // it needs the gate spelled out. Reading it off `Reload` rather than
+    // the established session means the gate spans reconnects.
     this._signals.run((eff) => {
       const conn = eff.get(this._reload!.established);
       if (!conn) return;
+      if (!eff.get(this._reload!.announced).has(botPath)) return;
+
       const botBroadcast = conn.consume(botPath);
       const track = botBroadcast.subscribe(merged.transcriptTrack, 0);
       const consumer = new Json.Stream.Consumer<RTVIMessage>(track, {
