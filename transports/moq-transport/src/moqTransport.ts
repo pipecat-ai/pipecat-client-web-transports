@@ -265,6 +265,10 @@ export class MoqTransport extends Transport {
   // expose this as a Signal so `_connect` can update it from the resolved
   // options at connect time.
   private _audioSampleRate = new Signal<number | undefined>(undefined);
+  // The mic's captured source, mirrored out of the Microphone so the
+  // encoder can consume it as a plain input.
+  private _micSource = new Signal<Publish.Audio.Source | undefined>(undefined);
+  private _audioEncoder: Publish.Audio.Encoder | null = null;
 
   // Watch side (bot → playback). Buffered playback via @moq/watch:
   // Broadcast -> Audio.Source -> Decoder -> Emitter, with `Sync.latencyMax`
@@ -448,43 +452,52 @@ export class MoqTransport extends Transport {
       connection: this._reload.established,
       enabled: new Signal(true),
       name: new Signal(ourPath),
-      audio: {
-        source: this._microphone.source,
-        enabled: this._micEnabled,
-        sampleRate: this._audioSampleRate,
-      },
     });
 
+    // The mic's captured source drives the encoder, which registers the
+    // `audio` rendition on the broadcast and fills its catalog entry.
+    this._signals.run((eff) => {
+      this._micSource.set(eff.get(this._microphone!.out.source));
+    });
+
+    this._audioEncoder = new Publish.Audio.Encoder("audio", {
+      broadcast: this._publishBroadcast,
+      enabled: this._micEnabled,
+      source: this._micSource,
+    });
+    this._audioEncoder.sampleRate = this._audioSampleRate;
+
     // Client-side transcript: `sendMessage` appends each RTVI message to
-    // a lossless JSON append-stream. `publishTrack` hands us a fresh track
-    // per subscription (only one, in the normal single-bot flow), so we
-    // spin up a `Json.Stream.Producer` per subscriber and replay the
-    // message log into it — a bot that subscribes after we've already sent
-    // messages still gets the full log, in order. The bot subscribes to
-    // this track by its name — same convention as the bot's own transcript
-    // track — so no catalog entry is needed.
+    // a lossless JSON append-stream, carried on a track we serve
+    // alongside the broadcast's own catalog/audio. The producer is
+    // re-created on each (re)connection — `net` swaps on reconnect — and
+    // the message log is replayed into it, so a bot that subscribes after
+    // we've already sent messages still gets the full log, in order. The
+    // bot subscribes by name, same convention as its own transcript
+    // track, so no catalog entry is needed.
     this._transcriptLog = [];
     this._transcriptOut = new Set<Json.Stream.Producer<RTVIMessage>>();
-    this._publishBroadcast.publishTrack(
-      merged.transcriptTrack,
-      (track, effect) => {
-        const producer = new Json.Stream.Producer<RTVIMessage>(track, {
-          compression: true,
-        });
-        for (const msg of this._transcriptLog ?? []) producer.append(msg);
-        this._transcriptOut?.add(producer);
-        effect.cleanup(() => {
-          this._transcriptOut?.delete(producer);
-          producer.finish();
-        });
-      },
-    );
+    this._signals.run((eff) => {
+      const net = eff.get(this._publishBroadcast!.net);
+      if (!net) return;
+
+      const track = net.createTrack(merged.transcriptTrack);
+      const producer = new Json.Stream.Producer<RTVIMessage>(track, {
+        compression: true,
+      });
+      for (const msg of this._transcriptLog ?? []) producer.append(msg);
+      this._transcriptOut?.add(producer);
+      eff.cleanup(() => {
+        this._transcriptOut?.delete(producer);
+        producer.finish();
+      });
+    });
 
     // Log the mic settings the browser actually granted, so we can see
     // when a UA ignores the constraint (e.g. macOS often pins 48k
     // regardless of `sampleRate.ideal`).
     this._signals.run((eff) => {
-      const src = eff.get(this._microphone!.source);
+      const src = eff.get(this._microphone!.out.source);
       if (!src) return;
       const track = "track" in src ? src.track : src;
       const s = track.getSettings();
@@ -523,8 +536,16 @@ export class MoqTransport extends Transport {
     // ceiling = how much faster-than-real-time TTS the player will hold
     // before dropping (audioBufferMaxMs). A number-typed max opens the
     // buffer; "real-time" collapses to the floor (skip-ahead behavior).
+    // The source produces the jitter Sync reads, so it's built first to
+    // avoid a construction cycle.
+    this._audioSource = new Watch.Audio.Source({
+      broadcast: this._watchBroadcast,
+      supported: Watch.Audio.Decoder.supported,
+    });
+
     const sync = new Watch.Sync({
       connection: this._reload.established,
+      audio: this._audioSource.out.jitter,
       latency: new Signal<Watch.Latency>({
         min: merged.audioLatencyMs as Moq.Time.Milli,
         max:
@@ -534,18 +555,15 @@ export class MoqTransport extends Transport {
       }),
     });
     this._sync = sync;
-    this._audioSource = new Watch.Audio.Source(sync, {
-      broadcast: this._watchBroadcast,
-    });
-    this._audioDecoder = new Watch.Audio.Decoder(this._audioSource, {
+    this._audioDecoder = new Watch.Audio.Decoder(this._audioSource, sync, {
       enabled: new Signal(true),
     });
     this._audioEmitter = new Watch.Audio.Emitter(this._audioDecoder);
 
     // Bridge Decoder.root (AudioNode) → MediaStreamTrack for tracks().bot.audio.
     this._signals.run((eff) => {
-      const ctx = eff.get(this._audioDecoder!.context);
-      const root = eff.get(this._audioDecoder!.root);
+      const ctx = eff.get(this._audioDecoder!.out.context);
+      const root = eff.get(this._audioDecoder!.out.root);
       if (!ctx || !root) return;
       const dest = ctx.createMediaStreamDestination();
       root.connect(dest);
@@ -567,8 +585,8 @@ export class MoqTransport extends Transport {
     // either a parser bug or the bot is advertising a rate that doesn't
     // match its actual Opus stream.
     this._signals.run((eff) => {
-      const config = eff.get(this._audioSource!.config);
-      const ctx = eff.get(this._audioDecoder!.context);
+      const config = eff.get(this._audioSource!.out.config);
+      const ctx = eff.get(this._audioDecoder!.out.context);
       if (!config && !ctx) return;
       console.log(
         `[MoqTransport] consume: catalog codec=${config?.codec}, ` +
@@ -592,28 +610,54 @@ export class MoqTransport extends Transport {
     this._signals.run((eff) => {
       const conn = eff.get(this._reload!.established);
       if (!conn) return;
-      if (!eff.get(this._reload!.announced).has(botPath)) return;
 
-      const botBroadcast = conn.consume(botPath);
-      const track = botBroadcast.subscribe(merged.transcriptTrack, 0);
-      const consumer = new Json.Stream.Consumer<RTVIMessage>(track, {
-        compression: true,
-      });
-      const ac = new AbortController();
-      this._drainTranscript(consumer, ac.signal).catch((e) => {
-        if (!ac.signal.aborted) {
-          console.warn("MoqTransport bot-transcript loop:", e);
-        }
-      });
-      eff.cleanup(() => {
-        ac.abort();
-        try {
-          track.close();
-        } catch {
-          // best-effort.
+      const announced = this._reload!.announced(botPath);
+      eff.cleanup(() => announced.close());
+
+      let live: AbortController | undefined;
+      eff.cleanup(() => live?.abort());
+
+      eff.spawn(async () => {
+        for (;;) {
+          const entry = await Promise.race([eff.cancel, announced.next()]);
+          if (!entry) return;
+
+          live?.abort();
+          live = undefined;
+          if (!entry.active) continue;
+
+          live = this._subscribeTranscript(conn, botPath, merged.transcriptTrack);
         }
       });
     });
+  }
+
+  /** Subscribe to the bot's transcript track; returns the handle that stops it. */
+  private _subscribeTranscript(
+    conn: Moq.Connection.Established,
+    botPath: Moq.Path.Valid,
+    trackName: string,
+  ): AbortController {
+    const botBroadcast = conn.consume(botPath);
+    const track = botBroadcast.subscribe(trackName, { priority: 0 });
+    const consumer = new Json.Stream.Consumer<RTVIMessage>(track, {
+      compression: true,
+    });
+
+    const ac = new AbortController();
+    this._drainTranscript(consumer, ac.signal).catch((e) => {
+      if (!ac.signal.aborted) {
+        console.warn("MoqTransport bot-transcript loop:", e);
+      }
+    });
+    ac.signal.addEventListener("abort", () => {
+      try {
+        track.close();
+      } catch {
+        // best-effort.
+      }
+    });
+    return ac;
   }
 
   async _disconnect(): Promise<void> {
@@ -687,7 +731,7 @@ export class MoqTransport extends Transport {
   // --------------------------------------------------------------------
 
   async getAllMics(): Promise<MediaDeviceInfo[]> {
-    return this._microphone?.device.available.peek() ?? [];
+    return this._microphone?.device.out.available.peek() ?? [];
   }
 
   async getAllCams(): Promise<MediaDeviceInfo[]> {
@@ -707,10 +751,10 @@ export class MoqTransport extends Transport {
   updateSpeaker(_speakerId: string): void {}
 
   get selectedMic(): MediaDeviceInfo | Record<string, never> {
-    const id = this._microphone?.device.active.peek();
+    const id = this._microphone?.device.out.active.peek();
     if (!id) return {};
     return (
-      this._microphone?.device.available.peek()?.find((d) => d.deviceId === id) ??
+      this._microphone?.device.out.available.peek()?.find((d) => d.deviceId === id) ??
       {}
     );
   }
@@ -736,7 +780,7 @@ export class MoqTransport extends Transport {
   }
 
   get isMicEnabled(): boolean {
-    return this._micEnabled.get();
+    return this._micEnabled.peek();
   }
 
   get isSharingScreen(): boolean {
@@ -763,7 +807,7 @@ export class MoqTransport extends Transport {
   }
 
   tracks(): Tracks {
-    const localSource = this._microphone?.source.peek();
+    const localSource = this._microphone?.out.source.peek();
     const localAudio =
       localSource && "track" in localSource ? localSource.track : localSource;
     return {
