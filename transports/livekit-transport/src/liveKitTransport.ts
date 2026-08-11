@@ -418,6 +418,30 @@ export class LiveKitTransport extends Transport {
     // linger. Safe to call on an already-stopped track (no-op per spec).
     this._localAudioTrack?.stop();
     this._localVideoTrack?.stop();
+
+    // Report this the same way enableMic(false)/enableCam(false) would,
+    // rather than just dropping the references below: fire onTrackStopped
+    // for whatever was last live, and flip _mic/camEnabled to false so
+    // isMicEnabled()/isCamEnabled() (and any mute/unmute toggle bound to
+    // them) reflect reality. Without this, disconnect leaves both saying
+    // "enabled" with no track behind them — silently wrong, and still wrong
+    // after a later connect() since nothing re-acquires unless the caller
+    // notices the mismatch and explicitly re-enables.
+    //
+    // Assign _mic/camEnabled *before* firing onTrackStopped below — same
+    // ordering fix as enableMic()/enableCam(): anything reacting to that
+    // event (e.g. client-react resyncing isMicEnabled) reads this same
+    // getter, and needs to see false already, not whatever it was pre-
+    // disconnect.
+    this._micEnabled = false;
+    this._camEnabled = false;
+    const participant = { id: "local", name: "", local: true };
+    if (this._lastReportedMicTrack) {
+      this._callbacks.onTrackStopped?.(this._lastReportedMicTrack, participant);
+    }
+    if (this._lastReportedCamTrack) {
+      this._callbacks.onTrackStopped?.(this._lastReportedCamTrack, participant);
+    }
     this._localAudioTrack = undefined;
     this._localVideoTrack = undefined;
     this._lastReportedMicTrack = undefined;
@@ -554,6 +578,14 @@ export class LiveKitTransport extends Transport {
 
       if (this._room.state === ConnectionState.Connected) {
         await this._room.localParticipant.setMicrophoneEnabled(enable);
+        // Set right after the real (fallible) operation succeeds, but
+        // *before* _syncSelectedMic/_adoptMicTrack below fire
+        // onTrackStarted/Stopped — consumers reacting to that event (e.g.
+        // client-react's isMicEnabled resync) read this same getter, and
+        // need to see the new value, not whatever it was before this call.
+        // Still only reached on success: a thrown error skips straight to
+        // the catch below, leaving this reflecting reality.
+        this._micEnabled = enable;
         if (existingTrack) {
           await this._syncSelectedMic(existingTrack);
         } else if (enable) {
@@ -569,15 +601,17 @@ export class LiveKitTransport extends Transport {
         // to depend on yet.
         if (enable) await existingTrack.unmute();
         else await existingTrack.mute();
+        this._micEnabled = enable;
         await this._syncSelectedMic(existingTrack);
       } else if (enable) {
-        await this._adoptMicTrack(await createLocalAudioTrack());
+        const track = await createLocalAudioTrack();
+        this._micEnabled = enable;
+        await this._adoptMicTrack(track);
+      } else {
+        // Disabling with nothing currently capturing — no fallible
+        // operation to gate on, just record the (already-true) reality.
+        this._micEnabled = enable;
       }
-
-      // Set only once the requested state is actually in effect — a failed
-      // attempt (caught below) leaves this reflecting reality instead of
-      // the intent we merely attempted.
-      this._micEnabled = enable;
     } catch (e) {
       logger.error("Failed to toggle mic", e);
       this._callbacks.onDeviceError?.(
@@ -598,6 +632,10 @@ export class LiveKitTransport extends Transport {
 
       if (this._room.state === ConnectionState.Connected) {
         await this._room.localParticipant.setCameraEnabled(enable);
+        // See enableMic()'s comment: set before _syncSelectedCam/
+        // _adoptCamTrack below fire onTrackStarted/Stopped, so anything
+        // reacting to that event sees the new value.
+        this._camEnabled = enable;
         if (existingTrack) {
           await this._syncSelectedCam(existingTrack);
         } else if (enable) {
@@ -610,14 +648,17 @@ export class LiveKitTransport extends Transport {
       } else if (existingTrack) {
         if (enable) await existingTrack.unmute();
         else await existingTrack.mute();
+        this._camEnabled = enable;
         await this._syncSelectedCam(existingTrack);
       } else if (enable) {
-        await this._adoptCamTrack(await createLocalVideoTrack());
+        const track = await createLocalVideoTrack();
+        this._camEnabled = enable;
+        await this._adoptCamTrack(track);
+      } else {
+        // Disabling with nothing currently capturing — no fallible
+        // operation to gate on, just record the (already-true) reality.
+        this._camEnabled = enable;
       }
-
-      // See enableMic()'s comment: only set once the requested state is
-      // actually in effect.
-      this._camEnabled = enable;
     } catch (e) {
       logger.error("Failed to toggle cam", e);
       this._callbacks.onDeviceError?.(
@@ -756,8 +797,7 @@ export class LiveKitTransport extends Transport {
         ? this._room.remoteParticipants.get(this._botId)
         : undefined;
       const hasBotMedia =
-        !!botParticipant?.getTrackPublication(Track.Source.Microphone)
-          ?.track ||
+        !!botParticipant?.getTrackPublication(Track.Source.Microphone)?.track ||
         !!botParticipant?.getTrackPublication(Track.Source.Camera)?.track;
 
       if (hasBotMedia) {
