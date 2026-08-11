@@ -410,45 +410,19 @@ export class LiveKitTransport extends Transport {
       "devicechange",
       this._deviceChangeHandler
     );
+    // room.disconnect() emits RoomEvent.Disconnected synchronously, before
+    // its own promise resolves, *if* the room was actually connected
+    // (confirmed against livekit-client's source — handleDisconnect() runs
+    // and emits in the same synchronous block the await here is waiting on).
+    // handleRoomDisconnected() is what actually tears everything down, for
+    // this explicit path, an involuntary one (network drop, room closed
+    // server-side), and a room that was never connected in the first place
+    // (initDevices() ran, connect() never did — the real SDK no-ops without
+    // emitting anything in that case) — one teardown routine, not two. It's
+    // idempotent (guarded on this.state), so calling it explicitly here too
+    // is a harmless no-op if the event already ran it.
     await this._room.disconnect();
-    // room.disconnect() stops tracks it actually published, but a track
-    // acquired via initDevices()/enableMic()/enableCam() that was never
-    // published (connect() never ran, or failed before Promise.all settled)
-    // is still open — stop it explicitly so the mic/camera indicator doesn't
-    // linger. Safe to call on an already-stopped track (no-op per spec).
-    this._localAudioTrack?.stop();
-    this._localVideoTrack?.stop();
-
-    // Report this the same way enableMic(false)/enableCam(false) would,
-    // rather than just dropping the references below: fire onTrackStopped
-    // for whatever was last live, and flip _mic/camEnabled to false so
-    // isMicEnabled()/isCamEnabled() (and any mute/unmute toggle bound to
-    // them) reflect reality. Without this, disconnect leaves both saying
-    // "enabled" with no track behind them — silently wrong, and still wrong
-    // after a later connect() since nothing re-acquires unless the caller
-    // notices the mismatch and explicitly re-enables.
-    //
-    // Assign _mic/camEnabled *before* firing onTrackStopped below — same
-    // ordering fix as enableMic()/enableCam(): anything reacting to that
-    // event (e.g. client-react resyncing isMicEnabled) reads this same
-    // getter, and needs to see false already, not whatever it was pre-
-    // disconnect.
-    this._micEnabled = false;
-    this._camEnabled = false;
-    const participant = { id: "local", name: "", local: true };
-    if (this._lastReportedMicTrack) {
-      this._callbacks.onTrackStopped?.(this._lastReportedMicTrack, participant);
-    }
-    if (this._lastReportedCamTrack) {
-      this._callbacks.onTrackStopped?.(this._lastReportedCamTrack, participant);
-    }
-    this._localAudioTrack = undefined;
-    this._localVideoTrack = undefined;
-    this._lastReportedMicTrack = undefined;
-    this._lastReportedCamTrack = undefined;
-    this._botId = "";
-    this.state = "disconnected";
-    this._callbacks.onDisconnected?.();
+    this.handleRoomDisconnected();
   }
 
   sendMessage(message: RTVIMessage): void {
@@ -986,12 +960,51 @@ export class LiveKitTransport extends Transport {
     }
   }
 
+  // The single teardown routine for both an explicit _disconnect() and an
+  // involuntary disconnect (network drop, room closed server-side) — see
+  // _disconnect()'s comment for why both funnel through here via
+  // RoomEvent.Disconnected rather than duplicating this logic.
   private handleRoomDisconnected() {
-    this._botId = "";
-    if (this.state !== "disconnected") {
-      this.state = "disconnected";
-      this._callbacks.onDisconnected?.();
+    if (this.state === "disconnected") return;
+
+    // room.disconnect() stops tracks it actually published, but a track
+    // acquired via initDevices()/enableMic()/enableCam() that was never
+    // published (connect() never ran, or failed before Promise.all settled)
+    // is still open — stop it explicitly so the mic/camera indicator doesn't
+    // linger. Safe to call on an already-stopped track (no-op per spec).
+    this._localAudioTrack?.stop();
+    this._localVideoTrack?.stop();
+
+    // Report this the same way enableMic(false)/enableCam(false) would,
+    // rather than just dropping the references below: fire onTrackStopped
+    // for whatever was last live, and flip _mic/camEnabled to false so
+    // isMicEnabled()/isCamEnabled() (and any mute/unmute toggle bound to
+    // them) reflect reality. Without this, disconnect leaves both saying
+    // "enabled" with no track behind them — silently wrong, and still wrong
+    // after a later connect() since nothing re-acquires unless the caller
+    // notices the mismatch and explicitly re-enables.
+    //
+    // Assign _mic/camEnabled *before* firing onTrackStopped below — same
+    // ordering fix as enableMic()/enableCam(): anything reacting to that
+    // event (e.g. client-react resyncing isMicEnabled) reads this same
+    // getter, and needs to see false already, not whatever it was pre-
+    // disconnect.
+    this._micEnabled = false;
+    this._camEnabled = false;
+    const participant = { id: "local", name: "", local: true };
+    if (this._lastReportedMicTrack) {
+      this._callbacks.onTrackStopped?.(this._lastReportedMicTrack, participant);
     }
+    if (this._lastReportedCamTrack) {
+      this._callbacks.onTrackStopped?.(this._lastReportedCamTrack, participant);
+    }
+    this._localAudioTrack = undefined;
+    this._localVideoTrack = undefined;
+    this._lastReportedMicTrack = undefined;
+    this._lastReportedCamTrack = undefined;
+    this._botId = "";
+    this.state = "disconnected";
+    this._callbacks.onDisconnected?.();
   }
 
   private handleMediaDevicesError(e: Error, kind?: MediaDeviceKind) {
