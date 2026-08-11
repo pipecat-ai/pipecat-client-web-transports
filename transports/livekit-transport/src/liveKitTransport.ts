@@ -13,6 +13,7 @@ import {
   logger,
 } from "@pipecat-ai/client-js";
 import {
+  ConnectionState,
   LocalAudioTrack,
   LocalParticipant,
   LocalTrackPublication,
@@ -27,6 +28,7 @@ import {
   RoomOptions,
   Track,
   createLocalAudioTrack,
+  createLocalTracks,
   createLocalVideoTrack,
 } from "livekit-client";
 import packageJson from "../package.json";
@@ -49,9 +51,17 @@ export class LiveKitTransport extends Transport {
   private _micEnabled: boolean = false;
   private _camEnabled: boolean = false;
   private _listenersAttached: boolean = false;
-  private _deviceChangeHandler = () => this.updateAvailableDevices();
+  private _readyHandler: (() => void) | null = null;
+  private _deviceChangeHandler = () => {
+    void this._handleDeviceChange();
+  };
   private _localAudioTrack?: LocalAudioTrack;
   private _localVideoTrack?: LocalVideoTrack;
+  // The raw MediaStreamTrack last reported to the app via onTrackStarted, if
+  // any — _syncSelectedMic/Cam's own record of "what we last told callers is
+  // live", diffed against current reality to decide what to report next.
+  private _lastReportedMicTrack?: MediaStreamTrack;
+  private _lastReportedCamTrack?: MediaStreamTrack;
   private _botId: string = "";
 
   constructor(options: LiveKitTransportConstructorOptions = {}) {
@@ -89,58 +99,115 @@ export class LiveKitTransport extends Transport {
   async initDevices(): Promise<void> {
     this.state = "initializing";
 
-    if (this._micEnabled) {
+    if (this._micEnabled && this._camEnabled) {
       try {
-        this._localAudioTrack = await createLocalAudioTrack();
-        await this.updateAvailableDevices();
-        const deviceId =
-          this._localAudioTrack.mediaStreamTrack.getSettings().deviceId;
-        const mics = await this.getAllMics();
-        const mic = mics.find((m) => m.deviceId === deviceId);
-        if (mic) {
-          this._selectedMic = mic;
-          this._callbacks.onMicUpdated?.(mic);
-        }
-        this._callbacks.onTrackStarted?.(
-          this._localAudioTrack.mediaStreamTrack,
-          { id: "local", name: "", local: true }
-        );
-      } catch (e) {
-        logger.warn("[LiveKit Transport] Could not initialize mic", e);
-        await this.updateAvailableDevices();
+        // createLocalTracks acquires both in one getUserMedia call, showing a
+        // single combined permission prompt instead of two sequential ones.
+        // A bare string deviceId is shorthand for { ideal } (a soft
+        // preference, silently dropped if unsatisfiable) rather than
+        // { exact } (which throws). We want that here: Chrome resolves
+        // "default" to its virtual default-device alias so getSettings()
+        // reports "default" and reselection stays sticky (see
+        // _reacquireIfMissing), but Firefox/Safari have no such device, and
+        // exact would make initDevices() throw there.
+        const tracks = await createLocalTracks({
+          audio: { deviceId: "default" },
+          video: { deviceId: "default" },
+        });
+        const audioTrack = tracks.find((t) => t.kind === Track.Kind.Audio) as
+          | LocalAudioTrack
+          | undefined;
+        const videoTrack = tracks.find((t) => t.kind === Track.Kind.Video) as
+          | LocalVideoTrack
+          | undefined;
+        if (audioTrack) await this._adoptMicTrack(audioTrack);
+        if (videoTrack) await this._adoptCamTrack(videoTrack);
+      } catch {
+        // createLocalTracks, like getUserMedia, is all-or-nothing — one
+        // device failing fails the whole combined request. Fall back to
+        // acquiring each independently so a single bad device doesn't take
+        // the other down with it, and the error attributes to the right one.
+        await Promise.all([this._acquireMic(), this._acquireCam()]);
       }
+    } else {
+      if (this._micEnabled) await this._acquireMic();
+      if (this._camEnabled) await this._acquireCam();
     }
 
-    if (this._camEnabled) {
-      try {
-        this._localVideoTrack = await createLocalVideoTrack();
-        if (!this._micEnabled) await this.updateAvailableDevices();
-        const deviceId =
-          this._localVideoTrack.mediaStreamTrack.getSettings().deviceId;
-        const cams = await this.getAllCams();
-        const cam = cams.find((c) => c.deviceId === deviceId);
-        if (cam) {
-          this._selectedCam = cam;
-          this._callbacks.onCamUpdated?.(cam);
-        }
-        this._callbacks.onTrackStarted?.(
-          this._localVideoTrack.mediaStreamTrack,
-          { id: "local", name: "", local: true }
-        );
-      } catch (e) {
-        logger.warn("[LiveKit Transport] Could not initialize cam", e);
-        if (!this._micEnabled) await this.updateAvailableDevices();
-      }
-    }
-
-    if (!this._micEnabled && !this._camEnabled) {
-      await this.updateAvailableDevices();
-    }
-
+    await this.updateAvailableDevices();
+    await this._syncSelectedSpeaker();
     this.state = "initialized";
   }
 
-  private async updateAvailableDevices() {
+  // Unlike mic/cam, there's no local track to read a live deviceId off of —
+  // nothing is being played out yet pre-connect. So on init we just reflect
+  // whatever the browser currently considers the default output device,
+  // the same way the browser itself would pick one absent any explicit
+  // switchActiveDevice() call.
+  private async _syncSelectedSpeaker(): Promise<void> {
+    const speakers = await this.getAllSpeakers();
+    // Chrome exposes a virtual "default" audiooutput device; Firefox/Safari
+    // don't — by convention the first device in the list is the default there.
+    const speaker =
+      speakers.find((d) => d.deviceId === "default") ?? speakers[0];
+    if (
+      speaker &&
+      (this._selectedSpeaker as MediaDeviceInfo).deviceId !== speaker.deviceId
+    ) {
+      this._selectedSpeaker = speaker;
+      this._callbacks.onSpeakerUpdated?.(speaker);
+    }
+  }
+
+  private async _acquireMic(): Promise<void> {
+    try {
+      // See the comment in initDevices() re: { deviceId: "default" } — a
+      // soft ideal preference, not exact, so this stays safe on Firefox/Safari.
+      await this._adoptMicTrack(
+        await createLocalAudioTrack({ deviceId: "default" })
+      );
+    } catch (e) {
+      logger.warn("[LiveKit Transport] Could not initialize mic", e);
+      this._callbacks.onDeviceError?.(
+        new DeviceError(
+          ["mic"],
+          this.toDeviceErrorType(MediaDeviceFailure.getFailure(e)),
+          e instanceof Error ? e.message : String(e)
+        )
+      );
+    }
+  }
+
+  private async _acquireCam(): Promise<void> {
+    try {
+      await this._adoptCamTrack(
+        await createLocalVideoTrack({ deviceId: "default" })
+      );
+    } catch (e) {
+      logger.warn("[LiveKit Transport] Could not initialize cam", e);
+      this._callbacks.onDeviceError?.(
+        new DeviceError(
+          ["cam"],
+          this.toDeviceErrorType(MediaDeviceFailure.getFailure(e)),
+          e instanceof Error ? e.message : String(e)
+        )
+      );
+    }
+  }
+
+  private async _adoptMicTrack(track: LocalAudioTrack): Promise<void> {
+    this._localAudioTrack = track;
+    await this._syncSelectedMic(track);
+  }
+
+  private async _adoptCamTrack(track: LocalVideoTrack): Promise<void> {
+    this._localVideoTrack = track;
+    await this._syncSelectedCam(track);
+  }
+
+  private async updateAvailableDevices(): Promise<
+    MediaDeviceInfo[] | undefined
+  > {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const cams = devices.filter((d) => d.kind === "videoinput");
@@ -150,8 +217,93 @@ export class LiveKitTransport extends Transport {
       this._callbacks.onAvailableCamsUpdated?.(cams);
       this._callbacks.onAvailableMicsUpdated?.(mics);
       this._callbacks.onAvailableSpeakersUpdated?.(speakers);
+      return devices;
     } catch (e) {
       logger.error("Error enumerating devices", e);
+      return undefined;
+    }
+  }
+
+  /**
+   * On devicechange, check whether the mic/cam we're actively capturing from
+   * is still present (or, for a "default" selection, whether the underlying
+   * physical default changed). livekit-client's own Room.selectDefaultDevices
+   * already does this for audiooutput on every devicechange (and switching
+   * the active output there also updates every remote participant's <audio>
+   * element — see updateSpeaker()), but it deliberately skips audioinput
+   * (except a Safari AirPods special case) and videoinput, leaving mic/cam
+   * reselection to us.
+   */
+  private async _handleDeviceChange(): Promise<void> {
+    const devices = await this.updateAvailableDevices();
+    if (!devices) return;
+    await Promise.all([
+      this._reacquireIfMissing(
+        "mic",
+        devices.filter((d) => d.kind === "audioinput")
+      ),
+      this._reacquireIfMissing(
+        "cam",
+        devices.filter((d) => d.kind === "videoinput")
+      ),
+    ]);
+  }
+
+  private async _reacquireIfMissing(
+    kind: "mic" | "cam",
+    devices: MediaDeviceInfo[]
+  ): Promise<void> {
+    const track =
+      kind === "mic" ? this._localAudioTrack : this._localVideoTrack;
+    if (!track) return; // not currently capturing — nothing to reacquire
+
+    const current = (
+      kind === "mic" ? this._selectedMic : this._selectedCam
+    ) as MediaDeviceInfo;
+    if (!current?.deviceId) return;
+
+    // Chrome exposes a virtual "default" device alongside the real ones;
+    // Firefox/Safari don't — by convention the first device in the list is
+    // the default there. Fall back accordingly.
+    const defaultDevice =
+      devices.find((d) => d.deviceId === "default") ?? devices[0];
+    const stillPresent = devices.some((d) => d.deviceId === current.deviceId);
+    const defaultChanged =
+      current.deviceId === "default" && current.label !== defaultDevice?.label;
+    console.log(
+      `[${kind}] reacquire check — current: ${current.deviceId} (${current.label}), stillPresent: ${stillPresent}, defaultDevice: ${defaultDevice?.deviceId} (${defaultDevice?.label}), defaultChanged: ${defaultChanged}`
+    );
+    if (stillPresent && !defaultChanged) return;
+
+    try {
+      if (defaultChanged) {
+        // Re-request the virtual "default" device itself (Chrome-only —
+        // defaultChanged can only be true when current.deviceId is literally
+        // "default"), not just an unconstrained restart. An unconstrained
+        // restartTrack({}) does pick up today's actual default hardware, but
+        // getSettings().deviceId then reports that device's own concrete
+        // hash, not "default" — so _syncSelectedMic/Cam would pin us to that
+        // one device and we'd lose "always follow the default" for the
+        // *next* devicechange. Explicitly requesting { exact: "default" }
+        // keeps getSettings().deviceId reporting "default" going forward.
+        await track.restartTrack({ deviceId: { exact: "default" } });
+      } else {
+        // The selected device physically disappeared. No deviceId
+        // constraint (an empty object, not undefined — restartTrack falls
+        // back to the track's *previous* constraints when passed nothing)
+        // so the browser picks a fresh default.
+        await track.restartTrack({});
+      }
+      if (kind === "mic") await this._syncSelectedMic(track as LocalAudioTrack);
+      else await this._syncSelectedCam(track as LocalVideoTrack);
+    } catch (e) {
+      this._callbacks.onDeviceError?.(
+        new DeviceError(
+          [kind],
+          this.toDeviceErrorType(MediaDeviceFailure.getFailure(e)),
+          e instanceof Error ? e.message : String(e)
+        )
+      );
     }
   }
 
@@ -176,29 +328,69 @@ export class LiveKitTransport extends Transport {
 
     this.state = "connecting";
 
-    try {
-      await this._room.connect(
-        connectParams.url,
-        connectParams.token,
-        connectParams.roomConnectionOptions
+    // Publish alongside connect(), not after it. publishTrack() only waits on
+    // the signal (WebSocket) connection, not full ICE/PC negotiation — the
+    // AddTrackRequest rides in the same initial offer/answer that's already
+    // negotiating for connect(). Sequencing it after connect() resolves would
+    // pay a slow link's cost twice (a full second renegotiation for the
+    // track) instead of once.
+    //
+    // room.connect() failing is a real connection failure. A publish failing
+    // is not — the session can still work with one fewer track — so each
+    // publish gets its own catch that reports onDeviceError (correctly
+    // attributed to mic vs cam) instead of rejecting the whole connect.
+    const roomConnectPromise = this._room.connect(
+      connectParams.url,
+      connectParams.token,
+      connectParams.roomConnectionOptions
+    );
+
+    const publishPromises: Promise<unknown>[] = [];
+    if (this._localAudioTrack) {
+      publishPromises.push(
+        this._room.localParticipant
+          .publishTrack(this._localAudioTrack)
+          .catch((e) => {
+            logger.error("[LiveKit Transport] Failed to publish mic track", e);
+            this._callbacks.onDeviceError?.(
+              new DeviceError(
+                ["mic"],
+                "unknown",
+                e instanceof Error ? e.message : String(e)
+              )
+            );
+          })
       );
+    }
+    if (this._localVideoTrack) {
+      publishPromises.push(
+        this._room.localParticipant
+          .publishTrack(this._localVideoTrack)
+          .catch((e) => {
+            logger.error("[LiveKit Transport] Failed to publish cam track", e);
+            this._callbacks.onDeviceError?.(
+              new DeviceError(
+                ["cam"],
+                "unknown",
+                e instanceof Error ? e.message : String(e)
+              )
+            );
+          })
+      );
+    }
+
+    try {
+      await roomConnectPromise;
     } catch (e) {
       logger.error("Failed to connect to LiveKit room", e);
       this.state = "error";
       throw new TransportStartError();
     }
 
-    if (this._localAudioTrack) {
-      await this._room.localParticipant.publishTrack(this._localAudioTrack);
-    } else if (this._micEnabled) {
-      await this._room.localParticipant.setMicrophoneEnabled(true);
-    }
-
-    if (this._localVideoTrack) {
-      await this._room.localParticipant.publishTrack(this._localVideoTrack);
-    } else if (this._camEnabled) {
-      await this._room.localParticipant.setCameraEnabled(true);
-    }
+    // Publishes were kicked off alongside connect() above; their failures are
+    // already caught and reported, so this can't reject — just makes sure
+    // they've settled before we consider ourselves connected.
+    await Promise.all(publishPromises);
 
     // room.connect() and the publish awaits above are all points at which a
     // concurrent disconnect() may have aborted us and already set state to
@@ -219,18 +411,24 @@ export class LiveKitTransport extends Transport {
       this._deviceChangeHandler
     );
     await this._room.disconnect();
+    // room.disconnect() stops tracks it actually published, but a track
+    // acquired via initDevices()/enableMic()/enableCam() that was never
+    // published (connect() never ran, or failed before Promise.all settled)
+    // is still open — stop it explicitly so the mic/camera indicator doesn't
+    // linger. Safe to call on an already-stopped track (no-op per spec).
+    this._localAudioTrack?.stop();
+    this._localVideoTrack?.stop();
     this._localAudioTrack = undefined;
     this._localVideoTrack = undefined;
+    this._lastReportedMicTrack = undefined;
+    this._lastReportedCamTrack = undefined;
     this._botId = "";
     this.state = "disconnected";
     this._callbacks.onDisconnected?.();
   }
 
   sendMessage(message: RTVIMessage): void {
-    if (
-      !this._room ||
-      (this.state !== "connected" && this.state !== "ready")
-    ) {
+    if (!this._room || (this.state !== "connected" && this.state !== "ready")) {
       logger.warn("Cannot send message, not connected");
       return;
     }
@@ -257,40 +455,60 @@ export class LiveKitTransport extends Transport {
     return devices.filter((d) => d.kind === "audiooutput");
   }
 
+  // updateMic/updateCam switch the device on our own owned LocalAudioTrack/
+  // LocalVideoTrack via restartTrack() — this works whether or not the track
+  // is currently published (Room-agnostic re-acquire pre-connect; a smooth
+  // sender.replaceTrack() with no renegotiation once published). There's
+  // nothing to switch if the device was never enabled in the first place.
   async updateMic(micId: string): Promise<void> {
     if ((this._selectedMic as MediaDeviceInfo).deviceId === micId) return;
+    if (!this._localAudioTrack) return;
+    const track = this._localAudioTrack;
     try {
-      await this._room.switchActiveDevice("audioinput", micId);
-      const mics = await this.getAllMics();
-      const mic = mics.find((m) => m.deviceId === micId);
-      if (mic) {
-        this._selectedMic = mic;
-        this._callbacks.onMicUpdated?.(mic);
-      }
-    } catch (e: unknown) {
+      const id_before = track.mediaStreamTrack.getSettings().deviceId;
+      console.log(`Updating mic from ${id_before} to ${micId}`);
+      // A bare string deviceId is shorthand for { ideal: micId } — a soft
+      // preference the browser can (and in practice does) ignore in favor of
+      // whatever device is already active. { exact } forces the switch,
+      // matching what Room.switchActiveDevice does for exactly this reason.
+      await track.restartTrack({ deviceId: { exact: micId } });
+      console.log(
+        `Mic id after restartTrack: ${track.mediaStreamTrack.getSettings().deviceId}`
+      );
+      await this._syncSelectedMic(track);
+    } catch (e) {
       this._callbacks.onDeviceError?.(
-        new DeviceError(["mic"], "unknown", (e as Error).message)
+        new DeviceError(
+          ["mic"],
+          this.toDeviceErrorType(MediaDeviceFailure.getFailure(e)),
+          e instanceof Error ? e.message : String(e)
+        )
       );
     }
   }
 
   async updateCam(camId: string): Promise<void> {
     if ((this._selectedCam as MediaDeviceInfo).deviceId === camId) return;
+    if (!this._localVideoTrack) return;
+    const track = this._localVideoTrack;
     try {
-      await this._room.switchActiveDevice("videoinput", camId);
-      const cams = await this.getAllCams();
-      const cam = cams.find((c) => c.deviceId === camId);
-      if (cam) {
-        this._selectedCam = cam;
-        this._callbacks.onCamUpdated?.(cam);
-      }
-    } catch (e: unknown) {
+      await track.restartTrack({ deviceId: { exact: camId } });
+      await this._syncSelectedCam(track);
+    } catch (e) {
       this._callbacks.onDeviceError?.(
-        new DeviceError(["cam"], "unknown", (e as Error).message)
+        new DeviceError(
+          ["cam"],
+          this.toDeviceErrorType(MediaDeviceFailure.getFailure(e)),
+          e instanceof Error ? e.message : String(e)
+        )
       );
     }
   }
 
+  // room.switchActiveDevice("audiooutput", ...) already updates the sinkId on
+  // every remote participant's <audio> element internally (Room.ts calls
+  // participant.setAudioOutput() for each one) — the DOM-walking LiveKit does
+  // itself isn't something we need to replicate here.
   async updateSpeaker(speakerId: string): Promise<void> {
     if ((this._selectedSpeaker as MediaDeviceInfo).deviceId === speakerId)
       return;
@@ -319,68 +537,167 @@ export class LiveKitTransport extends Transport {
     return this._selectedSpeaker;
   }
 
-  enableMic(enable: boolean): void {
-    this._room.localParticipant
-      .setMicrophoneEnabled(enable)
-      .then(async () => {
-        this._micEnabled = enable;
-        if (enable) {
-          const trackPub = this._room.localParticipant.getTrackPublication(
+  // Gate on livekit-client's own Room state (not our TransportState) since
+  // that's what determines which API applies: setMicrophoneEnabled()
+  // depends on an active engine connection, createLocalAudioTrack() doesn't.
+  //
+  // When connected, always go through setMicrophoneEnabled() rather than
+  // branching on whether we already hold a track ourselves — that's exactly
+  // what it does internally (livekit-client's own setTrackEnabled() calls
+  // track.mute()/unmute() when a publication already exists, or creates +
+  // publishes a fresh one otherwise), so there's no reason to duplicate that
+  // decision on our end. Either way, _syncSelectedMic() afterwards figures
+  // out what actually changed and reports it.
+  async enableMic(enable: boolean): Promise<void> {
+    try {
+      const existingTrack = this._localAudioTrack;
+
+      if (this._room.state === ConnectionState.Connected) {
+        await this._room.localParticipant.setMicrophoneEnabled(enable);
+        if (existingTrack) {
+          await this._syncSelectedMic(existingTrack);
+        } else if (enable) {
+          const pub = this._room.localParticipant.getTrackPublication(
             Track.Source.Microphone
           );
-          const deviceId =
-            trackPub?.track?.mediaStreamTrack?.getSettings().deviceId;
-          if (deviceId) {
-            const mics = await this.getAllMics();
-            const mic = mics.find((m) => m.deviceId === deviceId);
-            if (
-              mic &&
-              (this._selectedMic as MediaDeviceInfo).deviceId !== mic.deviceId
-            ) {
-              this._selectedMic = mic;
-              this._callbacks.onMicUpdated?.(mic);
-            }
-          }
+          if (pub?.track)
+            await this._adoptMicTrack(pub.track as LocalAudioTrack);
         }
-      })
-      .catch((e) => {
-        logger.error("Failed to toggle mic", e);
-        this._callbacks.onDeviceError?.(
-          new DeviceError(["mic"], "unknown", e.message)
-        );
-      });
+      } else if (existingTrack) {
+        // Not connected: manage our own Room-agnostic pre-warmed track
+        // directly — there's no engine connection for setMicrophoneEnabled()
+        // to depend on yet.
+        if (enable) await existingTrack.unmute();
+        else await existingTrack.mute();
+        await this._syncSelectedMic(existingTrack);
+      } else if (enable) {
+        await this._adoptMicTrack(await createLocalAudioTrack());
+      }
+
+      // Set only once the requested state is actually in effect — a failed
+      // attempt (caught below) leaves this reflecting reality instead of
+      // the intent we merely attempted.
+      this._micEnabled = enable;
+    } catch (e) {
+      logger.error("Failed to toggle mic", e);
+      this._callbacks.onDeviceError?.(
+        new DeviceError(
+          ["mic"],
+          this.toDeviceErrorType(MediaDeviceFailure.getFailure(e)),
+          e instanceof Error ? e.message : String(e)
+        )
+      );
+    }
   }
 
-  enableCam(enable: boolean): void {
-    this._room.localParticipant
-      .setCameraEnabled(enable)
-      .then(async () => {
-        this._camEnabled = enable;
-        if (enable) {
-          const trackPub = this._room.localParticipant.getTrackPublication(
+  // Same shape as enableMic(); see its comment for the setCameraEnabled()/
+  // mute()/unmute() split.
+  async enableCam(enable: boolean): Promise<void> {
+    try {
+      const existingTrack = this._localVideoTrack;
+
+      if (this._room.state === ConnectionState.Connected) {
+        await this._room.localParticipant.setCameraEnabled(enable);
+        if (existingTrack) {
+          await this._syncSelectedCam(existingTrack);
+        } else if (enable) {
+          const pub = this._room.localParticipant.getTrackPublication(
             Track.Source.Camera
           );
-          const deviceId =
-            trackPub?.track?.mediaStreamTrack?.getSettings().deviceId;
-          if (deviceId) {
-            const cams = await this.getAllCams();
-            const cam = cams.find((c) => c.deviceId === deviceId);
-            if (
-              cam &&
-              (this._selectedCam as MediaDeviceInfo).deviceId !== cam.deviceId
-            ) {
-              this._selectedCam = cam;
-              this._callbacks.onCamUpdated?.(cam);
-            }
-          }
+          if (pub?.track)
+            await this._adoptCamTrack(pub.track as LocalVideoTrack);
         }
-      })
-      .catch((e) => {
-        logger.error("Failed to toggle cam", e);
-        this._callbacks.onDeviceError?.(
-          new DeviceError(["cam"], "unknown", e.message)
+      } else if (existingTrack) {
+        if (enable) await existingTrack.unmute();
+        else await existingTrack.mute();
+        await this._syncSelectedCam(existingTrack);
+      } else if (enable) {
+        await this._adoptCamTrack(await createLocalVideoTrack());
+      }
+
+      // See enableMic()'s comment: only set once the requested state is
+      // actually in effect.
+      this._camEnabled = enable;
+    } catch (e) {
+      logger.error("Failed to toggle cam", e);
+      this._callbacks.onDeviceError?.(
+        new DeviceError(
+          ["cam"],
+          this.toDeviceErrorType(MediaDeviceFailure.getFailure(e)),
+          e instanceof Error ? e.message : String(e)
+        )
+      );
+    }
+  }
+
+  // Single entry point for "something about the mic/cam track may have
+  // changed" — called after every acquire, mute/unmute, restart (device
+  // switch or devicechange-driven reselect), and setMicrophoneEnabled()/
+  // setCameraEnabled(). Figures out what actually changed by diffing against
+  // last-known state, rather than making each call site work that out:
+  //   - device: compares against _selectedMic/_selectedCam, fires
+  //     onMicUpdated/onCamUpdated if the resolved device differs.
+  //   - validity: compares the current "live" raw track (undefined while
+  //     muted) against the last one we reported via onTrackStarted, firing
+  //     onTrackStopped/onTrackStarted for whatever actually differs. This
+  //     covers every case uniformly: a fresh acquire (nothing → track), a
+  //     mute (track → nothing), an unmute (nothing → track, same or restarted
+  //     object), a device switch (track → different track), and a no-op
+  //     repeat call (nothing to report either way).
+  private async _syncSelectedMic(track: LocalAudioTrack): Promise<void> {
+    const deviceId = track.mediaStreamTrack.getSettings().deviceId;
+    const mics = await this.getAllMics();
+    const mic = mics.find((m) => m.deviceId === deviceId);
+    if (
+      mic &&
+      (this._selectedMic as MediaDeviceInfo).deviceId !== mic.deviceId
+    ) {
+      this._selectedMic = mic;
+      this._callbacks.onMicUpdated?.(mic);
+    }
+
+    const liveTrack = track.isMuted ? undefined : track.mediaStreamTrack;
+    if (liveTrack !== this._lastReportedMicTrack) {
+      const participant = { id: "local", name: "", local: true };
+      if (this._lastReportedMicTrack) {
+        this._callbacks.onTrackStopped?.(
+          this._lastReportedMicTrack,
+          participant
         );
-      });
+      }
+      if (liveTrack) {
+        this._callbacks.onTrackStarted?.(liveTrack, participant);
+      }
+      this._lastReportedMicTrack = liveTrack;
+    }
+  }
+
+  private async _syncSelectedCam(track: LocalVideoTrack): Promise<void> {
+    const deviceId = track.mediaStreamTrack.getSettings().deviceId;
+    const cams = await this.getAllCams();
+    const cam = cams.find((c) => c.deviceId === deviceId);
+    if (
+      cam &&
+      (this._selectedCam as MediaDeviceInfo).deviceId !== cam.deviceId
+    ) {
+      this._selectedCam = cam;
+      this._callbacks.onCamUpdated?.(cam);
+    }
+
+    const liveTrack = track.isMuted ? undefined : track.mediaStreamTrack;
+    if (liveTrack !== this._lastReportedCamTrack) {
+      const participant = { id: "local", name: "", local: true };
+      if (this._lastReportedCamTrack) {
+        this._callbacks.onTrackStopped?.(
+          this._lastReportedCamTrack,
+          participant
+        );
+      }
+      if (liveTrack) {
+        this._callbacks.onTrackStarted?.(liveTrack, participant);
+      }
+      this._lastReportedCamTrack = liveTrack;
+    }
   }
 
   get isMicEnabled(): boolean {
@@ -403,18 +720,17 @@ export class LiveKitTransport extends Transport {
     const local = this._room.localParticipant;
     const getTrack = (
       p: LocalParticipant | RemoteParticipant,
-      _kind: string,
       source: Track.Source
-    ) => {
-      const pub = p.getTrackPublication(source);
-      return pub?.track?.mediaStreamTrack;
-    };
+    ) => p.getTrackPublication(source)?.track?.mediaStreamTrack;
 
+    // Mic/cam come straight from our own track references — reflects reality
+    // even pre-connect (e.g. right after initDevices()/enableMic(), before
+    // _connect() has published anything). Screen share is still LiveKit-native.
     const localTracks = {
-      audio: getTrack(local, "audio", Track.Source.Microphone),
-      video: getTrack(local, "video", Track.Source.Camera),
-      screenVideo: getTrack(local, "video", Track.Source.ScreenShare),
-      screenAudio: getTrack(local, "audio", Track.Source.ScreenShareAudio),
+      audio: this._localAudioTrack?.mediaStreamTrack,
+      video: this._localVideoTrack?.mediaStreamTrack,
+      screenVideo: getTrack(local, Track.Source.ScreenShare),
+      screenAudio: getTrack(local, Track.Source.ScreenShareAudio),
     };
 
     const botParticipant = this._botId
@@ -422,8 +738,8 @@ export class LiveKitTransport extends Transport {
       : undefined;
     const botTracks = botParticipant
       ? {
-          audio: getTrack(botParticipant, "audio", Track.Source.Microphone),
-          video: getTrack(botParticipant, "video", Track.Source.Camera),
+          audio: getTrack(botParticipant, Track.Source.Microphone),
+          video: getTrack(botParticipant, Track.Source.Camera),
         }
       : {};
 
@@ -431,9 +747,34 @@ export class LiveKitTransport extends Transport {
   }
 
   async sendReadyMessage() {
-    this.state = "ready";
-    await this._room.localParticipant.waitUntilActive();
-    this.sendMessage(RTVIMessage.clientReady());
+    return new Promise<void>((resolve) => {
+      // "ready" means the bot can hear/see us and we can hear/see it, not
+      // just "connected to the room" — so only resolve immediately if the
+      // bot's mic or cam track is already subscribed; otherwise wait for
+      // handleTrackSubscribed below.
+      const botParticipant = this._botId
+        ? this._room.remoteParticipants.get(this._botId)
+        : undefined;
+      const hasBotMedia =
+        !!botParticipant?.getTrackPublication(Track.Source.Microphone)
+          ?.track ||
+        !!botParticipant?.getTrackPublication(Track.Source.Camera)?.track;
+
+      if (hasBotMedia) {
+        this.state = "ready";
+        this.sendMessage(RTVIMessage.clientReady());
+        resolve();
+        return;
+      }
+
+      const readyHandler = () => {
+        this.state = "ready";
+        this.sendMessage(RTVIMessage.clientReady());
+        resolve();
+        this._readyHandler = null;
+      };
+      this._readyHandler = readyHandler;
+    }); // End of Promise
   }
 
   private attachEventListeners() {
@@ -493,10 +834,29 @@ export class LiveKitTransport extends Transport {
     publication: RemoteTrackPublication,
     participant: RemoteParticipant
   ) {
-    this._callbacks.onTrackStarted?.(
-      track.mediaStreamTrack,
-      this.toParticipant(participant)
+    console.log(
+      "track subscribed",
+      track.kind,
+      publication.source,
+      participant.identity
     );
+    if (this._readyHandler) {
+      this._readyHandler();
+    }
+    const isScreenShare =
+      publication.source === Track.Source.ScreenShare ||
+      publication.source === Track.Source.ScreenShareAudio;
+    if (isScreenShare) {
+      this._callbacks.onScreenTrackStarted?.(
+        track.mediaStreamTrack,
+        this.toParticipant(participant)
+      );
+    } else {
+      this._callbacks.onTrackStarted?.(
+        track.mediaStreamTrack,
+        this.toParticipant(participant)
+      );
+    }
   }
 
   private handleTrackUnsubscribed(
@@ -504,7 +864,16 @@ export class LiveKitTransport extends Transport {
     publication: RemoteTrackPublication,
     participant: RemoteParticipant
   ) {
-    if (track.mediaStreamTrack) {
+    if (!track.mediaStreamTrack) return;
+    const isScreenShare =
+      publication.source === Track.Source.ScreenShare ||
+      publication.source === Track.Source.ScreenShareAudio;
+    if (isScreenShare) {
+      this._callbacks.onScreenTrackStopped?.(
+        track.mediaStreamTrack,
+        this.toParticipant(participant)
+      );
+    } else {
       this._callbacks.onTrackStopped?.(
         track.mediaStreamTrack,
         this.toParticipant(participant)
@@ -512,46 +881,29 @@ export class LiveKitTransport extends Transport {
     }
   }
 
+  // Mic/cam publish/unpublish and device-sync are driven explicitly by
+  // initDevices()/enableMic()/enableCam()/updateMic()/updateCam() against our
+  // own owned LocalAudioTrack/LocalVideoTrack now — reporting them again here
+  // off the room's own publish event would double-fire onTrackStarted/
+  // onMicUpdated/onCamUpdated. Screen share is still LiveKit-native
+  // (setScreenShareEnabled), so it's the only source reported from these
+  // room-level events — via onScreenTrackStarted/Stopped, not the generic
+  // onTrackStarted/Stopped (those are for mic/cam/remote tracks).
   private handleLocalTrackPublished(
     publication: LocalTrackPublication,
     participant: LocalParticipant
   ) {
+    if (
+      publication.source !== Track.Source.ScreenShare &&
+      publication.source !== Track.Source.ScreenShareAudio
+    ) {
+      return;
+    }
     if (publication.track?.mediaStreamTrack) {
-      this._callbacks.onTrackStarted?.(
+      this._callbacks.onScreenTrackStarted?.(
         publication.track.mediaStreamTrack,
         this.toParticipant(participant)
       );
-    }
-
-    const deviceId =
-      publication.track?.mediaStreamTrack?.getSettings().deviceId;
-    if (!deviceId) return;
-
-    // Sync the selected input device when a capture track is published (e.g.
-    // via setMicrophoneEnabled/setCameraEnabled on the connect-without-
-    // initDevices path). Screen-share sources are not selectable devices.
-    if (publication.source === Track.Source.Microphone) {
-      this.getAllMics().then((mics) => {
-        const mic = mics.find((m) => m.deviceId === deviceId);
-        if (
-          mic &&
-          (this._selectedMic as MediaDeviceInfo).deviceId !== deviceId
-        ) {
-          this._selectedMic = mic;
-          this._callbacks.onMicUpdated?.(mic);
-        }
-      });
-    } else if (publication.source === Track.Source.Camera) {
-      this.getAllCams().then((cams) => {
-        const cam = cams.find((c) => c.deviceId === deviceId);
-        if (
-          cam &&
-          (this._selectedCam as MediaDeviceInfo).deviceId !== deviceId
-        ) {
-          this._selectedCam = cam;
-          this._callbacks.onCamUpdated?.(cam);
-        }
-      });
     }
   }
 
@@ -559,8 +911,14 @@ export class LiveKitTransport extends Transport {
     publication: LocalTrackPublication,
     participant: LocalParticipant
   ) {
+    if (
+      publication.source !== Track.Source.ScreenShare &&
+      publication.source !== Track.Source.ScreenShareAudio
+    ) {
+      return;
+    }
     if (publication.track?.mediaStreamTrack) {
-      this._callbacks.onTrackStopped?.(
+      this._callbacks.onScreenTrackStopped?.(
         publication.track.mediaStreamTrack,
         this.toParticipant(participant)
       );
@@ -568,6 +926,7 @@ export class LiveKitTransport extends Transport {
   }
 
   private handleParticipantConnected(participant: RemoteParticipant) {
+    console.log("participant joined", participant.identity, participant.name);
     this._callbacks.onParticipantJoined?.(this.toParticipant(participant));
 
     // Mirrors the other transports: the first remote participant to join is
