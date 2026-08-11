@@ -603,6 +603,61 @@ describe("LiveKitTransport — characterization", () => {
 
       expect(track.stop).toHaveBeenCalledTimes(1);
     });
+
+    test("_disconnect() reports mic/cam as stopped and flips isMicEnabled/isCamEnabled to false", async () => {
+      const { callbacks, spies } = buildSpyCallbacks();
+      wireTransport(transport, callbacks, { enableMic: true, enableCam: true });
+      await transport.initDevices();
+      const micTrack = localAudioTrackOf(transport)!;
+      const camTrack = localVideoTrackOf(transport)!;
+
+      await transport._disconnect();
+
+      expect(spies.onTrackStopped).toHaveBeenCalledWith(
+        micTrack.mediaStreamTrack,
+        expect.objectContaining({ local: true })
+      );
+      expect(spies.onTrackStopped).toHaveBeenCalledWith(
+        camTrack.mediaStreamTrack,
+        expect.objectContaining({ local: true })
+      );
+      expect(transport.isMicEnabled).toBe(false);
+      expect(transport.isCamEnabled).toBe(false);
+    });
+
+    test("isMicEnabled/isCamEnabled already reflect false from inside disconnect's onTrackStopped callback", async () => {
+      const { callbacks, spies } = buildSpyCallbacks();
+      wireTransport(transport, callbacks, { enableMic: true, enableCam: true });
+      await transport.initDevices();
+
+      const seenMic: boolean[] = [];
+      const seenCam: boolean[] = [];
+      const micTrack = localAudioTrackOf(transport)!;
+      const camTrack = localVideoTrackOf(transport)!;
+      spies.onTrackStopped.mockImplementation((track: MediaStreamTrack) => {
+        if (track === micTrack.mediaStreamTrack) seenMic.push(transport.isMicEnabled);
+        if (track === camTrack.mediaStreamTrack) seenCam.push(transport.isCamEnabled);
+      });
+
+      await transport._disconnect();
+
+      expect(seenMic).toEqual([false]);
+      expect(seenCam).toEqual([false]);
+    });
+
+    test("_disconnect() is a no-op for onTrackStopped when nothing was ever live (mic/cam disabled)", async () => {
+      const { callbacks, spies } = buildSpyCallbacks();
+      wireTransport(transport, callbacks, {
+        enableMic: false,
+        enableCam: false,
+      });
+
+      await transport._disconnect();
+
+      expect(spies.onTrackStopped).not.toHaveBeenCalled();
+      expect(transport.isMicEnabled).toBe(false);
+      expect(transport.isCamEnabled).toBe(false);
+    });
   });
 
   describe("connection", () => {
@@ -870,6 +925,26 @@ describe("LiveKitTransport — characterization", () => {
       expect(track.unmute).toHaveBeenCalledTimes(1);
       // Toggling reuses the existing track; it never re-acquires.
       expect(createLocalAudioTrack).not.toHaveBeenCalled();
+    });
+
+    test("isMicEnabled already reflects the new state from inside the onTrackStopped/onTrackStarted callback", async () => {
+      const { callbacks, spies } = buildSpyCallbacks();
+      wireTransport(transport, callbacks);
+      await transport.initDevices();
+
+      const seenDuringStopped: boolean[] = [];
+      spies.onTrackStopped.mockImplementation(() => {
+        seenDuringStopped.push(transport.isMicEnabled);
+      });
+      await transport.enableMic(false);
+      expect(seenDuringStopped).toEqual([false]);
+
+      const seenDuringStarted: boolean[] = [];
+      spies.onTrackStarted.mockImplementation(() => {
+        seenDuringStarted.push(transport.isMicEnabled);
+      });
+      await transport.enableMic(true);
+      expect(seenDuringStarted).toEqual([true]);
     });
 
     test("enableMic(true) with no existing track pre-warms one via createLocalAudioTrack() when not connected", async () => {
