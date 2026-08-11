@@ -184,8 +184,13 @@ vi.mock("livekit-client", () => {
     connect = vi.fn(async (_u: string, _t: string, _o?: unknown) => {
       this.state = ConnectionState.Connected;
     });
+    // Mirrors livekit-client's real Room.disconnect(): handleDisconnect()
+    // stops/unpublishes tracks and emits RoomEvent.Disconnected synchronously,
+    // all before disconnect()'s own promise resolves — not after.
     disconnect = vi.fn(async () => {
+      if (this.state === ConnectionState.Disconnected) return;
       this.state = ConnectionState.Disconnected;
+      this.emit(RoomEvent.Disconnected);
     });
     switchActiveDevice = vi.fn(async (_k: string, _id: string) => {});
     private _handlers: Record<string, ((...a: unknown[]) => void)[]> = {};
@@ -590,6 +595,23 @@ describe("LiveKitTransport — characterization", () => {
         "devicechange",
         expect.any(Function)
       );
+      expect(spies.onDisconnected).toHaveBeenCalledTimes(1);
+    });
+
+    // Regression: livekit-client's real Room.disconnect() emits
+    // RoomEvent.Disconnected synchronously, before its own promise resolves
+    // — so handleRoomDisconnected() (via that event) used to run the full
+    // teardown once, and then _disconnect()'s own unconditional teardown at
+    // the end ran it a second time, firing onDisconnected twice per
+    // disconnect. Exercise the case where the room actually was connected
+    // (so the event genuinely fires) and confirm it's still exactly once.
+    test("_disconnect() after an actual connection fires onDisconnected exactly once, not twice", async () => {
+      const { callbacks, spies } = buildSpyCallbacks();
+      wireTransport(transport, callbacks);
+      await connect(transport, { url: "wss://lk.example", token: "tok" });
+
+      await transport._disconnect();
+
       expect(spies.onDisconnected).toHaveBeenCalledTimes(1);
     });
 
