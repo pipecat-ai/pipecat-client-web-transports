@@ -512,9 +512,21 @@ export class MoqTransport extends Transport {
     // and hang is the DEFAULT_FORMAT) but pinning removes ambiguity if
     // a future publisher adds a suffix or a different default ships.
     // ----------------------------------------------------------------
+    // Enabled only while the bot's broadcast is actually announced: the
+    // catalog subscribe otherwise fires as soon as the connection is up,
+    // and against a bot that starts in response to our own announcement
+    // (direct mode) the path doesn't exist yet — the relay resets the
+    // stream and the catalog fetch never retries, leaving audio dead
+    // while the (separately gated) transcript still works. Flipping
+    // `enabled` on the announcement makes Watch.Broadcast (re)subscribe
+    // when the bot really is there, and tear down if it goes away.
+    const botAnnounced = new Signal(false);
+    this._signals.run((eff) => {
+      botAnnounced.set(eff.get(this._reload!.announced).has(botPath));
+    });
     this._watchBroadcast = new Watch.Broadcast({
       connection: this._reload.established,
-      enabled: new Signal(true),
+      enabled: botAnnounced,
       name: new Signal(botPath),
       catalogFormat: new Signal<Watch.CatalogFormat>("hang"),
     });
@@ -578,12 +590,22 @@ export class MoqTransport extends Transport {
       );
     });
 
-    // Transcript — a lossless JSON append-stream over a single track. We
-    // re-subscribe on each (re)connect; @moq/json's stream Consumer yields
-    // every appended record in order, losslessly.
+    // Transcript — a lossless JSON append-stream over a single track,
+    // re-subscribed on every (re-)announce. @moq/json's stream Consumer
+    // yields every appended record in order, losslessly.
+    //
+    // Gated on the announcement rather than the connection, because
+    // subscribing to a path nobody publishes yet gets the stream reset:
+    // a bot started in response to our own announcement necessarily
+    // appears after us. Same gate as `Watch.Broadcast`'s `enabled` above;
+    // this track goes straight through `@moq/net`, so it needs the gate
+    // spelled out. Reading it off `Reload` rather than the established
+    // session means the gate spans reconnects.
     this._signals.run((eff) => {
       const conn = eff.get(this._reload!.established);
       if (!conn) return;
+      if (!eff.get(this._reload!.announced).has(botPath)) return;
+
       const botBroadcast = conn.consume(botPath);
       const track = botBroadcast.subscribe(merged.transcriptTrack, 0);
       const consumer = new Json.Stream.Consumer<RTVIMessage>(track, {
