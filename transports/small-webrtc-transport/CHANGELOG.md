@@ -5,6 +5,14 @@ All notable changes to **Pipecat Small WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.7](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.6...small-webrtc-transport-v1.10.7) (2026-08-13)
+
+
+### Bug Fixes
+
+* Fix SmallWebRTC to return an error in _connectFailed rejection ([bc69b59](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/bc69b59a3a6163782627f3ec5fe20f6fb02ea1e5))
+* Fix SmallWebRTC to return an error in _connectFailed rejection ([e462176](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/e46217666b8be0528a9a394a7ad7909046ac21fc))
+
 ## [1.10.6](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.5...small-webrtc-transport-v1.10.6) (2026-07-16)
 
 
