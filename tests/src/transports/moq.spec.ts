@@ -45,17 +45,31 @@ vi.mock("@moq/publish", () => {
           .catch(() => {});
       },
     };
-    source = {
-      peek: () =>
-        this._track ? { track: this._track } : undefined,
+    // 0.4 moved component outputs under `out`.
+    out = {
+      source: {
+        peek: () => (this._track ? { track: this._track } : undefined),
+      },
     };
     constructor(_opts: unknown) {}
   }
   return {
     Broadcast: class {
+      // The network broadcast, re-created per connection. Undefined here
+      // since these tests never connect.
+      net = { peek: () => undefined };
       close() {}
     },
-    Audio: { StreamTrack: class {} },
+    Audio: {
+      StreamTrack: class {},
+      // 0.4 registers the audio rendition through an encoder rather than
+      // an inline `audio` prop on the broadcast.
+      Encoder: class {
+        sampleRate: unknown;
+        constructor(_name: string, _opts: unknown) {}
+        close() {}
+      },
+    },
     Source: { Microphone },
   };
 });
@@ -65,9 +79,19 @@ vi.mock("@moq/watch", () => ({
   },
   Sync: class {},
   Audio: {
-    Source: class {},
-    Decoder: class {},
-    Emitter: class {},
+    Source: class {
+      out = { jitter: undefined, config: { peek: () => undefined } };
+      close() {}
+    },
+    Decoder: class {
+      // Read by the transport to tell the source which codecs it can play.
+      static supported = undefined;
+      out = { context: undefined, root: undefined };
+      close() {}
+    },
+    Emitter: class {
+      close() {}
+    },
   },
 }));
 vi.mock("@moq/net", () => ({
