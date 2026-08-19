@@ -52,6 +52,7 @@ export class LiveKitTransport extends Transport {
   private _camEnabled: boolean = false;
   private _listenersAttached: boolean = false;
   private _readyHandler: (() => void) | null = null;
+  private _readyReject: ((reason?: unknown) => void) | null = null;
   private _deviceChangeHandler = () => {
     void this._handleDeviceChange();
   };
@@ -270,9 +271,6 @@ export class LiveKitTransport extends Transport {
     const stillPresent = devices.some((d) => d.deviceId === current.deviceId);
     const defaultChanged =
       current.deviceId === "default" && current.label !== defaultDevice?.label;
-    console.log(
-      `[${kind}] reacquire check — current: ${current.deviceId} (${current.label}), stillPresent: ${stillPresent}, defaultDevice: ${defaultDevice?.deviceId} (${defaultDevice?.label}), defaultChanged: ${defaultChanged}`
-    );
     if (stillPresent && !defaultChanged) return;
 
     try {
@@ -463,16 +461,11 @@ export class LiveKitTransport extends Transport {
     if (!this._localAudioTrack) return;
     const track = this._localAudioTrack;
     try {
-      const id_before = track.mediaStreamTrack.getSettings().deviceId;
-      console.log(`Updating mic from ${id_before} to ${micId}`);
       // A bare string deviceId is shorthand for { ideal: micId } — a soft
       // preference the browser can (and in practice does) ignore in favor of
       // whatever device is already active. { exact } forces the switch,
       // matching what Room.switchActiveDevice does for exactly this reason.
       await track.restartTrack({ deviceId: { exact: micId } });
-      console.log(
-        `Mic id after restartTrack: ${track.mediaStreamTrack.getSettings().deviceId}`
-      );
       await this._syncSelectedMic(track);
     } catch (e) {
       this._callbacks.onDeviceError?.(
@@ -762,7 +755,7 @@ export class LiveKitTransport extends Transport {
   }
 
   async sendReadyMessage() {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       // "ready" means the bot can hear/see us and we can hear/see it, not
       // just "connected to the room" — so only resolve immediately if the
       // bot's mic or cam track is already subscribed; otherwise wait for
@@ -786,8 +779,15 @@ export class LiveKitTransport extends Transport {
         this.sendMessage(RTVIMessage.clientReady());
         resolve();
         this._readyHandler = null;
+        this._readyReject = null;
       };
       this._readyHandler = readyHandler;
+      // Rejected from handleRoomDisconnected() if the room drops (network
+      // loss, room closed server-side) before the bot ever subscribes —
+      // otherwise this promise would hang forever, matching
+      // openai-realtime-webrtc-transport's _botIsReadyResolve.reject() on a
+      // failed/closed peer connection.
+      this._readyReject = reject;
     }); // End of Promise
   }
 
@@ -839,7 +839,7 @@ export class LiveKitTransport extends Transport {
         this._onMessage(msg as RTVIMessage);
       }
     } catch (e) {
-      logger.warn("Failed to parse data message", e);
+      logger.error("Failed to parse data message", e);
     }
   }
 
@@ -848,11 +848,8 @@ export class LiveKitTransport extends Transport {
     publication: RemoteTrackPublication,
     participant: RemoteParticipant
   ) {
-    console.log(
-      "track subscribed",
-      track.kind,
-      publication.source,
-      participant.identity
+    logger.debug(
+      `[LiveKit Transport] Track subscribed: ${track.kind} ${publication.source} from ${participant.identity}`
     );
     if (this._readyHandler) {
       this._readyHandler();
@@ -940,7 +937,9 @@ export class LiveKitTransport extends Transport {
   }
 
   private handleParticipantConnected(participant: RemoteParticipant) {
-    console.log("participant joined", participant.identity, participant.name);
+    logger.debug(
+      `[LiveKit Transport] Participant joined: ${participant.identity} (${participant.name})`
+    );
     this._callbacks.onParticipantJoined?.(this.toParticipant(participant));
 
     // Mirrors the other transports: the first remote participant to join is
@@ -966,6 +965,15 @@ export class LiveKitTransport extends Transport {
   // RoomEvent.Disconnected rather than duplicating this logic.
   private handleRoomDisconnected() {
     if (this.state === "disconnected") return;
+
+    // A pending sendReadyMessage() is still waiting on the bot's mic/cam
+    // track to subscribe — that will never happen now, so reject rather
+    // than leave the promise (and its caller) hanging forever.
+    if (this._readyReject) {
+      this._readyReject(new Error("LiveKit room disconnected before ready"));
+      this._readyHandler = null;
+      this._readyReject = null;
+    }
 
     // room.disconnect() stops tracks it actually published, but a track
     // acquired via initDevices()/enableMic()/enableCam() that was never
