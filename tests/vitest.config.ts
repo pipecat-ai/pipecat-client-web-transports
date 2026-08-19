@@ -35,6 +35,10 @@ export default defineConfig({
         "../transports/moq-transport/src/index.ts",
         import.meta.url
       ).pathname,
+      "@pipecat-ai/livekit-transport": new URL(
+        "../transports/livekit-transport/src/index.ts",
+        import.meta.url
+      ).pathname,
     },
   },
 });
