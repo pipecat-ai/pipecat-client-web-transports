@@ -34,7 +34,8 @@
     "livekit-client": "^2.21.0"
   },
   "description": "Pipecat Livekit Transport Package",
-  "author": "Himanshu Gunwant",
+  "author": "Daily.co",
+  "contributors": ["Himanshu Gunwant"],
   "bugs": {
     "url": "https://github.com/pipecat-ai/pipecat-client-web-transports/issues"
   }
