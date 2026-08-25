@@ -332,6 +332,16 @@ export class LiveKitTransport extends Transport {
 
     this.state = "connecting";
 
+    // Re-attach the devicechange listener dropped by a prior _disconnect() —
+    // initialize() only runs once per client lifetime, so a reconnect on the
+    // same transport must restore it here. Re-adding an already-registered
+    // listener is a no-op per the DOM spec, so the first connect is
+    // unaffected.
+    navigator.mediaDevices.addEventListener(
+      "devicechange",
+      this._deviceChangeHandler
+    );
+
     // Publish alongside connect(), not after it. publishTrack() only waits on
     // the signal (WebSocket) connection, not full ICE/PC negotiation — the
     // AddTrackRequest rides in the same initial offer/answer that's already
@@ -406,6 +416,17 @@ export class LiveKitTransport extends Transport {
 
     this.state = "connected";
     this._callbacks.onConnected?.();
+
+    // livekit-client only emits ParticipantConnected for participants who
+    // join *after* us: join-response participants are processed while the
+    // room is still "connecting", and Room.emitWhenConnected() silently
+    // drops (doesn't buffer) events in that state. The bot usually connects
+    // before the client does, so run whoever's already in the room through
+    // the same handler the event-driven path uses — it sets _botId and fires
+    // onParticipantJoined/onBotConnected.
+    this._room.remoteParticipants.forEach((p) =>
+      this.handleParticipantConnected(p)
+    );
   }
 
   async _disconnect(): Promise<void> {
@@ -886,7 +907,10 @@ export class LiveKitTransport extends Transport {
     logger.debug(
       `[LiveKit Transport] Track subscribed: ${track.kind} ${publication.source} from ${participant.identity}`
     );
-    if (this._readyHandler) {
+    // Only the bot's own media satisfies a pending sendReadyMessage() —
+    // "ready" means we can hear/see the bot, and in a multi-participant room
+    // another human's track subscribing says nothing about that.
+    if (this._readyHandler && participant.identity === this._botId) {
       this._readyHandler();
     }
     const isScreenShare =
