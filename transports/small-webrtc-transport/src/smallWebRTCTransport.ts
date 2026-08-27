@@ -86,6 +86,13 @@ class SignallingMessageObject {
   }
 }
 
+// A 4xx means the server refused this offer; re-sending it can't succeed.
+const isOfferRefused = (e: unknown): e is Response =>
+  typeof Response !== "undefined" &&
+  e instanceof Response &&
+  e.status >= 400 &&
+  e.status < 500;
+
 const AUDIO_TRANSCEIVER_INDEX = 0;
 const VIDEO_TRANSCEIVER_INDEX = 1;
 const SCREEN_VIDEO_TRANSCEIVER_INDEX = 2;
@@ -566,6 +573,10 @@ export class SmallWebRTCTransport extends Transport {
   private async attemptReconnection(
     recreatePeerConnection: boolean = false
   ): Promise<void> {
+    if (this._abortController?.signal.aborted) {
+      logger.debug("Transport disconnected, skipping reconnection.");
+      return;
+    }
     if (this.isReconnecting) {
       logger.debug("Reconnection already in progress, skipping.");
       return;
@@ -580,15 +591,19 @@ export class SmallWebRTCTransport extends Transport {
     logger.debug(`Reconnection attempt ${this.reconnectionAttempts}...`);
     // aiortc does not seem to work when just trying to restart the ice
     // so for this case we create a new peer connection on both sides
-    if (recreatePeerConnection) {
-      const oldPC = this.pc;
-      await this.startNewPeerConnection(recreatePeerConnection);
-      if (oldPC) {
-        logger.debug("closing old peer connection");
-        this.closePeerConnection(oldPC);
+    try {
+      if (recreatePeerConnection) {
+        const oldPC = this.pc;
+        await this.startNewPeerConnection(recreatePeerConnection);
+        if (oldPC) {
+          logger.debug("closing old peer connection");
+          this.closePeerConnection(oldPC);
+        }
+      } else {
+        await this.negotiate();
       }
-    } else {
-      await this.negotiate();
+    } catch (e) {
+      logger.error(`Reconnection stopped: ${e}`);
     }
   }
 
@@ -692,9 +707,10 @@ export class SmallWebRTCTransport extends Transport {
     }
   }
 
+  /** Resolves true on a successful answer, false when a retry was scheduled. */
   private async negotiate(
     recreatePeerConnection: boolean = false
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!this.pc) {
       return Promise.reject("Peer connection is not initialized");
     }
@@ -775,12 +791,24 @@ export class SmallWebRTCTransport extends Transport {
       // @ts-ignore
       logger.debug(`Received answer for peer connection id ${answer.pc_id}`);
       await this.pc!.setRemoteDescription(answer);
+      return true;
     } catch (e) {
+      if (isOfferRefused(e)) {
+        const error = new RTVIError(
+          `WebRTC offer rejected with status ${e.status}`,
+          e.status
+        );
+        logger.error(error.message);
+        this.state = "error";
+        await this.stop(error);
+        throw error;
+      }
       logger.debug(
         `Reconnection attempt ${this.reconnectionAttempts} failed: ${e}`
       );
       this.isReconnecting = false;
       setTimeout(() => this.attemptReconnection(true), 2000);
+      return false;
     }
   }
 
@@ -822,8 +850,8 @@ export class SmallWebRTCTransport extends Transport {
     this.addInitialTransceivers();
     this.dc = this.createDataChannel("chat", { ordered: true });
     await this.addUserMedia();
-    await this.negotiate(recreatePeerConnection);
-    // Sending the ice candidates
+    const negotiated = await this.negotiate(recreatePeerConnection);
+    if (!negotiated) return;
     this._canSendIceCandidates = true;
     await this.flushIceCandidates();
   }
@@ -950,7 +978,7 @@ export class SmallWebRTCTransport extends Transport {
     pc.close();
   }
 
-  private async stop(): Promise<void> {
+  private async stop(error?: RTVIError): Promise<void> {
     if (!this.pc) {
       logger.debug("Peer connection is already closed or null.");
       return;
@@ -975,7 +1003,7 @@ export class SmallWebRTCTransport extends Transport {
     this._canSendIceCandidates = false;
 
     if (this._connectFailed) {
-      this._connectFailed(new TransportStartError());
+      this._connectFailed(error ?? new TransportStartError());
     }
     this._connectFailed = null;
     this._connectResolved = null;
