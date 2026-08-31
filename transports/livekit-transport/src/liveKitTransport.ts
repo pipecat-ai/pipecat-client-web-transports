@@ -123,11 +123,15 @@ export class LiveKitTransport extends Transport {
           | undefined;
         if (audioTrack) await this._adoptMicTrack(audioTrack);
         if (videoTrack) await this._adoptCamTrack(videoTrack);
-      } catch {
+      } catch (e) {
         // createLocalTracks, like getUserMedia, is all-or-nothing — one
         // device failing fails the whole combined request. Fall back to
         // acquiring each independently so a single bad device doesn't take
         // the other down with it, and the error attributes to the right one.
+        logger.warn(
+          "[LiveKit Transport] Combined mic+cam acquisition failed, falling back to acquiring each independently",
+          e
+        );
         await Promise.all([this._acquireMic(), this._acquireCam()]);
       }
     } else {
@@ -206,19 +210,31 @@ export class LiveKitTransport extends Transport {
     await this._syncSelectedCam(track);
   }
 
+  private async _enumerateDevices(): Promise<{
+    all: MediaDeviceInfo[];
+    mics: MediaDeviceInfo[];
+    cams: MediaDeviceInfo[];
+    speakers: MediaDeviceInfo[];
+  }> {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    return {
+      all,
+      mics: all.filter((d) => d.kind === "audioinput"),
+      cams: all.filter((d) => d.kind === "videoinput"),
+      speakers: all.filter((d) => d.kind === "audiooutput"),
+    };
+  }
+
   private async updateAvailableDevices(): Promise<
     MediaDeviceInfo[] | undefined
   > {
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const cams = devices.filter((d) => d.kind === "videoinput");
-      const mics = devices.filter((d) => d.kind === "audioinput");
-      const speakers = devices.filter((d) => d.kind === "audiooutput");
+      const { all, cams, mics, speakers } = await this._enumerateDevices();
 
       this._callbacks.onAvailableCamsUpdated?.(cams);
       this._callbacks.onAvailableMicsUpdated?.(mics);
       this._callbacks.onAvailableSpeakersUpdated?.(speakers);
-      return devices;
+      return all;
     } catch (e) {
       logger.error("Error enumerating devices", e);
       return undefined;
@@ -437,18 +453,15 @@ export class LiveKitTransport extends Transport {
 
   // Device Management
   async getAllMics(): Promise<MediaDeviceInfo[]> {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    return devices.filter((d) => d.kind === "audioinput");
+    return (await this._enumerateDevices()).mics;
   }
 
   async getAllCams(): Promise<MediaDeviceInfo[]> {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    return devices.filter((d) => d.kind === "videoinput");
+    return (await this._enumerateDevices()).cams;
   }
 
   async getAllSpeakers(): Promise<MediaDeviceInfo[]> {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    return devices.filter((d) => d.kind === "audiooutput");
+    return (await this._enumerateDevices()).speakers;
   }
 
   // updateMic/updateCam switch the device on our own owned LocalAudioTrack/
@@ -458,7 +471,12 @@ export class LiveKitTransport extends Transport {
   // nothing to switch if the device was never enabled in the first place.
   async updateMic(micId: string): Promise<void> {
     if ((this._selectedMic as MediaDeviceInfo).deviceId === micId) return;
-    if (!this._localAudioTrack) return;
+    if (!this._localAudioTrack) {
+      logger.warn(
+        "[LiveKit Transport] updateMic() called with no active mic track — call initDevices() or enableMic() first"
+      );
+      return;
+    }
     const track = this._localAudioTrack;
     try {
       // A bare string deviceId is shorthand for { ideal: micId } — a soft
@@ -480,7 +498,12 @@ export class LiveKitTransport extends Transport {
 
   async updateCam(camId: string): Promise<void> {
     if ((this._selectedCam as MediaDeviceInfo).deviceId === camId) return;
-    if (!this._localVideoTrack) return;
+    if (!this._localVideoTrack) {
+      logger.warn(
+        "[LiveKit Transport] updateCam() called with no active cam track — call initDevices() or enableCam() first"
+      );
+      return;
+    }
     const track = this._localVideoTrack;
     try {
       await track.restartTrack({ deviceId: { exact: camId } });
