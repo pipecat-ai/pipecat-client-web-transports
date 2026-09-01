@@ -581,6 +581,42 @@ describe("LiveKitTransport — characterization", () => {
       ).toHaveBeenCalledWith(expect.any(Uint8Array), { reliable: true });
     });
 
+    test("sendReadyMessage() ignores track subscriptions from non-bot participants", async () => {
+      const { callbacks } = buildSpyCallbacks();
+      wireTransport(transport, callbacks);
+
+      const bot = {
+        identity: "bot-1",
+        name: "Bot",
+        getTrackPublication: () => undefined,
+      };
+      roomOf(transport).remoteParticipants.set("bot-1", bot);
+      roomOf(transport).emit(RoomEvent.ParticipantConnected, bot); // sets _botId
+
+      const readyPromise = transport.sendReadyMessage();
+      await Promise.resolve();
+
+      // Another human's track subscribing doesn't mean the bot can be heard —
+      // "ready" must wait for the bot's own media.
+      roomOf(transport).emit(
+        RoomEvent.TrackSubscribed,
+        { kind: "audio", mediaStreamTrack: {} },
+        { source: Track.Source.Microphone },
+        { identity: "human-2", name: "Other Human" }
+      );
+      await Promise.resolve();
+      expect(transport.state).not.toBe("ready");
+
+      roomOf(transport).emit(
+        RoomEvent.TrackSubscribed,
+        { kind: "audio", mediaStreamTrack: {} },
+        { source: Track.Source.Microphone },
+        bot
+      );
+      await readyPromise;
+      expect(transport.state).toBe("ready");
+    });
+
     test("_disconnect(): disconnecting → disconnected, disconnects room, removes listener, fires onDisconnected", async () => {
       const { callbacks, recorder, spies } = buildSpyCallbacks();
       wireTransport(transport, callbacks);
@@ -680,6 +716,28 @@ describe("LiveKitTransport — characterization", () => {
       expect(transport.isMicEnabled).toBe(false);
       expect(transport.isCamEnabled).toBe(false);
     });
+
+    // initialize() attaches the devicechange listener and _disconnect()
+    // removes it — but client-js only calls transport.initialize() once per
+    // client, so a disconnect → reconnect cycle on the same transport must
+    // re-attach it or device hot-plug handling silently dies for the second
+    // session.
+    test("reconnect after _disconnect() re-attaches the devicechange listener", async () => {
+      const { callbacks } = buildSpyCallbacks();
+      wireTransport(transport, callbacks);
+      await connect(transport, { url: "wss://lk.example", token: "tok" });
+      await transport._disconnect();
+
+      await connect(transport, { url: "wss://lk.example", token: "tok" });
+
+      const adds = mediaDevices.addEventListener.mock.calls.filter(
+        ([event]) => event === "devicechange"
+      ).length;
+      const removals = mediaDevices.removeEventListener.mock.calls.filter(
+        ([event]) => event === "devicechange"
+      ).length;
+      expect(adds).toBeGreaterThan(removals);
+    });
   });
 
   describe("connection", () => {
@@ -766,6 +824,33 @@ describe("LiveKitTransport — characterization", () => {
         connect(transport, { url: "wss://lk.example", token: "tok" })
       ).rejects.toBeInstanceOf(TransportStartError);
       expect(transport.state).toBe("error");
+    });
+
+    // livekit-client only emits ParticipantConnected for participants who
+    // join *after* us: join-response participants are processed while the
+    // room is still "connecting", and Room.emitWhenConnected() silently drops
+    // (doesn't buffer) events in that state. With the pipecat runner the
+    // agent typically connects before the client does, so already-present is
+    // the common ordering — the transport has to sweep remoteParticipants
+    // itself after connecting.
+    test("_connect() identifies a bot already present in the room at join time", async () => {
+      const { callbacks, spies } = buildSpyCallbacks();
+      wireTransport(transport, callbacks);
+      const bot = {
+        identity: "bot-1",
+        name: "Bot",
+        getTrackPublication: () => undefined,
+      };
+      roomOf(transport).remoteParticipants.set("bot-1", bot);
+
+      await connect(transport, { url: "wss://lk.example", token: "tok" });
+
+      expect(spies.onParticipantJoined).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "bot-1" })
+      );
+      expect(spies.onBotConnected).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "bot-1" })
+      );
     });
   });
 
