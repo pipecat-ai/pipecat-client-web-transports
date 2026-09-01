@@ -1040,7 +1040,7 @@ describe("LiveKitTransport — characterization", () => {
       // The real setMicrophoneEnabled() resolves to track.mute()/unmute()
       // internally when a publication already exists (that's the whole point
       // of this test); our bare mock doesn't simulate that side effect, so
-      // apply it directly to make _syncSelectedMic()'s diff observable.
+      // apply it directly to make _syncMicTrack()'s diff observable.
       roomOf(transport).localParticipant.setMicrophoneEnabled.mockImplementation(
         async (enable: boolean) => {
           track.isMuted = !enable;
@@ -1208,7 +1208,7 @@ describe("LiveKitTransport — characterization", () => {
       expect(spies.onTrackStopped).not.toHaveBeenCalled();
     });
 
-    test("_syncSelectedCam() doesn't re-fire onCamUpdated when re-synced to the same device", async () => {
+    test("_syncCamTrack() doesn't re-fire onCamUpdated when re-synced to the same device", async () => {
       const { callbacks, spies } = buildSpyCallbacks();
       wireTransport(transport, callbacks, { enableMic: false, enableCam: true });
       await transport.initDevices(); // selects cam-1, fires onCamUpdated once
@@ -1220,9 +1220,9 @@ describe("LiveKitTransport — characterization", () => {
       // lands back on the same device) should stay quiet.
       await (
         transport as unknown as {
-          _syncSelectedCam(t: unknown): Promise<void>;
+          _syncCamTrack(t: unknown): Promise<void>;
         }
-      )._syncSelectedCam(track);
+      )._syncCamTrack(track);
 
       expect(spies.onCamUpdated).not.toHaveBeenCalled();
     });

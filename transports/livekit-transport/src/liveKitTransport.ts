@@ -59,7 +59,7 @@ export class LiveKitTransport extends Transport {
   private _localAudioTrack?: LocalAudioTrack;
   private _localVideoTrack?: LocalVideoTrack;
   // The raw MediaStreamTrack last reported to the app via onTrackStarted, if
-  // any — _syncSelectedMic/Cam's own record of "what we last told callers is
+  // any — _syncMicTrack/Cam's own record of "what we last told callers is
   // live", diffed against current reality to decide what to report next.
   private _lastReportedMicTrack?: MediaStreamTrack;
   private _lastReportedCamTrack?: MediaStreamTrack;
@@ -121,8 +121,8 @@ export class LiveKitTransport extends Transport {
         const videoTrack = tracks.find((t) => t.kind === Track.Kind.Video) as
           | LocalVideoTrack
           | undefined;
-        if (audioTrack) await this._adoptMicTrack(audioTrack);
-        if (videoTrack) await this._adoptCamTrack(videoTrack);
+        if (audioTrack) await this._syncMicTrack(audioTrack);
+        if (videoTrack) await this._syncCamTrack(videoTrack);
       } catch (e) {
         // createLocalTracks, like getUserMedia, is all-or-nothing — one
         // device failing fails the whole combined request. Fall back to
@@ -132,11 +132,11 @@ export class LiveKitTransport extends Transport {
           "[LiveKit Transport] Combined mic+cam acquisition failed, falling back to acquiring each independently",
           e
         );
-        await Promise.all([this._acquireMic(), this._acquireCam()]);
+        await Promise.all([this._initMic(), this._initCam()]);
       }
     } else {
-      if (this._micEnabled) await this._acquireMic();
-      if (this._camEnabled) await this._acquireCam();
+      if (this._micEnabled) await this._initMic();
+      if (this._camEnabled) await this._initCam();
     }
 
     await this.updateAvailableDevices();
@@ -164,11 +164,11 @@ export class LiveKitTransport extends Transport {
     }
   }
 
-  private async _acquireMic(): Promise<void> {
+  private async _initMic(): Promise<void> {
     try {
       // See the comment in initDevices() re: { deviceId: "default" } — a
       // soft ideal preference, not exact, so this stays safe on Firefox/Safari.
-      await this._adoptMicTrack(
+      await this._syncMicTrack(
         await createLocalAudioTrack({ deviceId: "default" })
       );
     } catch (e) {
@@ -183,9 +183,9 @@ export class LiveKitTransport extends Transport {
     }
   }
 
-  private async _acquireCam(): Promise<void> {
+  private async _initCam(): Promise<void> {
     try {
-      await this._adoptCamTrack(
+      await this._syncCamTrack(
         await createLocalVideoTrack({ deviceId: "default" })
       );
     } catch (e) {
@@ -198,16 +198,6 @@ export class LiveKitTransport extends Transport {
         )
       );
     }
-  }
-
-  private async _adoptMicTrack(track: LocalAudioTrack): Promise<void> {
-    this._localAudioTrack = track;
-    await this._syncSelectedMic(track);
-  }
-
-  private async _adoptCamTrack(track: LocalVideoTrack): Promise<void> {
-    this._localVideoTrack = track;
-    await this._syncSelectedCam(track);
   }
 
   private async _enumerateDevices(): Promise<{
@@ -296,7 +286,7 @@ export class LiveKitTransport extends Transport {
         // "default"), not just an unconstrained restart. An unconstrained
         // restartTrack({}) does pick up today's actual default hardware, but
         // getSettings().deviceId then reports that device's own concrete
-        // hash, not "default" — so _syncSelectedMic/Cam would pin us to that
+        // hash, not "default" — so _syncMicTrack/Cam would pin us to that
         // one device and we'd lose "always follow the default" for the
         // *next* devicechange. Explicitly requesting { exact: "default" }
         // keeps getSettings().deviceId reporting "default" going forward.
@@ -308,8 +298,8 @@ export class LiveKitTransport extends Transport {
         // so the browser picks a fresh default.
         await track.restartTrack({});
       }
-      if (kind === "mic") await this._syncSelectedMic(track as LocalAudioTrack);
-      else await this._syncSelectedCam(track as LocalVideoTrack);
+      if (kind === "mic") await this._syncMicTrack(track as LocalAudioTrack);
+      else await this._syncCamTrack(track as LocalVideoTrack);
     } catch (e) {
       this._callbacks.onDeviceError?.(
         new DeviceError(
@@ -484,7 +474,7 @@ export class LiveKitTransport extends Transport {
       // whatever device is already active. { exact } forces the switch,
       // matching what Room.switchActiveDevice does for exactly this reason.
       await track.restartTrack({ deviceId: { exact: micId } });
-      await this._syncSelectedMic(track);
+      await this._syncMicTrack(track);
     } catch (e) {
       this._callbacks.onDeviceError?.(
         new DeviceError(
@@ -507,7 +497,7 @@ export class LiveKitTransport extends Transport {
     const track = this._localVideoTrack;
     try {
       await track.restartTrack({ deviceId: { exact: camId } });
-      await this._syncSelectedCam(track);
+      await this._syncCamTrack(track);
     } catch (e) {
       this._callbacks.onDeviceError?.(
         new DeviceError(
@@ -560,48 +550,63 @@ export class LiveKitTransport extends Transport {
   // what it does internally (livekit-client's own setTrackEnabled() calls
   // track.mute()/unmute() when a publication already exists, or creates +
   // publishes a fresh one otherwise), so there's no reason to duplicate that
-  // decision on our end. Either way, _syncSelectedMic() afterwards figures
-  // out what actually changed and reports it.
+  // decision on our end.
+  //
+  // Does the whole job its name promises: performs the real (fallible)
+  // operation, then — only once that's actually succeeded — flips
+  // _micEnabled, so isMicEnabled() reflects reality by the time this
+  // returns. That assignment has to land here, *before* the caller's
+  // _syncMicTrack() below fires onTrackStarted/Stopped: consumers reacting
+  // to that event (e.g. client-react's isMicEnabled resync) read this same
+  // getter, and need to see the new value, not whatever it was before this
+  // call. A thrown error skips the assignment entirely, leaving this
+  // reflecting reality.
+  //
+  // Returns the resulting track (or undefined — e.g. disabling with nothing
+  // currently capturing) for the caller to adopt/sync via _syncMicTrack().
+  private async _setMicEnabled(
+    enable: boolean
+  ): Promise<LocalAudioTrack | undefined> {
+    const existingTrack = this._localAudioTrack;
+
+    if (this._room.state === ConnectionState.Connected) {
+      await this._room.localParticipant.setMicrophoneEnabled(enable);
+      this._micEnabled = enable;
+      if (existingTrack) return existingTrack;
+      if (!enable) return undefined;
+      const pub = this._room.localParticipant.getTrackPublication(
+        Track.Source.Microphone
+      );
+      return pub?.track as LocalAudioTrack | undefined;
+    }
+
+    // Not connected: manage our own Room-agnostic pre-warmed track directly
+    // — there's no engine connection for setMicrophoneEnabled() to depend
+    // on yet.
+    if (existingTrack) {
+      if (enable) await existingTrack.unmute();
+      else await existingTrack.mute();
+      this._micEnabled = enable;
+      return existingTrack;
+    }
+    if (enable) {
+      const track = await createLocalAudioTrack();
+      this._micEnabled = enable;
+      return track;
+    }
+    // Disabling with nothing currently capturing — no fallible operation to
+    // perform, nothing to adopt, just record the (already-true) reality.
+    this._micEnabled = enable;
+    return undefined;
+  }
+
   async enableMic(enable: boolean): Promise<void> {
     try {
-      const existingTrack = this._localAudioTrack;
-
-      if (this._room.state === ConnectionState.Connected) {
-        await this._room.localParticipant.setMicrophoneEnabled(enable);
-        // Set right after the real (fallible) operation succeeds, but
-        // *before* _syncSelectedMic/_adoptMicTrack below fire
-        // onTrackStarted/Stopped — consumers reacting to that event (e.g.
-        // client-react's isMicEnabled resync) read this same getter, and
-        // need to see the new value, not whatever it was before this call.
-        // Still only reached on success: a thrown error skips straight to
-        // the catch below, leaving this reflecting reality.
-        this._micEnabled = enable;
-        if (existingTrack) {
-          await this._syncSelectedMic(existingTrack);
-        } else if (enable) {
-          const pub = this._room.localParticipant.getTrackPublication(
-            Track.Source.Microphone
-          );
-          if (pub?.track)
-            await this._adoptMicTrack(pub.track as LocalAudioTrack);
-        }
-      } else if (existingTrack) {
-        // Not connected: manage our own Room-agnostic pre-warmed track
-        // directly — there's no engine connection for setMicrophoneEnabled()
-        // to depend on yet.
-        if (enable) await existingTrack.unmute();
-        else await existingTrack.mute();
-        this._micEnabled = enable;
-        await this._syncSelectedMic(existingTrack);
-      } else if (enable) {
-        const track = await createLocalAudioTrack();
-        this._micEnabled = enable;
-        await this._adoptMicTrack(track);
-      } else {
-        // Disabling with nothing currently capturing — no fallible
-        // operation to gate on, just record the (already-true) reality.
-        this._micEnabled = enable;
-      }
+      const track = await this._setMicEnabled(enable);
+      // _syncMicTrack() re-assigning _localAudioTrack to itself (the
+      // existing-track cases) is a harmless no-op; it figures out what, if
+      // anything, actually changed and reports it.
+      if (track) await this._syncMicTrack(track);
     } catch (e) {
       logger.error("Failed to toggle mic", e);
       this._callbacks.onDeviceError?.(
@@ -614,41 +619,43 @@ export class LiveKitTransport extends Transport {
     }
   }
 
-  // Same shape as enableMic(); see its comment for the setCameraEnabled()/
-  // mute()/unmute() split.
+  // Same shape as enableMic(); see _setMicEnabled()'s comment for the
+  // setCameraEnabled()/mute()/unmute() split and the _camEnabled ordering.
+  private async _setCamEnabled(
+    enable: boolean
+  ): Promise<LocalVideoTrack | undefined> {
+    const existingTrack = this._localVideoTrack;
+
+    if (this._room.state === ConnectionState.Connected) {
+      await this._room.localParticipant.setCameraEnabled(enable);
+      this._camEnabled = enable;
+      if (existingTrack) return existingTrack;
+      if (!enable) return undefined;
+      const pub = this._room.localParticipant.getTrackPublication(
+        Track.Source.Camera
+      );
+      return pub?.track as LocalVideoTrack | undefined;
+    }
+
+    if (existingTrack) {
+      if (enable) await existingTrack.unmute();
+      else await existingTrack.mute();
+      this._camEnabled = enable;
+      return existingTrack;
+    }
+    if (enable) {
+      const track = await createLocalVideoTrack();
+      this._camEnabled = enable;
+      return track;
+    }
+    this._camEnabled = enable;
+    return undefined;
+  }
+
   async enableCam(enable: boolean): Promise<void> {
     try {
-      const existingTrack = this._localVideoTrack;
-
-      if (this._room.state === ConnectionState.Connected) {
-        await this._room.localParticipant.setCameraEnabled(enable);
-        // See enableMic()'s comment: set before _syncSelectedCam/
-        // _adoptCamTrack below fire onTrackStarted/Stopped, so anything
-        // reacting to that event sees the new value.
-        this._camEnabled = enable;
-        if (existingTrack) {
-          await this._syncSelectedCam(existingTrack);
-        } else if (enable) {
-          const pub = this._room.localParticipant.getTrackPublication(
-            Track.Source.Camera
-          );
-          if (pub?.track)
-            await this._adoptCamTrack(pub.track as LocalVideoTrack);
-        }
-      } else if (existingTrack) {
-        if (enable) await existingTrack.unmute();
-        else await existingTrack.mute();
-        this._camEnabled = enable;
-        await this._syncSelectedCam(existingTrack);
-      } else if (enable) {
-        const track = await createLocalVideoTrack();
-        this._camEnabled = enable;
-        await this._adoptCamTrack(track);
-      } else {
-        // Disabling with nothing currently capturing — no fallible
-        // operation to gate on, just record the (already-true) reality.
-        this._camEnabled = enable;
-      }
+      const track = await this._setCamEnabled(enable);
+      if (track) await this._syncCamTrack(track);
     } catch (e) {
       logger.error("Failed to toggle cam", e);
       this._callbacks.onDeviceError?.(
@@ -664,8 +671,11 @@ export class LiveKitTransport extends Transport {
   // Single entry point for "something about the mic/cam track may have
   // changed" — called after every acquire, mute/unmute, restart (device
   // switch or devicechange-driven reselect), and setMicrophoneEnabled()/
-  // setCameraEnabled(). Figures out what actually changed by diffing against
-  // last-known state, rather than making each call site work that out:
+  // setCameraEnabled(). Adopts `track` as the current local track (a no-op
+  // reassignment when the caller is re-syncing the same track it already
+  // held, e.g. after restartTrack()) and figures out what actually changed
+  // by diffing against last-known state, rather than making each call site
+  // work that out:
   //   - device: compares against _selectedMic/_selectedCam, fires
   //     onMicUpdated/onCamUpdated if the resolved device differs.
   //   - validity: compares the current "live" raw track (undefined while
@@ -675,7 +685,8 @@ export class LiveKitTransport extends Transport {
   //     mute (track → nothing), an unmute (nothing → track, same or restarted
   //     object), a device switch (track → different track), and a no-op
   //     repeat call (nothing to report either way).
-  private async _syncSelectedMic(track: LocalAudioTrack): Promise<void> {
+  private async _syncMicTrack(track: LocalAudioTrack): Promise<void> {
+    this._localAudioTrack = track;
     const deviceId = track.mediaStreamTrack.getSettings().deviceId;
     const mics = await this.getAllMics();
     const mic = mics.find((m) => m.deviceId === deviceId);
@@ -703,7 +714,8 @@ export class LiveKitTransport extends Transport {
     }
   }
 
-  private async _syncSelectedCam(track: LocalVideoTrack): Promise<void> {
+  private async _syncCamTrack(track: LocalVideoTrack): Promise<void> {
+    this._localVideoTrack = track;
     const deviceId = track.mediaStreamTrack.getSettings().deviceId;
     const cams = await this.getAllCams();
     const cam = cams.find((c) => c.deviceId === deviceId);
