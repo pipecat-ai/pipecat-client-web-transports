@@ -52,8 +52,7 @@ export type SmallWebRTCTransportConnectionOptions = {
   iceConfig?: IceConfig;
 };
 
-export interface SmallWebRTCTransportConstructorOptions
-  extends SmallWebRTCTransportConnectionOptions {
+export interface SmallWebRTCTransportConstructorOptions extends SmallWebRTCTransportConnectionOptions {
   iceServers?: RTCIceServer[];
   waitForICEGathering?: boolean;
   audioCodec?: string;
@@ -135,6 +134,7 @@ export class SmallWebRTCTransport extends Transport {
   private _candidateQueue: RTCIceCandidate[] = [];
   private __flushTimeout: ReturnType<typeof setTimeout> | null = null;
   private _flushDelay = 200;
+  private _lastNegotiationError: unknown = null;
 
   constructor(opts: SmallWebRTCTransportConstructorOptions = {}) {
     super();
@@ -385,16 +385,21 @@ export class SmallWebRTCTransport extends Transport {
 
     await this.mediaManager.connect();
 
+    // Wired up before startNewPeerConnection() so a negotiation failure
+    // during the very first attempt can reject this promise via stop(),
+    // rather than racing to set these fields only after the call returns.
+    const connected = new Promise<void>((resolve, reject) => {
+      this._connectResolved = resolve;
+      this._connectFailed = reject;
+    });
+
     await this.startNewPeerConnection();
 
     if (this._abortController?.signal.aborted) return;
 
     if (this.dc?.readyState !== "open") {
       // Wait until we are actually connected and the data channel is ready
-      await new Promise<void>((resolve, reject) => {
-        this._connectResolved = resolve;
-        this._connectFailed = reject;
-      });
+      await connected;
     }
 
     this.state = "connected";
@@ -583,7 +588,7 @@ export class SmallWebRTCTransport extends Transport {
     }
     if (this.reconnectionAttempts >= this.maxReconnectionAttempts) {
       logger.debug("Max reconnection attempts reached. Stopping transport.");
-      await this.stop();
+      await this.stop(this.buildTransportStartError());
       return;
     }
     this.isReconnecting = true;
@@ -707,10 +712,9 @@ export class SmallWebRTCTransport extends Transport {
     }
   }
 
-  /** Resolves true on a successful answer, false when a retry was scheduled. */
   private async negotiate(
     recreatePeerConnection: boolean = false
-  ): Promise<boolean> {
+  ): Promise<void> {
     if (!this.pc) {
       return Promise.reject("Peer connection is not initialized");
     }
@@ -791,25 +795,45 @@ export class SmallWebRTCTransport extends Transport {
       // @ts-ignore
       logger.debug(`Received answer for peer connection id ${answer.pc_id}`);
       await this.pc!.setRemoteDescription(answer);
-      return true;
+
+      // Only start sending queued ICE candidates once we have a successful
+      // answer; sending them against a failed offer just produces PATCHes
+      // with a null pc_id.
+      this._canSendIceCandidates = true;
+      await this.flushIceCandidates();
     } catch (e) {
+      this._lastNegotiationError = e;
+
+      // A 4xx from the offer endpoint (auth, quota, validation, ...) is
+      // deterministic. Retrying it on a timer cannot succeed, so give up
+      // immediately instead of burning through the reconnection attempts.
       if (isOfferRefused(e)) {
-        const error = new RTVIError(
-          `WebRTC offer rejected with status ${e.status}`,
-          e.status
-        );
-        logger.error(error.message);
-        this.state = "error";
-        await this.stop(error);
-        throw error;
+        logger.error(`WebRTC offer rejected with status ${e.status}`);
+        this.isReconnecting = false;
+        await this.stop(this.buildTransportStartError());
+        return;
       }
+
       logger.debug(
         `Reconnection attempt ${this.reconnectionAttempts} failed: ${e}`
       );
       this.isReconnecting = false;
       setTimeout(() => this.attemptReconnection(true), 2000);
-      return false;
     }
+  }
+
+  private buildTransportStartError(): TransportStartError {
+    const e = this._lastNegotiationError;
+    const error = new TransportStartError(
+      isOfferRefused(e)
+        ? `WebRTC offer rejected with status ${e.status}`
+        : `Offer request failed${e ? `: ${String(e)}` : "."}`
+    );
+    (error as Error & { cause?: unknown }).cause = e;
+    (error as Error & { status?: unknown }).status = (
+      e as Error & { status?: unknown }
+    )?.status;
+    return error;
   }
 
   private addInitialTransceivers() {
@@ -850,10 +874,7 @@ export class SmallWebRTCTransport extends Transport {
     this.addInitialTransceivers();
     this.dc = this.createDataChannel("chat", { ordered: true });
     await this.addUserMedia();
-    const negotiated = await this.negotiate(recreatePeerConnection);
-    if (!negotiated) return;
-    this._canSendIceCandidates = true;
-    await this.flushIceCandidates();
+    await this.negotiate(recreatePeerConnection);
   }
 
   private async addUserMedia(): Promise<void> {
@@ -978,10 +999,14 @@ export class SmallWebRTCTransport extends Transport {
     pc.close();
   }
 
-  private async stop(error?: RTVIError): Promise<void> {
+  private async stop(error?: TransportStartError): Promise<void> {
     if (!this.pc) {
       logger.debug("Peer connection is already closed or null.");
       return;
+    }
+
+    if (error) {
+      this.state = "error";
     }
 
     if (this.dc) {
@@ -997,6 +1022,7 @@ export class SmallWebRTCTransport extends Transport {
     this.pc_id = null;
     this.reconnectionAttempts = 0;
     this.isReconnecting = false;
+    this._lastNegotiationError = null;
     this._callbacks.onDisconnected?.();
 
     this._candidateQueue = [];
