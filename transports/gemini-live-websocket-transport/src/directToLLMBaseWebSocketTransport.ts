@@ -31,6 +31,13 @@ export abstract class DirectToLLMBaseWebSocketTransport extends Transport {
 
   constructor(service_options: LLMServiceOptions, manager: MediaManager) {
     super();
+    console.warn(
+      "[@pipecat-ai/gemini-live-websocket-transport] This package " +
+        "is no longer supported and will not receive further " +
+        "updates. See " +
+        "https://github.com/pipecat-ai/pipecat-client-web-transports " +
+        "for details."
+    );
     this._service_options = service_options;
     this._mediaManager = manager;
     this._mediaManager.setUserAudioCallback(

@@ -134,6 +134,15 @@ Typical media flow using a LiveKitTransport:
 
 ### [GeminiLiveWebSocketTransport](transports/gemini-live-websocket-transport/README.md)
 
+> **Deprecated:** This transport connects directly from the browser
+> to a third-party LLM API rather than through a Pipecat server, so
+> it can't use most Pipecat server-side features and drifts out of
+> sync with that API over time. It is no longer supported and will
+> not receive further updates. Published npm versions will remain
+> installable, but since this transport depends directly on a
+> third-party API that changes over time, it may stop working
+> correctly as that API evolves.
+
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/gemini)
 [![README](https://img.shields.io/badge/README-goldenrod)](transports/gemini-live-websocket-transport/README.md)
 [![Demo](https://img.shields.io/badge/Demo-forestgreen)](examples/directToLLMTransports/README.md)
@@ -156,7 +165,16 @@ Media flow using a GeminiLiveWebSocketTransport:
   └────────────────────────────────────┘
 ```
 
-### [OpenAIRealTimeWebRTCTransport](transports/gemini-live-websocket-transport/README.md)
+### [OpenAIRealTimeWebRTCTransport](transports/openai-realtime-webrtc-transport/README.md)
+
+> **Deprecated:** This transport connects directly from the browser
+> to a third-party LLM API rather than through a Pipecat server, so
+> it can't use most Pipecat server-side features and drifts out of
+> sync with that API over time. It is no longer supported and will
+> not receive further updates. Published npm versions will remain
+> installable, but since this transport depends directly on a
+> third-party API that changes over time, it may stop working
+> correctly as that API evolves.
 
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/openai-webrtc)
 [![README](https://img.shields.io/badge/README-goldenrod)](transports/openai-realtime-webrtc-transport/README.md)

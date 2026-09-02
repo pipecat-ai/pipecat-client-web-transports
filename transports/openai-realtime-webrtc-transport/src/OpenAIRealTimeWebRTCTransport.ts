@@ -128,6 +128,12 @@ export class OpenAIRealTimeWebRTCTransport extends Transport {
 
   constructor(service_options: OpenAIServiceOptions) {
     super();
+    console.warn(
+      "[@pipecat-ai/openai-realtime-webrtc-transport] This package is " +
+        "no longer supported and will not receive further updates. See " +
+        "https://github.com/pipecat-ai/pipecat-client-web-transports " +
+        "for details."
+    );
     this._service_options = service_options;
   }
 
