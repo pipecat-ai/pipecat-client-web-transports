@@ -14,8 +14,24 @@ export class FakeRTCDataChannel {
   readyState: string = "connecting";
   send = vi.fn();
   close = vi.fn();
-  addEventListener = vi.fn();
-  removeEventListener = vi.fn();
+
+  // Real per-instance listener registry so tests can simulate the browser
+  // actually firing "open" / "close" — e.g. to drive the keepalive-interval
+  // setup/teardown in createDataChannel().
+  private listeners = new Map<string, Set<(ev?: unknown) => void>>();
+
+  addEventListener = vi.fn((type: string, cb: (ev?: unknown) => void) => {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type)!.add(cb);
+  });
+  removeEventListener = vi.fn((type: string, cb: (ev?: unknown) => void) => {
+    this.listeners.get(type)?.delete(cb);
+  });
+
+  /** Simulates the browser firing `type` on this channel. */
+  dispatch(type: string, ev?: unknown) {
+    this.listeners.get(type)?.forEach((cb) => cb(ev));
+  }
 }
 
 export class FakeRTCPeerConnection {
@@ -45,7 +61,13 @@ export class FakeRTCPeerConnection {
   addTransceiver = vi.fn();
   getTransceivers = vi.fn(() => []);
   getSenders = vi.fn(() => []);
-  createDataChannel = vi.fn(() => new FakeRTCDataChannel());
+
+  /** The most recently created data channel, for tests to reach into. */
+  lastDataChannel: FakeRTCDataChannel | null = null;
+  createDataChannel = vi.fn(() => {
+    this.lastDataChannel = new FakeRTCDataChannel();
+    return this.lastDataChannel;
+  });
 
   addEventListener = vi.fn((type: string, cb: () => void) => {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set());

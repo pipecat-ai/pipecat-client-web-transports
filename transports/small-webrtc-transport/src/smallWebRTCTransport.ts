@@ -973,6 +973,10 @@ export class SmallWebRTCTransport extends Transport {
       }
       // @ts-ignore
       this.keepAliveInterval = setInterval(() => {
+        // This interval can fire while the channel is "closing", before it
+        // gets cleared on "close". Chrome doesn't mind sending a message
+        // then, but Safari will throw an InvalidStateError.
+        if (dc.readyState !== "open") return;
         const message = "ping: " + new Date().getTime();
         dc.send(message);
       }, 1000);
