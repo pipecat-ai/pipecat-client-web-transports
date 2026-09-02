@@ -507,8 +507,9 @@ export class SmallWebRTCTransport extends Transport {
     logger.debug(`iceConnectionState: ${pc.iceConnectionState}`);
 
     pc.addEventListener("signalingstatechange", () => {
-      logger.debug(`signalingState: ${this.pc!.signalingState}`);
-      if (this.pc!.signalingState == "stable") {
+      if (pc !== this.pc) return;
+      logger.debug(`signalingState: ${pc.signalingState}`);
+      if (pc.signalingState == "stable") {
         this.handleReconnectionCompleted();
       }
     });

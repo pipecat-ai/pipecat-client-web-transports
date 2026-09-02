@@ -26,19 +26,46 @@ export class FakeRTCPeerConnection {
   sctp: { maxMessageSize: number } | null = null;
   onicecandidate: ((event: { candidate: unknown }) => void) | null = null;
 
+  // Real per-instance listener registry (rather than a bare vi.fn() no-op)
+  // so tests can simulate the browser actually firing events — e.g. close()
+  // firing "signalingstatechange" on itself, which is what a stale peer
+  // connection does mid-reconnection.
+  private listeners = new Map<string, Set<() => void>>();
+
   createOffer = vi.fn(async () => ({ type: "offer", sdp: "v=0\r\n" }));
   setLocalDescription = vi.fn(async (desc: RTCSessionDescriptionInit) => {
     this.localDescription = desc;
   });
-  setRemoteDescription = vi.fn(async () => {});
+  setRemoteDescription = vi.fn(async () => {
+    // Real browsers land in "stable" once a valid answer is applied, and
+    // fire signalingstatechange as part of that transition.
+    this.signalingState = "stable";
+    this.dispatch("signalingstatechange");
+  });
   addTransceiver = vi.fn();
-  addEventListener = vi.fn();
-  removeEventListener = vi.fn();
   getTransceivers = vi.fn(() => []);
   getSenders = vi.fn(() => []);
-  close = vi.fn();
-
   createDataChannel = vi.fn(() => new FakeRTCDataChannel());
+
+  addEventListener = vi.fn((type: string, cb: () => void) => {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type)!.add(cb);
+  });
+  removeEventListener = vi.fn((type: string, cb: () => void) => {
+    this.listeners.get(type)?.delete(cb);
+  });
+
+  /** Simulates the browser firing `type` on this connection. */
+  dispatch(type: string) {
+    this.listeners.get(type)?.forEach((cb) => cb());
+  }
+
+  close = vi.fn(() => {
+    // Real browsers transition signalingState to "closed" and fire
+    // signalingstatechange when close() is called.
+    this.signalingState = "closed";
+    this.dispatch("signalingstatechange");
+  });
 }
 
 /**
