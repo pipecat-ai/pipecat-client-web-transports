@@ -1,5 +1,10 @@
 # Gemini Live Websocket Transport
 
+> **Deprecated:** This package is no longer supported and will not
+> receive further updates. See
+> https://github.com/pipecat-ai/pipecat-client-web-transports for
+> details.
+
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/gemini)
 [![Demo](https://img.shields.io/badge/Demo-forestgreen)](examples/directToLLMTransports/README.md)
 ![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/gemini-live-websocket-transport)
