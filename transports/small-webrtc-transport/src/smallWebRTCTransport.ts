@@ -52,8 +52,7 @@ export type SmallWebRTCTransportConnectionOptions = {
   iceConfig?: IceConfig;
 };
 
-export interface SmallWebRTCTransportConstructorOptions
-  extends SmallWebRTCTransportConnectionOptions {
+export interface SmallWebRTCTransportConstructorOptions extends SmallWebRTCTransportConnectionOptions {
   iceServers?: RTCIceServer[];
   waitForICEGathering?: boolean;
   audioCodec?: string;
@@ -85,6 +84,13 @@ class SignallingMessageObject {
     this.message = message;
   }
 }
+
+// A 4xx means the server refused this offer; re-sending it can't succeed.
+const isOfferRefused = (e: unknown): e is Response =>
+  typeof Response !== "undefined" &&
+  e instanceof Response &&
+  e.status >= 400 &&
+  e.status < 500;
 
 const AUDIO_TRANSCEIVER_INDEX = 0;
 const VIDEO_TRANSCEIVER_INDEX = 1;
@@ -128,6 +134,7 @@ export class SmallWebRTCTransport extends Transport {
   private _candidateQueue: RTCIceCandidate[] = [];
   private __flushTimeout: ReturnType<typeof setTimeout> | null = null;
   private _flushDelay = 200;
+  private _lastNegotiationError: unknown = null;
 
   constructor(opts: SmallWebRTCTransportConstructorOptions = {}) {
     super();
@@ -378,16 +385,21 @@ export class SmallWebRTCTransport extends Transport {
 
     await this.mediaManager.connect();
 
+    // Wired up before startNewPeerConnection() so a negotiation failure
+    // during the very first attempt can reject this promise via stop(),
+    // rather than racing to set these fields only after the call returns.
+    const connected = new Promise<void>((resolve, reject) => {
+      this._connectResolved = resolve;
+      this._connectFailed = reject;
+    });
+
     await this.startNewPeerConnection();
 
     if (this._abortController?.signal.aborted) return;
 
     if (this.dc?.readyState !== "open") {
       // Wait until we are actually connected and the data channel is ready
-      await new Promise<void>((resolve, reject) => {
-        this._connectResolved = resolve;
-        this._connectFailed = reject;
-      });
+      await connected;
     }
 
     this.state = "connected";
@@ -495,8 +507,9 @@ export class SmallWebRTCTransport extends Transport {
     logger.debug(`iceConnectionState: ${pc.iceConnectionState}`);
 
     pc.addEventListener("signalingstatechange", () => {
-      logger.debug(`signalingState: ${this.pc!.signalingState}`);
-      if (this.pc!.signalingState == "stable") {
+      if (pc !== this.pc) return;
+      logger.debug(`signalingState: ${pc.signalingState}`);
+      if (pc.signalingState == "stable") {
         this.handleReconnectionCompleted();
       }
     });
@@ -566,13 +579,17 @@ export class SmallWebRTCTransport extends Transport {
   private async attemptReconnection(
     recreatePeerConnection: boolean = false
   ): Promise<void> {
+    if (this._abortController?.signal.aborted) {
+      logger.debug("Transport disconnected, skipping reconnection.");
+      return;
+    }
     if (this.isReconnecting) {
       logger.debug("Reconnection already in progress, skipping.");
       return;
     }
     if (this.reconnectionAttempts >= this.maxReconnectionAttempts) {
       logger.debug("Max reconnection attempts reached. Stopping transport.");
-      await this.stop();
+      await this.stop(this.buildTransportStartError());
       return;
     }
     this.isReconnecting = true;
@@ -580,15 +597,19 @@ export class SmallWebRTCTransport extends Transport {
     logger.debug(`Reconnection attempt ${this.reconnectionAttempts}...`);
     // aiortc does not seem to work when just trying to restart the ice
     // so for this case we create a new peer connection on both sides
-    if (recreatePeerConnection) {
-      const oldPC = this.pc;
-      await this.startNewPeerConnection(recreatePeerConnection);
-      if (oldPC) {
-        logger.debug("closing old peer connection");
-        this.closePeerConnection(oldPC);
+    try {
+      if (recreatePeerConnection) {
+        const oldPC = this.pc;
+        await this.startNewPeerConnection(recreatePeerConnection);
+        if (oldPC) {
+          logger.debug("closing old peer connection");
+          this.closePeerConnection(oldPC);
+        }
+      } else {
+        await this.negotiate();
       }
-    } else {
-      await this.negotiate();
+    } catch (e) {
+      logger.error(`Reconnection stopped: ${e}`);
     }
   }
 
@@ -775,13 +796,45 @@ export class SmallWebRTCTransport extends Transport {
       // @ts-ignore
       logger.debug(`Received answer for peer connection id ${answer.pc_id}`);
       await this.pc!.setRemoteDescription(answer);
+
+      // Only start sending queued ICE candidates once we have a successful
+      // answer; sending them against a failed offer just produces PATCHes
+      // with a null pc_id.
+      this._canSendIceCandidates = true;
+      await this.flushIceCandidates();
     } catch (e) {
+      this._lastNegotiationError = e;
+
+      // A 4xx from the offer endpoint (auth, quota, validation, ...) is
+      // deterministic. Retrying it on a timer cannot succeed, so give up
+      // immediately instead of burning through the reconnection attempts.
+      if (isOfferRefused(e)) {
+        logger.error(`WebRTC offer rejected with status ${e.status}`);
+        this.isReconnecting = false;
+        await this.stop(this.buildTransportStartError());
+        return;
+      }
+
       logger.debug(
         `Reconnection attempt ${this.reconnectionAttempts} failed: ${e}`
       );
       this.isReconnecting = false;
       setTimeout(() => this.attemptReconnection(true), 2000);
     }
+  }
+
+  private buildTransportStartError(): TransportStartError {
+    const e = this._lastNegotiationError;
+    const error = new TransportStartError(
+      isOfferRefused(e)
+        ? `WebRTC offer rejected with status ${e.status}`
+        : `Offer request failed${e ? `: ${String(e)}` : "."}`
+    );
+    (error as Error & { cause?: unknown }).cause = e;
+    (error as Error & { status?: unknown }).status = (
+      e as Error & { status?: unknown }
+    )?.status;
+    return error;
   }
 
   private addInitialTransceivers() {
@@ -823,9 +876,6 @@ export class SmallWebRTCTransport extends Transport {
     this.dc = this.createDataChannel("chat", { ordered: true });
     await this.addUserMedia();
     await this.negotiate(recreatePeerConnection);
-    // Sending the ice candidates
-    this._canSendIceCandidates = true;
-    await this.flushIceCandidates();
   }
 
   private async addUserMedia(): Promise<void> {
@@ -923,6 +973,10 @@ export class SmallWebRTCTransport extends Transport {
       }
       // @ts-ignore
       this.keepAliveInterval = setInterval(() => {
+        // This interval can fire while the channel is "closing", before it
+        // gets cleared on "close". Chrome doesn't mind sending a message
+        // then, but Safari will throw an InvalidStateError.
+        if (dc.readyState !== "open") return;
         const message = "ping: " + new Date().getTime();
         dc.send(message);
       }, 1000);
@@ -950,10 +1004,14 @@ export class SmallWebRTCTransport extends Transport {
     pc.close();
   }
 
-  private async stop(): Promise<void> {
+  private async stop(error?: TransportStartError): Promise<void> {
     if (!this.pc) {
       logger.debug("Peer connection is already closed or null.");
       return;
+    }
+
+    if (error) {
+      this.state = "error";
     }
 
     if (this.dc) {
@@ -969,13 +1027,14 @@ export class SmallWebRTCTransport extends Transport {
     this.pc_id = null;
     this.reconnectionAttempts = 0;
     this.isReconnecting = false;
+    this._lastNegotiationError = null;
     this._callbacks.onDisconnected?.();
 
     this._candidateQueue = [];
     this._canSendIceCandidates = false;
 
     if (this._connectFailed) {
-      this._connectFailed(new TransportStartError());
+      this._connectFailed(error ?? new TransportStartError());
     }
     this._connectFailed = null;
     this._connectResolved = null;
