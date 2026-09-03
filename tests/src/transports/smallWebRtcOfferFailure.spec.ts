@@ -82,6 +82,7 @@ describe("SmallWebRTCTransport offer-failure handling (issue #173)", () => {
     expect(
       ((caught as Error & { cause?: unknown }).cause as Response).status
     ).toBe(429);
+    expect((caught as Error & { status?: unknown }).status).toBe(429);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // Advancing well past the 2s blind-retry delay must not produce a second
@@ -133,6 +134,62 @@ describe("SmallWebRTCTransport offer-failure handling (issue #173)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect((caught as Error).message).toContain("network unreachable");
     expect((caught as Error & { cause?: unknown }).cause).toBe(networkError);
+  });
+
+  test("a 5xx offer response is not treated as refused: it still retries, and ICE candidates still wait for a real answer", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(null, { status: 503, statusText: "Service Unavailable" })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+
+    const connectPromise = transport.connect();
+    const caughtPromise = connectPromise.catch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // A queued ICE candidate should not be flushed while the offer keeps
+    // failing, even though a 5xx (unlike a 4xx) is retried rather than
+    // treated as a deterministic refusal.
+    getCurrentPc().onicecandidate?.({ candidate: fakeIceCandidate });
+    await vi.advanceTimersByTimeAsync(300); // 200ms flush debounce
+    expect(fetchMock).toHaveBeenCalledTimes(1); // still just the offer POST
+
+    // The 2s retry timer fires next, proving a 5xx is treated as
+    // retryable rather than a deterministic refusal.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    void caughtPromise;
+  });
+
+  test("disconnect() cancels a pending retry (no further offer requests after teardown)", async () => {
+    const networkError = new TypeError("network unreachable");
+    const fetchMock = vi.fn(async () => {
+      throw networkError;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+
+    const connectPromise = transport.connect();
+    const caughtPromise = connectPromise.catch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await transport.disconnect();
+    await caughtPromise;
+
+    // The 2s retry scheduled by the first failure must not fire a second
+    // offer request once the transport has been torn down.
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("a failed offer does not flush queued ICE candidates (no PATCH follows the failed POST)", async () => {
