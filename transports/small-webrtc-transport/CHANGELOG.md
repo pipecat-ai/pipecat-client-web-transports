@@ -10,13 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
-* Fix SmallWebRTC to return an error in _connectFailed rejection ([bc69b59](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/bc69b59a3a6163782627f3ec5fe20f6fb02ea1e5))
-* Fix SmallWebRTC to return an error in _connectFailed rejection ([e462176](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/e46217666b8be0528a9a394a7ad7909046ac21fc))
-* **small-webrtc-transport:** guard keepalive ping against InvalidStateError in Safari ([ad4291b](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/ad4291bf4c0dc75720c9cba918baf1c192ec0d68))
-* **small-webrtc-transport:** guard keepalive ping against InvalidStateError in Safari ([76c782a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/76c782a4a8920cdb75230b02cec3cef6154df484)), closes [#63](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/63)
-* **small-webrtc-transport:** ignore signalingstatechange events from stale peer connections ([1b9152d](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/1b9152dada09ab6a112690dcd4ec23c68caf9a4b)), closes [#169](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/169)
-* **small-webrtc-transport:** set state to error, fix a connect() race, and expose status/cause ([8e9f5e5](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/8e9f5e55933bb273883d8639d38e472cbab03a7a)), closes [#173](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/173)
-* **small-webrtc:** stop retrying refused offers and surface the HTTP status ([d757039](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/d7570392db5e30e120959cd3d244c1bd6d9c5652))
+* Fix SmallWebRTC to return an error in `_connectFailed` rejection ([e462176](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/e46217666b8be0528a9a394a7ad7909046ac21fc))
+* Guard keepalive ping against `InvalidStateError` in Safari ([76c782a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/76c782a4a8920cdb75230b02cec3cef6154df484)), closes [#63](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/63)
+* Ignore `signalingstatechange` events from stale peer connections ([1b9152d](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/1b9152dada09ab6a112690dcd4ec23c68caf9a4b)), closes [#169](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/169)
+* Fixed issues with offer failures/rejections to set state to `error`, fix a `connect()` race condition, expose the  `status`/`cause` from the original `Error` and stop retrying if the offer is refused ([8e9f5e5](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/8e9f5e55933bb273883d8639d38e472cbab03a7a)), closes [#173](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/173)
 
 ## [1.10.6](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.5...small-webrtc-transport-v1.10.6) (2026-07-16)
 
