@@ -5,6 +5,16 @@ All notable changes to **Pipecat OpenAIRealTimeWebRTCTransport** will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.8](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/openai-realtime-webrtc-transport-v1.5.7...openai-realtime-webrtc-transport-v1.5.8) (2026-09-09)
+
+### ⚠ DEPRECATED
+
+**This package is no longer supported and will not receive further updates.** It connects directly from the browser to a third-party LLM API, which we can no longer commit to keeping in sync as that API evolves. See the [repository README](https://github.com/pipecat-ai/pipecat-client-web-transports) for details.
+
+### Bug Fixes
+
+* add a runtime console warning on construction announcing the deprecation
+
 ## [1.5.7](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/openai-realtime-webrtc-transport-v1.5.6...openai-realtime-webrtc-transport-v1.5.7) (2026-07-16)
 
 
