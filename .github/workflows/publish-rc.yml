@@ -9,9 +9,8 @@ on:
         type: choice
         options:
           - daily
-          - gemini-live-websocket-transport
+          - livekit-transport
           - moq-transport
-          - openai-realtime-webrtc-transport
           - small-webrtc-transport
           - websocket-transport
       preid:

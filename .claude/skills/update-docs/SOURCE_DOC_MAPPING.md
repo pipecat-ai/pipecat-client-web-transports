@@ -46,12 +46,6 @@ change: the name has left that package's public API.
 
 Nothing else. Each package is small and almost entirely public surface.
 
-## Base classes
-
-| File | Pages to check |
-| --- | --- |
-| `transports/gemini-live-websocket-transport/src/directToLLMBaseWebSocketTransport.ts` | `api-reference/client/js/transports/gemini.mdx`. It is not re-exported from the package root, but it defines `LLMServiceOptions`, which `GeminiLLMServiceOptions` extends and which the page documents field by field. Its constructor signature is therefore observable even though the class is not. |
-
 ## Non-standard locations
 
 | File | Page |
@@ -66,9 +60,7 @@ so use this table rather than deriving it:
 | Package directory | Page |
 | --- | --- |
 | `transports/daily/` | `api-reference/client/js/transports/daily.mdx` |
-| `transports/gemini-live-websocket-transport/` | `api-reference/client/js/transports/gemini.mdx` |
 | `transports/moq-transport/` | `api-reference/client/js/transports/moq.mdx` |
-| `transports/openai-realtime-webrtc-transport/` | `api-reference/client/js/transports/openai-webrtc.mdx` |
 | `transports/small-webrtc-transport/` | `api-reference/client/js/transports/small-webrtc.mdx` |
 | `transports/websocket-transport/` | `api-reference/client/js/transports/websocket.mdx` |
 

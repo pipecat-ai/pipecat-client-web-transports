@@ -23,14 +23,6 @@ export default defineConfig({
         "../transports/websocket-transport/src/index.ts",
         import.meta.url
       ).pathname,
-      "@pipecat-ai/openai-realtime-webrtc-transport": new URL(
-        "../transports/openai-realtime-webrtc-transport/src/index.ts",
-        import.meta.url
-      ).pathname,
-      "@pipecat-ai/gemini-live-websocket-transport": new URL(
-        "../transports/gemini-live-websocket-transport/src/index.ts",
-        import.meta.url
-      ).pathname,
       "@pipecat-ai/moq-transport": new URL(
         "../transports/moq-transport/src/index.ts",
         import.meta.url

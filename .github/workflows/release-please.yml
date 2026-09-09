@@ -17,10 +17,8 @@ jobs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       paths_released: ${{ steps.release.outputs.paths_released }}
       daily_release_created: ${{ steps.release.outputs['daily-transport--release_created'] }}
-      gemini_release_created: ${{ steps.release.outputs['gemini-live-websocket-transport--release_created'] }}
       livekit_release_created: ${{ steps.release.outputs['livekit-transport--release_created'] }}
       moq_release_created: ${{ steps.release.outputs['moq-transport--release_created'] }}
-      openai_release_created: ${{ steps.release.outputs['openai-realtime-webrtc-transport--release_created'] }}
       small_webrtc_release_created: ${{ steps.release.outputs['small-webrtc-transport--release_created'] }}
       websocket_release_created: ${{ steps.release.outputs['websocket-transport--release_created'] }}
     steps:
@@ -47,24 +45,6 @@ jobs:
       - run: npm run build -w @pipecat-ai/daily-transport
       - run: npm publish --provenance
         working-directory: transports/daily
-
-  publish-gemini:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created == 'true' && contains(fromJson(needs.release-please.outputs.paths_released), 'transports/gemini-live-websocket-transport') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-      - run: npm install --ignore-scripts
-      - run: npm run build -w @pipecat-ai/gemini-live-websocket-transport
-      - run: npm publish --provenance
-        working-directory: transports/gemini-live-websocket-transport
 
   publish-livekit:
     needs: release-please
@@ -101,24 +81,6 @@ jobs:
       - run: npm run build -w @pipecat-ai/moq-transport
       - run: npm publish --provenance
         working-directory: transports/moq-transport
-
-  publish-openai:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created == 'true' && contains(fromJson(needs.release-please.outputs.paths_released), 'transports/openai-realtime-webrtc-transport') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-      - run: npm install --ignore-scripts
-      - run: npm run build -w @pipecat-ai/openai-realtime-webrtc-transport
-      - run: npm publish --provenance
-        working-directory: transports/openai-realtime-webrtc-transport
 
   publish-small-webrtc:
     needs: release-please
