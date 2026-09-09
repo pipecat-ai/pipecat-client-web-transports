@@ -7,13 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.5.8](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/openai-realtime-webrtc-transport-v1.5.7...openai-realtime-webrtc-transport-v1.5.8) (2026-09-09)
 
-
-### Miscellaneous Chores
-
-* Bump gemini and openai transport versions to 1.5.8 to prep patch release ([f5b5ffb](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/f5b5ffbe479e1006b0cd8a0ce0ac83361b8abcee))
-
-## [1.5.8](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/openai-realtime-webrtc-transport-v1.5.7...openai-realtime-webrtc-transport-v1.5.8) (2026-09-09)
-
 ### ⚠ DEPRECATED
 
 **This package is no longer supported and will not receive further updates.** It connects directly from the browser to a third-party LLM API, which we can no longer commit to keeping in sync as that API evolves. See the [repository README](https://github.com/pipecat-ai/pipecat-client-web-transports) for details.
