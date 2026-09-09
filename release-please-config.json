@@ -11,11 +11,6 @@
       "package-name": "@pipecat-ai/daily-transport",
       "changelog-path": "CHANGELOG.md"
     },
-    "transports/gemini-live-websocket-transport": {
-      "component": "gemini-live-websocket-transport",
-      "package-name": "@pipecat-ai/gemini-live-websocket-transport",
-      "changelog-path": "CHANGELOG.md"
-    },
     "transports/livekit-transport": {
       "component": "livekit-transport",
       "package-name": "@pipecat-ai/livekit-transport",
@@ -24,11 +19,6 @@
     "transports/moq-transport": {
       "component": "moq-transport",
       "package-name": "@pipecat-ai/moq-transport",
-      "changelog-path": "CHANGELOG.md"
-    },
-    "transports/openai-realtime-webrtc-transport": {
-      "component": "openai-realtime-webrtc-transport",
-      "package-name": "@pipecat-ai/openai-realtime-webrtc-transport",
       "changelog-path": "CHANGELOG.md"
     },
     "transports/small-webrtc-transport": {

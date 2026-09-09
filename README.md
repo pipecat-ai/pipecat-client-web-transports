@@ -3,7 +3,7 @@
 [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/transport)
 [![Discord](https://img.shields.io/discord/1239284677165056021)](https://discord.gg/pipecat)
 
-A mono-repo to house the various supported Transport options to be used with the pipecat-client-web library. Currently, there are seven transports: `small-webrtc-transport`, `daily-transport`, `websocket-transport`, `gemini-live-websocket-transport`, `openai-realtime-webrtc-transport`, `livekit-transport` and `moq-transport`.
+A mono-repo to house the various supported Transport options to be used with the pipecat-client-web library. Currently, there are five transports: `small-webrtc-transport`, `daily-transport`, `websocket-transport`, `livekit-transport` and `moq-transport`.
 
 ## Documentation
 
@@ -132,72 +132,6 @@ Typical media flow using a LiveKitTransport:
 
 ```
 
-### [GeminiLiveWebSocketTransport](transports/gemini-live-websocket-transport/README.md)
-
-> **Deprecated:** This transport connects directly from the browser
-> to a third-party LLM API rather than through a Pipecat server, so
-> it can't use most Pipecat server-side features and drifts out of
-> sync with that API over time. It is no longer supported and will
-> not receive further updates. Published npm versions will remain
-> installable, but since this transport depends directly on a
-> third-party API that changes over time, it may stop working
-> correctly as that API evolves.
-
-[![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/gemini)
-[![README](https://img.shields.io/badge/README-goldenrod)](transports/gemini-live-websocket-transport/README.md)
-[![Demo](https://img.shields.io/badge/Demo-forestgreen)](examples/directToLLMTransports/README.md)
-[![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/gemini-live-websocket-transport)](https://www.npmjs.com/package/@pipecat-ai/gemini-live-websocket-transport)
-
-This Transport extends the [RealTimeWebSocketTransport](transports/realtime-websocket-transport/README) and connects directly to Gemini over a WebSocket connection using the Multimodal Live API. This type of transport is great for testing different services out without the need to build a server component. Just be aware that it is insecure since you will need to have access to your Gemini API Key client-side so not probably something you want to use in your production app.
-
-Media flow using a GeminiLiveWebSocketTransport:
-
-```
-                Client                                      Server
-  ┌────────────────────────────────────┐
-  │                                    │
-  │           PipecatClient            │                ┌──────────────┐
-  │                                    │    Media over  │              │
-  │  ┌──────────────────────────────┐  │    WebSocket   │    Gemini    │
-  │  │ GeminiLiveWebSocketTransport │◄─┼────────────────┼─►  Server    │
-  │  └──────────────────────────────┘  │                │              │
-  │                                    │                └──────────────┘
-  └────────────────────────────────────┘
-```
-
-### [OpenAIRealTimeWebRTCTransport](transports/openai-realtime-webrtc-transport/README.md)
-
-> **Deprecated:** This transport connects directly from the browser
-> to a third-party LLM API rather than through a Pipecat server, so
-> it can't use most Pipecat server-side features and drifts out of
-> sync with that API over time. It is no longer supported and will
-> not receive further updates. Published npm versions will remain
-> installable, but since this transport depends directly on a
-> third-party API that changes over time, it may stop working
-> correctly as that API evolves.
-
-[![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai/client/js/transports/openai-webrtc)
-[![README](https://img.shields.io/badge/README-goldenrod)](transports/openai-realtime-webrtc-transport/README.md)
-[![Demo](https://img.shields.io/badge/Demo-forestgreen)](examples/directToLLMTransports/README.md)
-[![NPM Version](https://img.shields.io/npm/v/@pipecat-ai/openai-realtime-webrtc-transport)](https://www.npmjs.com/package/@pipecat-ai/openai-realtime-webrtc-transport)
-
-This Transport connects directly to OpenAI over a WebRTC connection using the RealTime API. This type of transport is great for testing different services out without the need to build a server component. Just be aware that it is insecure since you will need to have access to your OpenAI API Key client-side so not probably something you want to use in your production app. It does not implement the Ephemeral Token process.
-
-Media flow using a OpenAIRealTimeWebRTCTransport:
-
-```
-                Client                                      Server
-  ┌─────────────────────────────────────┐
-  │                                     │
-  │          PipecatClient              │                ┌──────────────┐
-  │                                     │    Media over  │              │
-  │  ┌───────────────────────────────┐  │      WebRTC    │    OpenAI    │
-  │  │ OpenAIRealTimeWebRTCTransport │◄─┼────────────────┼─►  Server    │
-  │  └───────────────────────────────┘  │                │              │
-  │                                     │                └──────────────┘
-  └─────────────────────────────────────┘
-```
-
 ### [MoqTransport](/transports/moq-transport/README.md)
 
 [![Docs](https://img.shields.io/badge/documentation-blue)](https://docs.pipecat.ai/client/js/transports)
@@ -233,6 +167,10 @@ Typical media flow using a MoqTransport:
                                        └────────────────────────────────────────────┘
 
 ```
+
+## No Longer Supported
+
+`gemini-live-websocket-transport` and `openai-realtime-webrtc-transport` were removed from this repo as of their `1.5.8` releases. Both connected directly from the browser to a third-party LLM API rather than through a Pipecat server, saw essentially no adoption, and couldn't be kept in sync with those APIs as they changed, so they're no longer supported or maintained. The last published npm versions remain installable (`@pipecat-ai/gemini-live-websocket-transport@1.5.8`, `@pipecat-ai/openai-realtime-webrtc-transport@1.5.8`), but are not guaranteed to keep working as the underlying APIs evolve.
 
 ## Local Development
 
