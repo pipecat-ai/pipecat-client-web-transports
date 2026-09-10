@@ -688,6 +688,8 @@ export class MoqTransport extends Transport {
   private _waitForBotAudio(timeoutMs = 10_000): Promise<void> {
     const source = this._audioSource;
     const broadcast = this._watchBroadcast;
+    // Both are set in _connect(); if they're null
+    // (bc a `disconnect` happened); resolve immediately;
     if (!source || !broadcast) return Promise.resolve();
     return new Promise((resolve) => {
       let done = false;
