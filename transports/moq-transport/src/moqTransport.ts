@@ -671,13 +671,54 @@ export class MoqTransport extends Transport {
     }
   }
 
-  sendReadyMessage(): void {
-    // Flip transport state to `ready` and dispatch the RTVI `client-ready`
-    // message on the client→bot transcript track so the bot's RTVIProcessor
-    // can negotiate protocol version. Mirrors the pattern used by
-    // small-webrtc-transport and daily-transport.
+  async sendReadyMessage(): Promise<void> {
+    // `client-ready` is the bot's cue to start speaking, and its audio is
+    // live media with no replay — so hold it until our audio subscription
+    // is on the wire, or the head of the first utterance is lost.
+    await this._waitForBotAudio();
     this.state = "ready";
     this.sendMessage(RTVIMessage.clientReady());
+  }
+
+  /** Resolve once the watch side has issued its audio-track subscribe —
+   *  `Watch.Audio.Decoder` subscribes in an effect gated on exactly these
+   *  three signals. Not gated on received audio: the bot won't speak
+   *  until `client-ready` arrives. The timeout keeps `connect()` from
+   *  hanging against a bot with no audio track. */
+  private _waitForBotAudio(timeoutMs = 10_000): Promise<void> {
+    const source = this._audioSource;
+    const broadcast = this._watchBroadcast;
+    // Both are set in _connect(); if they're null
+    // (bc a `disconnect` happened); resolve immediately;
+    if (!source || !broadcast) return Promise.resolve();
+    return new Promise((resolve) => {
+      let done = false;
+      const eff = new Effect();
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        eff.close();
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        console.warn(
+          "[MoqTransport] bot audio not subscribed after " +
+            `${timeoutMs}ms; sending client-ready anyway`
+        );
+        finish();
+      }, timeoutMs);
+      eff.run((e) => {
+        if (
+          e.get(source.track) &&
+          e.get(source.config) &&
+          e.get(broadcast.active)
+        ) {
+          // One macrotask, so the decoder's subscribe effect runs first.
+          setTimeout(finish, 0);
+        }
+      });
+    });
   }
 
   // --------------------------------------------------------------------
