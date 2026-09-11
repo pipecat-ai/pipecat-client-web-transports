@@ -285,11 +285,20 @@ export class DailyMediaManager extends MediaManager {
     }
   }
 
+  // NOTE: deliberately not `this._daily.localVideo()` / `localAudio()`. Daily
+  // fires 'track-started'/'track-stopped' *before* it commits the new state
+  // to the participant object those getters read from (see daily-js's
+  // DAILY_EVENT_PARTICIPANT_UPDATED handling: maybeEventTrackStopped/Started
+  // run, then `this._participants[id]` is reassigned). Callers that react to
+  // TrackStarted/TrackStopped by reading isCamEnabled/isMicEnabled — e.g. to
+  // resync UI state — would otherwise always observe the pre-toggle value.
+  // _camEnabled/_micEnabled are updated synchronously in
+  // handleTrackStarted/handleTrackStopped below, before those callbacks fire.
   get isCamEnabled(): boolean {
-    return this._daily.localVideo();
+    return this._camEnabled;
   }
   get isMicEnabled(): boolean {
-    return this._daily.localAudio();
+    return this._micEnabled;
   }
   get isSharingScreen(): boolean {
     return this._daily.localScreenAudio() || this._daily.localScreenVideo();
@@ -401,7 +410,22 @@ export class DailyMediaManager extends MediaManager {
         }
       }
     };
-    this._callbacks.onDeviceError?.(generateDeviceError(ev.error));
+    const deviceError = generateDeviceError(ev.error);
+    // enableMic()/enableCam() set _micEnabled/_camEnabled optimistically,
+    // but setLocalAudio()/setLocalVideo() are fire-and-forget — no promise,
+    // no synchronous failure signal — so a failed request (blocked
+    // permission, device in use, etc.) leaves that optimistic value wrong
+    // with nothing to correct it: no track-started/stopped ever fires for
+    // an operation that didn't actually take effect. This is the only
+    // signal we get that the request failed, so resync from Daily's actual
+    // state for whichever device(s) it implicates.
+    if (deviceError.devices.includes("mic")) {
+      this._micEnabled = this._daily.localAudio();
+    }
+    if (deviceError.devices.includes("cam")) {
+      this._camEnabled = this._daily.localVideo();
+    }
+    this._callbacks.onDeviceError?.(deviceError);
   }
 
   private _handleLocalAudioLevel(ev: DailyEventObjectLocalAudioLevel) {
@@ -415,6 +439,7 @@ export class DailyMediaManager extends MediaManager {
   protected async handleTrackStarted(event: DailyEventObjectTrack) {
     if (!event.participant?.local) return;
     if (event.track.kind === "audio") {
+      this._micEnabled = true;
       if (this._mediaStreamRecorder) {
         const status = this._mediaStreamRecorder.getStatus();
         switch (status) {
@@ -454,6 +479,8 @@ export class DailyMediaManager extends MediaManager {
         }
       }
       this._currentAudioTrack = event.track;
+    } else if (event.track.kind === "video") {
+      this._camEnabled = true;
     }
     this._callbacks.onTrackStarted?.(
       event.track,
@@ -467,12 +494,15 @@ export class DailyMediaManager extends MediaManager {
   protected handleTrackStopped(event: DailyEventObjectTrack) {
     if (!event.participant?.local) return;
     if (event.track.kind === "audio") {
+      this._micEnabled = false;
       if (
         this._mediaStreamRecorder &&
         this._mediaStreamRecorder.getStatus() === "recording"
       ) {
         this._mediaStreamRecorder.pause();
       }
+    } else if (event.track.kind === "video") {
+      this._camEnabled = false;
     }
     this._callbacks.onTrackStopped?.(
       event.track,
