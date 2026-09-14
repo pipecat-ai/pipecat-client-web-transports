@@ -16,6 +16,7 @@ jobs:
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       paths_released: ${{ steps.release.outputs.paths_released }}
+      transport_lib_release_created: ${{ steps.release.outputs['transport-lib--release_created'] }}
       daily_release_created: ${{ steps.release.outputs['daily-transport--release_created'] }}
       livekit_release_created: ${{ steps.release.outputs['livekit-transport--release_created'] }}
       moq_release_created: ${{ steps.release.outputs['moq-transport--release_created'] }}
@@ -42,6 +43,7 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
       - run: npm install --ignore-scripts
+      - run: npm run build -w @pipecat-ai/transport-lib
       - run: npm run build -w @pipecat-ai/daily-transport
       - run: npm publish --provenance
         working-directory: transports/daily
@@ -96,6 +98,7 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
       - run: npm install --ignore-scripts
+      - run: npm run build -w @pipecat-ai/transport-lib
       - run: npm run build -w @pipecat-ai/small-webrtc-transport
       - run: npm publish --provenance
         working-directory: transports/small-webrtc-transport
@@ -114,6 +117,7 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
       - run: npm install --ignore-scripts
+      - run: npm run build -w @pipecat-ai/transport-lib
       - run: npm run build -w @pipecat-ai/websocket-transport
       - run: npm publish --provenance
         working-directory: transports/websocket-transport
