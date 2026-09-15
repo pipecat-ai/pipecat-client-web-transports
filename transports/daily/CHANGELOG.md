@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
-* Fixed issue with mute toggle states being delayed ([a4051c8](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/a4051c87d4aae2d1007e56400848d6f1efd34455))
 * Fixed issue with mute toggle states being delayed ([51954df](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/51954df18f7f1f23b6965e863ac0425493f9be4d))
 
 ## [1.6.8](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/daily-transport-v1.6.7...daily-transport-v1.6.8) (2026-07-16)
