@@ -131,12 +131,15 @@ describe("MoqTransport — characterization", () => {
     expect(recorder.states).toEqual(["initialized"]);
   });
 
-  test("sendReadyMessage() flips state to 'ready'", () => {
+  test("sendReadyMessage() flips state to 'ready'", async () => {
+    // sendReadyMessage() is async: it first awaits _waitForBotAudio(),
+    // which resolves immediately here because the transport was never
+    // connected (no watch-side signals to wait on).
     const { callbacks, recorder } = buildSpyCallbacks();
     wireTransport(transport, callbacks);
     recorder.states.length = 0;
 
-    transport.sendReadyMessage();
+    await transport.sendReadyMessage();
 
     expect(transport.state).toBe("ready");
     expect(recorder.states).toEqual(["ready"]);
