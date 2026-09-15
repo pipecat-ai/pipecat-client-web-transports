@@ -8,14 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.10.8](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.7...small-webrtc-transport-v1.10.8) (2026-09-15)
 
 
-### Miscellaneous Chores
-
-* **main:** release  small-webrtc-transport 1.10.8 ([2b4fda9](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/2b4fda90e7779ecb1b70040fdca9374cce593195))
-* **main:** release  small-webrtc-transport 1.10.8 ([d1b96dc](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/d1b96dcacfe85d5dec76bfe244403d4284c0d31d))
-
-## [1.10.8](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.7...small-webrtc-transport-v1.10.8) (2026-09-15)
-
-
 ### Bug Fixes
 
 * Fixed issue with mute toggle states being delayed ([51954df](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/51954df18f7f1f23b6965e863ac0425493f9be4d))
