@@ -5,6 +5,13 @@ All notable changes to **Pipecat Small WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.9](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.8...small-webrtc-transport-v1.10.9) (2026-09-15)
+
+
+### Miscellaneous Chores
+
+* **main:** release  small-webrtc-transport 1.10.8 ([41a30de](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/41a30ded98ee7a1dc487ef0afd13e226abd3b134))
+
 ## [1.10.8](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.7...small-webrtc-transport-v1.10.8) (2026-09-15)
 
 
