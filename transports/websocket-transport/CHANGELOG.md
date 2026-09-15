@@ -5,6 +5,15 @@ All notable changes to **Pipecat Websocket Transport** will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.7.2...websocket-transport-v1.7.3) (2026-09-15)
+
+
+### Miscellaneous Chores
+
+* **main:** release  websocket-transport 1.7.2 ([bfc84d3](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/bfc84d3280ac72c93a7fbde07071160dce3cc273))
+* **main:** release  websocket-transport 1.7.2 ([b1cd648](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/b1cd6483a555f7d56144f0f5bdfb64d565394442))
+* **main:** release  websocket-transport 1.7.2 ([13e9412](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/13e9412e0e97a4b9f2afe23bb35ad3158c6f2e7b))
+
 ## [1.7.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.7.1...websocket-transport-v1.7.2) (2026-09-15)
 
 
