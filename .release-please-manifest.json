@@ -1,5 +1,5 @@
 {
-  "lib": "0.1.0",
+  "lib": "0.1.1",
   "transports/daily": "1.6.8",
   "transports/livekit-transport": "1.0.0",
   "transports/moq-transport": "0.1.1",
