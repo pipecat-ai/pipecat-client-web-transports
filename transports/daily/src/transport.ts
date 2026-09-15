@@ -34,7 +34,7 @@ import {
   logger,
 } from "@pipecat-ai/client-js";
 
-import { MediaStreamRecorder } from "../../../lib/wavtools";
+import { MediaStreamRecorder } from "@pipecat-ai/transport-lib";
 
 import packageJson from "../package.json";
 

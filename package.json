@@ -6,6 +6,7 @@
     "node": ">=22.14.0"
   },
   "workspaces": [
+    "lib",
     "transports/*",
     "tests"
   ],

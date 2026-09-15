@@ -10,9 +10,11 @@ import {
   UnsupportedFeatureError,
 } from "@pipecat-ai/client-js";
 
-import { ReconnectingWebSocket } from "../../../lib/websocket-utils/reconnectingWebSocket";
-import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
-import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
+import {
+  ReconnectingWebSocket,
+  DailyMediaManager,
+  MediaManager,
+} from "@pipecat-ai/transport-lib";
 import { WebSocketSerializer } from "./serializers/websocketSerializer.ts";
 import { ProtobufFrameSerializer } from "./serializers/protobufSerializer.ts";
 

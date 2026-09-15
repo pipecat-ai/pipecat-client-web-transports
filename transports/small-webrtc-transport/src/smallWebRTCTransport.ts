@@ -16,8 +16,7 @@ import {
   TransportState,
   UnsupportedFeatureError,
 } from "@pipecat-ai/client-js";
-import { MediaManager } from "../../../lib/media-mgmt/mediaManager";
-import { DailyMediaManager } from "../../../lib/media-mgmt/dailyMediaManager";
+import { MediaManager, DailyMediaManager } from "@pipecat-ai/transport-lib";
 
 class TrackStatusMessage {
   type = "trackStatus";

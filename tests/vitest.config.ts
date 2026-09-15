@@ -11,6 +11,10 @@ export default defineConfig({
     // TypeScript directly rather than pulling from each package's `dist`. Keeps
     // characterization tests in lockstep with source and avoids a build step.
     alias: {
+      "@pipecat-ai/transport-lib": new URL(
+        "../lib/src/index.ts",
+        import.meta.url
+      ).pathname,
       "@pipecat-ai/daily-transport": new URL(
         "../transports/daily/src/index.ts",
         import.meta.url
