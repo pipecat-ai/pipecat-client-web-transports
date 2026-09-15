@@ -1,6 +1,6 @@
 {
   "name": "@pipecat-ai/transport-lib",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "license": "BSD-2-Clause",
   "main": "dist/index.js",
