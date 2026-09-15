@@ -1,6 +1,6 @@
 {
   "name": "@pipecat-ai/small-webrtc-transport",
-  "version": "1.10.7",
+  "version": "1.10.8",
   "license": "BSD-2-Clause",
   "main": "dist/index.js",
   "module": "dist/index.module.js",
@@ -24,10 +24,14 @@
   ],
   "targets": {
     "main": {
-      "includeNodeModules": ["@pipecat-ai/transport-lib"]
+      "includeNodeModules": [
+        "@pipecat-ai/transport-lib"
+      ]
     },
     "module": {
-      "includeNodeModules": ["@pipecat-ai/transport-lib"]
+      "includeNodeModules": [
+        "@pipecat-ai/transport-lib"
+      ]
     }
   },
   "scripts": {
@@ -38,7 +42,7 @@
   },
   "devDependencies": {
     "@pipecat-ai/client-js": "^1.13.0",
-    "@pipecat-ai/transport-lib": "^0.1.0",
+    "@pipecat-ai/transport-lib": "^0.1.1",
     "@types/lodash": "^4.17.20",
     "@types/node": "^22.9.0",
     "eslint": "9.39.1",
