@@ -5,6 +5,26 @@ All notable changes to **Pipecat Small WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.9](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.8...small-webrtc-transport-v1.10.9) (2026-09-15)
+
+
+### Bug Fixes
+
+* **small-webrtc-transport:** guard keepalive ping against InvalidStateError in Safari ([ad4291b](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/ad4291bf4c0dc75720c9cba918baf1c192ec0d68))
+* **small-webrtc-transport:** guard keepalive ping against InvalidStateError in Safari ([76c782a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/76c782a4a8920cdb75230b02cec3cef6154df484)), closes [#63](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/63)
+* **small-webrtc-transport:** ignore signalingstatechange events from stale peer connections ([1b9152d](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/1b9152dada09ab6a112690dcd4ec23c68caf9a4b)), closes [#169](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/169)
+* **small-webrtc-transport:** set state to error, fix a connect() race, and expose status/cause ([8e9f5e5](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/8e9f5e55933bb273883d8639d38e472cbab03a7a)), closes [#173](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/173)
+* **small-webrtc:** stop retrying refused offers and surface the HTTP status ([d757039](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/d7570392db5e30e120959cd3d244c1bd6d9c5652))
+
+
+### Miscellaneous Chores
+
+* **main:** release  small-webrtc-transport 1.10.7 ([cb469f4](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/cb469f4a022becfd165a979632b4b2c7d2ce34ca))
+* **main:** release  small-webrtc-transport 1.10.7 ([8eea3c2](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/8eea3c227fe717e7d0c4d3b31b825b4d4a015d25))
+* **main:** release  small-webrtc-transport 1.10.8 ([41a30de](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/41a30ded98ee7a1dc487ef0afd13e226abd3b134))
+* **main:** release  small-webrtc-transport 1.10.8 ([2b4fda9](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/2b4fda90e7779ecb1b70040fdca9374cce593195))
+* **main:** release  small-webrtc-transport 1.10.8 ([d1b96dc](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/d1b96dcacfe85d5dec76bfe244403d4284c0d31d))
+
 ## [1.10.8](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.7...small-webrtc-transport-v1.10.8) (2026-09-15)
 
 
