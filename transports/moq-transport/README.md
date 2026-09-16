@@ -20,6 +20,10 @@ The `MoqTransport` class connects a `PipecatClient` to a Pipecat MoQ bot, either
 
 Connection management uses WebTransport with a WebSocket fallback (raced by `@moq/net`), with auto-reconnect via `Connection.Reload`.
 
+### Transcript records
+
+Each transcript track is a single group that a subscriber always reads from its first record, so a reconnect on either side replays the whole log. To keep a replay from redelivering messages such as `client-ready`, every record is the RTVI message plus two fields: `seq`, the record's position in the publisher's log, and `epoch`, an opaque string identifying that log. The transport numbers what it sends and drops incoming records at or below the last `seq` it accepted for the current `epoch`; a different `epoch` is a new bot, whose count starts over. Both fields are removed before the message reaches `PipecatClient`. A record without `seq` is delivered unchanged, so a bot that predates the fields keeps working. `acceptTranscriptRecord` and the `TranscriptRecord` type are exported for other implementations of the same stream.
+
 ## Features
 
 - 🎤 Microphone capture and Opus publish (`@moq/publish`)

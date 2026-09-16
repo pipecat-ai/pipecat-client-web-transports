@@ -43,6 +43,52 @@ const DEFAULT_AUDIO_BUFFER_MAX_MS = 30 * 1000;
 const DEFAULT_AUDIO_SAMPLE_RATE = 48000;
 
 /**
+ * A transcript record as it travels on the wire: the RTVI message plus
+ * the fields a subscriber uses to drop replays.
+ *
+ * The transcript stream is a single group that a subscriber always reads
+ * from its first record, so a reconnect on either side replays the whole
+ * log. ``seq`` counts records for the life of the publisher's log and
+ * ``epoch`` identifies that log, so a fresh peer starts its own count
+ * rather than colliding with the watermark a subscriber kept from the
+ * previous one. A record without ``seq`` comes from a peer that predates
+ * the fields and is delivered as is.
+ */
+export type TranscriptRecord = RTVIMessage & { seq?: number; epoch?: string };
+
+/** The last record accepted from a peer, for the epoch it was published in. */
+export interface TranscriptWatermark {
+  epoch: string | undefined;
+  lastSeq: number;
+}
+
+/**
+ * Return the RTVI message carried by a peer transcript record, or ``null``
+ * for a record the watermark shows was already delivered. Advances the
+ * watermark; a record from a different epoch starts it over.
+ */
+export function acceptTranscriptRecord(
+  watermark: TranscriptWatermark,
+  record: TranscriptRecord,
+): RTVIMessage | null {
+  const { seq, epoch, ...message } = record;
+  if (typeof seq !== "number" || !Number.isInteger(seq)) return record;
+  if (epoch !== watermark.epoch) {
+    watermark.epoch = epoch;
+    watermark.lastSeq = -1;
+  }
+  if (seq <= watermark.lastSeq) return null;
+  watermark.lastSeq = seq;
+  return message as RTVIMessage;
+}
+
+function newTranscriptEpoch(): string {
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
  * Constructor options for the MoQ transport.
  *
  * The browser dials a MOQ peer (relay or bot in serve mode) at
@@ -230,6 +276,12 @@ function decodeCertHash(b64: string): ArrayBuffer {
  *   is what carries ``client-ready`` for protocol-version negotiation,
  *   typed text input, function-call results, and any other client→server
  *   RTVI traffic.
+ *
+ * Records on both tracks carry ``seq`` and ``epoch`` (see
+ * :type:`TranscriptRecord`): each side numbers what it sends and drops
+ * what it has already received, so a reconnect on either side, which
+ * replays the whole log, does not redeliver messages such as
+ * ``client-ready``.
  */
 export class MoqTransport extends Transport {
   public static SERVICE_NAME = "moq-transport";
@@ -254,8 +306,14 @@ export class MoqTransport extends Transport {
   // track, so we hold one Producer per subscription (`_transcriptOut`)
   // and replay the message log (`_transcriptLog`) into each — so a bot
   // that subscribes late still gets every message, in order.
-  private _transcriptOut: Set<Json.Stream.Producer<RTVIMessage>> | null = null;
-  private _transcriptLog: RTVIMessage[] | null = null;
+  private _transcriptOut: Set<Json.Stream.Producer<TranscriptRecord>> | null = null;
+  private _transcriptLog: TranscriptRecord[] | null = null;
+  // Identifies this connection's log to the bot's replay check; each
+  // record's `seq` is its index in `_transcriptLog`.
+  private _transcriptEpoch: string | null = null;
+  // Last record accepted from the bot. Kept across the bot's re-announces
+  // within one connection, since each re-subscribe replays its whole log.
+  private _peerWatermark: TranscriptWatermark = { epoch: undefined, lastSeq: -1 };
   private _micEnabled = new Signal(true);
   private _micConstraints = new Signal<MediaTrackConstraints | undefined>(
     undefined,
@@ -464,14 +522,16 @@ export class MoqTransport extends Transport {
     // this track by its name — same convention as the bot's own transcript
     // track — so no catalog entry is needed.
     this._transcriptLog = [];
-    this._transcriptOut = new Set<Json.Stream.Producer<RTVIMessage>>();
+    this._transcriptEpoch = newTranscriptEpoch();
+    this._peerWatermark = { epoch: undefined, lastSeq: -1 };
+    this._transcriptOut = new Set<Json.Stream.Producer<TranscriptRecord>>();
     this._publishBroadcast.publishTrack(
       merged.transcriptTrack,
       (track, effect) => {
-        const producer = new Json.Stream.Producer<RTVIMessage>(track, {
+        const producer = new Json.Stream.Producer<TranscriptRecord>(track, {
           compression: true,
         });
-        for (const msg of this._transcriptLog ?? []) producer.append(msg);
+        for (const record of this._transcriptLog ?? []) producer.append(record);
         this._transcriptOut?.add(producer);
         effect.cleanup(() => {
           this._transcriptOut?.delete(producer);
@@ -608,7 +668,7 @@ export class MoqTransport extends Transport {
 
       const botBroadcast = conn.consume(botPath);
       const track = botBroadcast.subscribe(merged.transcriptTrack, 0);
-      const consumer = new Json.Stream.Consumer<RTVIMessage>(track, {
+      const consumer = new Json.Stream.Consumer<TranscriptRecord>(track, {
         compression: true,
       });
       const ac = new AbortController();
@@ -653,6 +713,7 @@ export class MoqTransport extends Transport {
       this._watchBroadcast = null;
       this._transcriptOut = null;
       this._transcriptLog = null;
+      this._transcriptEpoch = null;
       this._publishBroadcast = null;
       this._microphone = null;
       this._signals = null;
@@ -810,9 +871,16 @@ export class MoqTransport extends Transport {
     }
     // Append to the lossless stream. Keep a log too, so a bot that
     // subscribes after this point is replayed every message in order
-    // (see the `publishTrack` serve callback above).
-    this._transcriptLog.push(message);
-    for (const producer of this._transcriptOut) producer.append(message);
+    // (see the `publishTrack` serve callback above). The record carries
+    // its position in the log and the log's epoch, which is what lets the
+    // bot skip the replay.
+    const record: TranscriptRecord = {
+      ...message,
+      seq: this._transcriptLog.length,
+      epoch: this._transcriptEpoch ?? undefined,
+    };
+    this._transcriptLog.push(record);
+    for (const producer of this._transcriptOut) producer.append(record);
   }
 
   tracks(): Tracks {
@@ -830,16 +898,19 @@ export class MoqTransport extends Transport {
   // --------------------------------------------------------------------
 
   /** Pull RTVI messages off the @moq/json stream consumer and hand each
-   *  one to `PipecatClient` via `_onMessage`. The handler resolves the
+   *  one to `PipecatClient` via `_onMessage`, skipping records the
+   *  watermark shows were already delivered. The handler resolves the
    *  SDK's connect promise when bot-ready arrives. */
   private async _drainTranscript(
-    consumer: Json.Stream.Consumer<RTVIMessage>,
+    consumer: Json.Stream.Consumer<TranscriptRecord>,
     signal: AbortSignal,
   ): Promise<void> {
     for (;;) {
-      const message = await consumer.next();
-      if (!message || signal.aborted) break;
-      if (typeof message !== "object") continue;
+      const record = await consumer.next();
+      if (!record || signal.aborted) break;
+      if (typeof record !== "object") continue;
+      const message = acceptTranscriptRecord(this._peerWatermark, record);
+      if (!message) continue;
       // Intra-transport shutdown signal from the bot: bot is about to
       // close its MoQ session. Disable auto-reconnect, tear down the
       // audio decoder + subscribers on our side while WebTransport is

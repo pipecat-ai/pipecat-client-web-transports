@@ -75,7 +75,7 @@ vi.mock("@moq/net", () => ({
   Path: { from: (...parts: string[]) => parts.join("/") },
 }));
 
-import { MoqTransport } from "@pipecat-ai/moq-transport";
+import { acceptTranscriptRecord, MoqTransport } from "@pipecat-ai/moq-transport";
 
 import { buildSpyCallbacks, wireTransport } from "../helpers/observeTransport";
 
@@ -275,5 +275,150 @@ describe("MoqTransport — characterization", () => {
 
     expect(resolved.clientId).toBe("bob");
     expect(resolved.relayUrl).toBe("https://relay.example/moq");
+  });
+});
+
+/**
+ * Transcript records carry `seq` and `epoch` so that the replay every
+ * (re)subscribe gets is dropped rather than redelivered. These tests drive
+ * the publish and drain paths with stand-ins for the @moq/json producer and
+ * consumer; the stream itself is exercised against a relay, not here.
+ */
+describe("MoqTransport — transcript records", () => {
+  type Record = { [key: string]: unknown };
+  const rtvi = (type: string, extra: Record = {}): Record => ({
+    id: "m1",
+    label: "rtvi-ai",
+    type,
+    data: {},
+    ...extra,
+  });
+
+  /** `_drainTranscript` and the transcript fields are internal. */
+  type Internals = {
+    _transcriptLog: Record[] | null;
+    _transcriptOut: Set<{ append: (r: Record) => void }> | null;
+    _transcriptEpoch: string | null;
+    _drainTranscript: (
+      consumer: { next: () => Promise<Record | null> },
+      signal: AbortSignal,
+    ) => Promise<void>;
+  };
+
+  let transport: MoqTransport;
+
+  beforeEach(() => {
+    transport = new MoqTransport({ relayUrl: "https://relay.example/moq" });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("acceptTranscriptRecord() delivers a new record with the fields stripped", () => {
+    const watermark = { epoch: undefined, lastSeq: -1 };
+    const message = acceptTranscriptRecord(
+      watermark,
+      rtvi("bot-ready", { seq: 0, epoch: "e1" }) as never,
+    );
+    expect(message).toEqual(rtvi("bot-ready"));
+    expect(watermark).toEqual({ epoch: "e1", lastSeq: 0 });
+  });
+
+  test("acceptTranscriptRecord() drops a replay of records already delivered", () => {
+    const watermark = { epoch: undefined, lastSeq: -1 };
+    for (const seq of [0, 1, 2]) {
+      expect(acceptTranscriptRecord(watermark, rtvi("x", { seq, epoch: "e" }) as never)).not.toBeNull();
+    }
+    // The whole log comes back on a resubscribe.
+    for (const seq of [0, 1, 2]) {
+      expect(acceptTranscriptRecord(watermark, rtvi("x", { seq, epoch: "e" }) as never)).toBeNull();
+    }
+    expect(acceptTranscriptRecord(watermark, rtvi("x", { seq: 3, epoch: "e" }) as never)).not.toBeNull();
+  });
+
+  test("acceptTranscriptRecord() starts the count over for a new epoch", () => {
+    const watermark = { epoch: undefined, lastSeq: -1 };
+    acceptTranscriptRecord(watermark, rtvi("x", { seq: 5, epoch: "old" }) as never);
+    expect(acceptTranscriptRecord(watermark, rtvi("x", { seq: 0, epoch: "new" }) as never)).not.toBeNull();
+    expect(acceptTranscriptRecord(watermark, rtvi("x", { seq: 0, epoch: "new" }) as never)).toBeNull();
+  });
+
+  test("acceptTranscriptRecord() passes a record without a sequence through unchanged", () => {
+    const watermark = { epoch: undefined, lastSeq: -1 };
+    const record = rtvi("client-ready");
+    expect(acceptTranscriptRecord(watermark, record as never)).toBe(record);
+    expect(acceptTranscriptRecord(watermark, record as never)).toBe(record);
+    const odd = rtvi("x", { seq: 1.5 });
+    expect(acceptTranscriptRecord(watermark, odd as never)).toBe(odd);
+  });
+
+  test("sendMessage() numbers each record from its position in the log and keeps the message itself unchanged", () => {
+    const internals = transport as unknown as Internals;
+    const producer = { append: vi.fn<(r: Record) => void>() };
+    internals._transcriptLog = [];
+    internals._transcriptEpoch = "e1";
+    internals._transcriptOut = new Set([producer]);
+
+    const first = rtvi("client-ready");
+    transport.sendMessage(first as never);
+    transport.sendMessage(rtvi("client-message") as never);
+
+    expect(producer.append.mock.calls.map(([r]) => [r.seq, r.epoch, r.type])).toEqual([
+      [0, "e1", "client-ready"],
+      [1, "e1", "client-message"],
+    ]);
+    expect(first).toEqual(rtvi("client-ready"));
+    // A later subscriber is replayed the same numbered records.
+    expect(internals._transcriptLog.map((r) => r.seq)).toEqual([0, 1]);
+  });
+
+  test("_drainTranscript() delivers each bot record once, stripped, across a replay", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    const { onMessage } = wireTransport(transport, callbacks);
+    const script: (Record | null)[] = [
+      rtvi("bot-ready", { seq: 0, epoch: "b1" }),
+      rtvi("bot-output", { seq: 1, epoch: "b1" }),
+      // The stream is re-read from its first record after a reconnect.
+      rtvi("bot-ready", { seq: 0, epoch: "b1" }),
+      rtvi("bot-output", { seq: 1, epoch: "b1" }),
+      rtvi("bot-output", { seq: 2, epoch: "b1" }),
+      null,
+    ];
+    const consumer = { next: vi.fn(async () => script.shift() ?? null) };
+
+    await (transport as unknown as Internals)._drainTranscript(
+      consumer,
+      new AbortController().signal,
+    );
+
+    expect(onMessage.mock.calls.map(([m]) => m)).toEqual([
+      rtvi("bot-ready"),
+      rtvi("bot-output"),
+      rtvi("bot-output"),
+    ]);
+  });
+
+  test("_drainTranscript() still honors the bot's session-ending marker when it carries the fields", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    const { onMessage } = wireTransport(transport, callbacks);
+    const disconnect = vi
+      .spyOn(transport as unknown as { _disconnect: () => Promise<void> }, "_disconnect")
+      .mockResolvedValue(undefined);
+    const script: (Record | null)[] = [
+      { label: "moq-transport", type: "session-ending", seq: 0, epoch: "b1" },
+      rtvi("bot-output", { seq: 1, epoch: "b1" }),
+      null,
+    ];
+    const consumer = { next: vi.fn(async () => script.shift() ?? null) };
+
+    await (transport as unknown as Internals)._drainTranscript(
+      consumer,
+      new AbortController().signal,
+    );
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(consumer.next).toHaveBeenCalledTimes(1);
   });
 });
