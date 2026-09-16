@@ -421,4 +421,56 @@ describe("MoqTransport — transcript records", () => {
     expect(onMessage).not.toHaveBeenCalled();
     expect(consumer.next).toHaveBeenCalledTimes(1);
   });
+
+  test("_drainTranscript() redials when the bot's tracks end without the marker", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    const redial = vi
+      .spyOn(transport as unknown as { _redial: () => void }, "_redial")
+      .mockImplementation(() => {});
+    const script: (Record | null)[] = [rtvi("bot-output", { seq: 0, epoch: "b1" }), null];
+    const consumer = { next: vi.fn(async () => script.shift() ?? null) };
+
+    await (transport as unknown as Internals)._drainTranscript(
+      consumer,
+      new AbortController().signal,
+    );
+
+    expect(redial).toHaveBeenCalledTimes(1);
+  });
+
+  test("_drainTranscript() does not redial when its own teardown aborted it", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    const redial = vi
+      .spyOn(transport as unknown as { _redial: () => void }, "_redial")
+      .mockImplementation(() => {});
+    const ac = new AbortController();
+    const consumer = {
+      next: vi.fn(async () => {
+        ac.abort();
+        return null;
+      }),
+    };
+
+    await (transport as unknown as Internals)._drainTranscript(consumer, ac.signal);
+
+    expect(redial).not.toHaveBeenCalled();
+  });
+
+  test("_disconnect() sends the session-ending marker before tearing down", async () => {
+    const internals = transport as unknown as Internals;
+    const producer = { append: vi.fn<(r: Record) => void>() };
+    internals._transcriptLog = [];
+    internals._transcriptEpoch = "e1";
+    internals._transcriptOut = new Set([producer]);
+    (transport as unknown as { _state: string })._state = "connected";
+
+    await transport._disconnect();
+
+    expect(producer.append.mock.calls.map(([r]) => [r.label, r.type, r.seq, r.epoch])).toEqual([
+      ["moq-transport", "session-ending", 0, "e1"],
+    ]);
+    expect(transport.state).toBe("disconnected");
+  });
 });

@@ -282,6 +282,12 @@ function decodeCertHash(b64: string): ArrayBuffer {
  * what it has already received, so a reconnect on either side, which
  * replays the whole log, does not redeliver messages such as
  * ``client-ready``.
+ *
+ * Each side appends a ``session-ending`` marker to its transcript before
+ * it leaves. The bot's tracks ending after the marker is a hangup; ending
+ * without it may be a failed relay between the peers, which looks the
+ * same on the wire, so the transport redials and the bot either reappears
+ * on the new session or is never announced on it.
  */
 export class MoqTransport extends Transport {
   public static SERVICE_NAME = "moq-transport";
@@ -314,6 +320,9 @@ export class MoqTransport extends Transport {
   // Last record accepted from the bot. Kept across the bot's re-announces
   // within one connection, since each re-subscribe replays its whole log.
   private _peerWatermark: TranscriptWatermark = { epoch: undefined, lastSeq: -1 };
+  // Reload's enabled signal; flipping it off and on redials the relay.
+  private _reloadEnabled: Signal<boolean> | null = null;
+  private _lastRedialAt = 0;
   private _micEnabled = new Signal(true);
   private _micConstraints = new Signal<MediaTrackConstraints | undefined>(
     undefined,
@@ -453,8 +462,9 @@ export class MoqTransport extends Transport {
 
     // Reload auto-reconnects on disconnect; Publish.Broadcast and
     // Watch.Broadcast both react to its `established` signal.
+    this._reloadEnabled = new Signal(true);
     this._reload = new Moq.Connection.Reload({
-      enabled: new Signal(true),
+      enabled: this._reloadEnabled,
       url: new Signal(url),
       webtransport,
     });
@@ -691,6 +701,18 @@ export class MoqTransport extends Transport {
   async _disconnect(): Promise<void> {
     if (this._state === "disconnected") return;
     this.state = "disconnecting";
+    // Tell the bot this side is leaving, so it ends the call at once
+    // rather than treating the tracks ending as a possible relay failure.
+    // Best-effort: give the record a moment to reach the wire before the
+    // producers are finished.
+    if (
+      this._appendTranscriptRecord({
+        label: "moq-transport",
+        type: "session-ending",
+      } as RTVIMessage)
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
     try {
       this._audioEmitter?.close();
       this._audioDecoder?.close();
@@ -718,6 +740,7 @@ export class MoqTransport extends Transport {
       this._microphone = null;
       this._signals = null;
       this._reload = null;
+      this._reloadEnabled = null;
       this.state = "disconnected";
       // Fire the SDK's disconnected callback. `state = "disconnected"`
       // above already triggers `onTransportStateChanged`, but the SDK
@@ -862,18 +885,24 @@ export class MoqTransport extends Transport {
   // --------------------------------------------------------------------
 
   sendMessage(message: RTVIMessage): void {
-    if (!this._transcriptOut || !this._transcriptLog) {
+    if (!this._appendTranscriptRecord(message)) {
       console.warn(
         "[MoqTransport] sendMessage called before connect; dropping",
         message,
       );
-      return;
     }
-    // Append to the lossless stream. Keep a log too, so a bot that
-    // subscribes after this point is replayed every message in order
-    // (see the `publishTrack` serve callback above). The record carries
-    // its position in the log and the log's epoch, which is what lets the
-    // bot skip the replay.
+  }
+
+  /** Append a message to the client's transcript stream. Returns false
+   *  before connect, when there is no stream to append to.
+   *
+   *  The stream is lossless, and a log of it is kept so a bot that
+   *  subscribes later is replayed every message in order (see the
+   *  `publishTrack` serve callback in `_connect`). The record carries its
+   *  position in the log and the log's epoch, which is what lets the bot
+   *  skip the replay. */
+  private _appendTranscriptRecord(message: RTVIMessage): boolean {
+    if (!this._transcriptOut || !this._transcriptLog) return false;
     const record: TranscriptRecord = {
       ...message,
       seq: this._transcriptLog.length,
@@ -881,6 +910,7 @@ export class MoqTransport extends Transport {
     };
     this._transcriptLog.push(record);
     for (const producer of this._transcriptOut) producer.append(record);
+    return true;
   }
 
   tracks(): Tracks {
@@ -935,6 +965,28 @@ export class MoqTransport extends Transport {
       }
       this._onMessage?.(message);
     }
+    // The bot's tracks ended without its marker while this side is still
+    // connected. A relay between the peers failing looks the same on the
+    // wire as the bot leaving, so redial: a fresh session re-establishes
+    // the subscriptions, and a bot that really left is simply never
+    // announced on it.
+    if (!signal.aborted) this._redial();
+  }
+
+  /** Drop the relay session and dial again, at most once every few
+   *  seconds. Every subscription is gated on the established session,
+   *  so it all comes back on the new one. */
+  private _redial(): void {
+    const enabled = this._reloadEnabled;
+    if (!enabled) return;
+    const now = Date.now();
+    if (now - this._lastRedialAt < 5000) return;
+    this._lastRedialAt = now;
+    console.warn(
+      "[MoqTransport] bot tracks ended without session-ending; redialing",
+    );
+    enabled.set(false);
+    setTimeout(() => enabled.set(true), 0);
   }
 
   /** Flush buffered bot audio and re-anchor playback at an utterance
