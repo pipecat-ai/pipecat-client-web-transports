@@ -352,6 +352,10 @@ export class MoqTransport extends Transport {
   // Transport lifecycle state. Mirrored to `_callbacks.onTransportStateChanged`.
   declare protected _state: TransportState;
 
+  // Whether this session completed the ready handshake (`sendReadyMessage`).
+  // Allows the UI state to behave correctly after a reconnect.
+  private _wasReady = false;
+
   constructor(options: MoqTransportOptions) {
     super();
     this._moqOptions = applyDefaults(options);
@@ -434,6 +438,7 @@ export class MoqTransport extends Transport {
     }
     this._moqOptions = merged;
 
+    this._wasReady = false;
     this.state = "connecting";
 
     let url: URL;
@@ -475,7 +480,20 @@ export class MoqTransport extends Transport {
     this._signals.run((eff) => {
       const status = eff.get(this._reload!.status);
       if (status === "connected") {
-        if (this._state === "connecting") this.state = "connected";
+        if (this._state === "connecting") {
+          if (this._wasReady) {
+            // Reconnect: hold `ready` until the audio subscribe is back on
+            // the wire (as sendReadyMessage does). The guard drops the
+            // transition if the session moved on while we waited.
+            void this._waitForBotAudio().then(() => {
+              if (this._state === "connecting") {
+                this.state = "ready";
+              }
+            });
+          } else {
+            this.state = "connected";
+          }
+        }
       } else if (status === "connecting") {
         this.state = "connecting";
       } else if (status === "disconnected") {
@@ -741,6 +759,7 @@ export class MoqTransport extends Transport {
       this._signals = null;
       this._reload = null;
       this._reloadEnabled = null;
+      this._wasReady = false;
       this.state = "disconnected";
       // Fire the SDK's disconnected callback. `state = "disconnected"`
       // above already triggers `onTransportStateChanged`, but the SDK
@@ -760,6 +779,7 @@ export class MoqTransport extends Transport {
     // live media with no replay — so hold it until our audio subscription
     // is on the wire, or the head of the first utterance is lost.
     await this._waitForBotAudio();
+    this._wasReady = true;
     this.state = "ready";
     this.sendMessage(RTVIMessage.clientReady());
   }
