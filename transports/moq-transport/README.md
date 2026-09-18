@@ -20,6 +20,12 @@ The `MoqTransport` class connects a `PipecatClient` to a Pipecat MoQ bot, either
 
 Connection management uses WebTransport with a WebSocket fallback (raced by `@moq/net`), with auto-reconnect via `Connection.Reload`.
 
+### Transcript records
+
+Each transcript track is a single group that a subscriber always reads from its first record, so a reconnect on either side replays the whole log. To keep a replay from redelivering messages such as `client-ready`, every record is the RTVI message plus two fields: `seq`, the record's position in the publisher's log, and `epoch`, an opaque string identifying that log. The transport numbers what it sends and drops incoming records at or below the last `seq` it accepted for the current `epoch`; a different `epoch` is a new bot, whose count starts over. Both fields are removed before the message reaches `PipecatClient`. A record without `seq` is delivered unchanged, so a bot that predates the fields keeps working. `acceptTranscriptRecord` and the `TranscriptRecord` type are exported for other implementations of the same stream.
+
+Each side also appends a `{ label: "moq-transport", type: "session-ending" }` record before it leaves. The bot's tracks ending after that marker is a hangup, and the transport disconnects. Ending without it may be a relay between the peers failing, which looks the same on the wire, so the transport redials: the bot either reappears on the new session or is never announced on it.
+
 ## Features
 
 - 🎤 Microphone capture and Opus publish (`@moq/publish`)
@@ -113,12 +119,14 @@ The transport can be in one of these states:
 - "disconnecting"
 - "error"
 
+Once the session is `ready`, a relay reconnect does not change the state. `Connection.Reload` redials in the background. A message sent meanwhile is kept in the transcript log and replayed to the bot when it resubscribes; audio from the gap is not. If the relay cannot be reached for Reload's whole retry window (five minutes), the transport moves to `error` and reports a fatal error through `onError`, and `PipecatClient` disconnects.
+
 ## Error Handling
 
 The transport includes error handling for:
 - Microphone acquisition failures (`initDevices`, `_connect`)
 - Invalid `relayUrl`
-- WebTransport / WebSocket connection failures (surfaced via `@moq/net` auto-reconnect)
+- WebTransport / WebSocket connection failures (retried by `@moq/net` auto-reconnect; fatal once its retry window runs out)
 - Catalog decode and audio decode errors (logged; the consume loop continues)
 
 ## License
