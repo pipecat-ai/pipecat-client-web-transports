@@ -352,9 +352,12 @@ export class MoqTransport extends Transport {
   // Transport lifecycle state. Mirrored to `_callbacks.onTransportStateChanged`.
   declare protected _state: TransportState;
 
-  // Whether this session completed the ready handshake (`sendReadyMessage`).
-  // Allows the UI state to behave correctly after a reconnect.
+  // Whether `sendReadyMessage` has taken this session to `ready`. From then
+  // on the relay status no longer drives the state (see `_onRelayStatus`).
   private _wasReady = false;
+
+  // Settles a pending `_waitForBotAudio`.
+  private _endBotAudioWait: (() => void) | null = null;
 
   constructor(options: MoqTransportOptions) {
     super();
@@ -474,33 +477,16 @@ export class MoqTransport extends Transport {
       webtransport,
     });
 
+    // Reload heals a dropped connection on its own and rejects `closed`
+    // only once its retry window runs out.
+    const reload = this._reload;
+    reload.closed.catch((err: unknown) => this._onRelayGaveUp(reload, err));
+
     // One reactive root for status mirroring. Connect/Watch are
     // self-driving via their own internal effects.
     this._signals = new Effect();
     this._signals.run((eff) => {
-      const status = eff.get(this._reload!.status);
-      if (status === "connected") {
-        if (this._state === "connecting") {
-          if (this._wasReady) {
-            // Reconnect: hold `ready` until the audio subscribe is back on
-            // the wire (as sendReadyMessage does). The guard drops the
-            // transition if the session moved on while we waited.
-            void this._waitForBotAudio().then(() => {
-              if (this._state === "connecting") {
-                this.state = "ready";
-              }
-            });
-          } else {
-            this.state = "connected";
-          }
-        }
-      } else if (status === "connecting") {
-        this.state = "connecting";
-      } else if (status === "disconnected") {
-        if (this._state !== "disconnecting" && this._state !== "disconnected") {
-          this.state = "disconnected";
-        }
-      }
+      this._onRelayStatus(eff.get(reload.status));
     });
 
     const ourPath = Moq.Path.from(merged.namespace, merged.clientId);
@@ -716,6 +702,47 @@ export class MoqTransport extends Transport {
     });
   }
 
+  /** Mirror the relay connection status into the transport state, until
+   *  the session is ready. After that the state holds `ready` while Reload
+   *  redials: `PipecatClient` only lets `sendText` and the like through in
+   *  `ready`, and a message sent meanwhile is kept in the transcript log
+   *  and replayed to the bot. A ready session ends through `_disconnect`
+   *  or `_onRelayGaveUp`. */
+  private _onRelayStatus(status: Moq.Connection.ReloadStatus): void {
+    if (this._wasReady) return;
+    if (status === "connected") {
+      if (this._state === "connecting") this.state = "connected";
+    } else if (status === "connecting") {
+      this.state = "connecting";
+    } else if (status === "disconnected") {
+      if (this._state !== "disconnecting" && this._state !== "disconnected") {
+        this.state = "disconnected";
+      }
+    }
+  }
+
+  /** Reload stopped redialing: the relay stayed unreachable for its whole
+   *  retry window. Reported as fatal, which is `PipecatClient`'s cue to
+   *  disconnect. Ignored from a Reload this transport has moved on from,
+   *  and during a disconnect already under way. */
+  private _onRelayGaveUp(reload: Moq.Connection.Reload, err: unknown): void {
+    if (this._reload !== reload || this._state === "disconnecting") return;
+    // `connect` races its dials with `Promise.any`, whose AggregateError
+    // carries the causes in `errors` and nothing useful in `message`.
+    const errors = (err as { errors?: unknown } | null)?.errors;
+    const causes: unknown[] = Array.isArray(errors) ? errors : [err];
+    const reason = causes
+      .map((cause) => (cause instanceof Error ? cause.message : String(cause)))
+      .join("; ");
+    this.state = "error";
+    this._callbacks?.onError?.(
+      RTVIMessage.error(
+        `MoqTransport could not connect to the relay: ${reason}`,
+        true,
+      ),
+    );
+  }
+
   async _disconnect(): Promise<void> {
     if (this._state === "disconnected") return;
     this.state = "disconnecting";
@@ -732,6 +759,7 @@ export class MoqTransport extends Transport {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     try {
+      this._endBotAudioWait?.();
       this._audioEmitter?.close();
       this._audioDecoder?.close();
       this._audioSource?.close();
@@ -778,7 +806,10 @@ export class MoqTransport extends Transport {
     // `client-ready` is the bot's cue to start speaking, and its audio is
     // live media with no replay — so hold it until our audio subscription
     // is on the wire, or the head of the first utterance is lost.
+    const reload = this._reload;
     await this._waitForBotAudio();
+    // Torn down while waiting: this session never became ready.
+    if (this._reload !== reload) return;
     this._wasReady = true;
     this.state = "ready";
     this.sendMessage(RTVIMessage.clientReady());
@@ -788,31 +819,40 @@ export class MoqTransport extends Transport {
    *  `Watch.Audio.Decoder` subscribes in an effect gated on exactly these
    *  three signals. Not gated on received audio: the bot won't speak
    *  until `client-ready` arrives. The timeout keeps `connect()` from
-   *  hanging against a bot with no audio track. */
+   *  hanging against a bot with no audio track. Its clock starts once the
+   *  relay is connected, so a relay that was never reached does not time
+   *  out into `ready`; `_disconnect` settles a wait still pending. */
   private _waitForBotAudio(timeoutMs = 10_000): Promise<void> {
     const source = this._audioSource;
     const broadcast = this._watchBroadcast;
-    // Both are set in _connect(); if they're null
+    const reload = this._reload;
+    // All are set in _connect(); if they're null
     // (bc a `disconnect` happened); resolve immediately;
-    if (!source || !broadcast) return Promise.resolve();
+    if (!source || !broadcast || !reload) return Promise.resolve();
     return new Promise((resolve) => {
       let done = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const eff = new Effect();
       const finish = () => {
         if (done) return;
         done = true;
         clearTimeout(timer);
         eff.close();
+        if (this._endBotAudioWait === finish) this._endBotAudioWait = null;
         resolve();
       };
-      const timer = setTimeout(() => {
-        console.warn(
-          "[MoqTransport] bot audio not subscribed after " +
-            `${timeoutMs}ms; sending client-ready anyway`
-        );
-        finish();
-      }, timeoutMs);
+      this._endBotAudioWait = finish;
       eff.run((e) => {
+        if (timer === undefined) {
+          if (e.get(reload.status) !== "connected") return;
+          timer = setTimeout(() => {
+            console.warn(
+              "[MoqTransport] bot audio not subscribed after " +
+                `${timeoutMs}ms; sending client-ready anyway`
+            );
+            finish();
+          }, timeoutMs);
+        }
         if (
           e.get(source.track) &&
           e.get(source.config) &&

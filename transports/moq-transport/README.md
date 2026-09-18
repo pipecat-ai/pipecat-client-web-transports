@@ -119,12 +119,14 @@ The transport can be in one of these states:
 - "disconnecting"
 - "error"
 
+Once the session is `ready`, a relay reconnect does not change the state. `Connection.Reload` redials in the background. A message sent meanwhile is kept in the transcript log and replayed to the bot when it resubscribes; audio from the gap is not. If the relay cannot be reached for Reload's whole retry window (five minutes), the transport moves to `error` and reports a fatal error through `onError`, and `PipecatClient` disconnects.
+
 ## Error Handling
 
 The transport includes error handling for:
 - Microphone acquisition failures (`initDevices`, `_connect`)
 - Invalid `relayUrl`
-- WebTransport / WebSocket connection failures (surfaced via `@moq/net` auto-reconnect)
+- WebTransport / WebSocket connection failures (retried by `@moq/net` auto-reconnect; fatal once its retry window runs out)
 - Catalog decode and audio decode errors (logged; the consume loop continues)
 
 ## License
