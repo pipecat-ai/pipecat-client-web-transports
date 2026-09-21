@@ -43,6 +43,52 @@ const DEFAULT_AUDIO_BUFFER_MAX_MS = 30 * 1000;
 const DEFAULT_AUDIO_SAMPLE_RATE = 48000;
 
 /**
+ * A transcript record as it travels on the wire: the RTVI message plus
+ * the fields a subscriber uses to drop replays.
+ *
+ * The transcript stream is a single group that a subscriber always reads
+ * from its first record, so a reconnect on either side replays the whole
+ * log. ``seq`` counts records for the life of the publisher's log and
+ * ``epoch`` identifies that log, so a fresh peer starts its own count
+ * rather than colliding with the watermark a subscriber kept from the
+ * previous one. A record without ``seq`` comes from a peer that predates
+ * the fields and is delivered as is.
+ */
+export type TranscriptRecord = RTVIMessage & { seq?: number; epoch?: string };
+
+/** The last record accepted from a peer, for the epoch it was published in. */
+export interface TranscriptWatermark {
+  epoch: string | undefined;
+  lastSeq: number;
+}
+
+/**
+ * Return the RTVI message carried by a peer transcript record, or ``null``
+ * for a record the watermark shows was already delivered. Advances the
+ * watermark; a record from a different epoch starts it over.
+ */
+export function acceptTranscriptRecord(
+  watermark: TranscriptWatermark,
+  record: TranscriptRecord,
+): RTVIMessage | null {
+  const { seq, epoch, ...message } = record;
+  if (typeof seq !== "number" || !Number.isInteger(seq)) return record;
+  if (epoch !== watermark.epoch) {
+    watermark.epoch = epoch;
+    watermark.lastSeq = -1;
+  }
+  if (seq <= watermark.lastSeq) return null;
+  watermark.lastSeq = seq;
+  return message as RTVIMessage;
+}
+
+function newTranscriptEpoch(): string {
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
  * Constructor options for the MoQ transport.
  *
  * The browser dials a MOQ peer (relay or bot in serve mode) at
@@ -230,6 +276,18 @@ function decodeCertHash(b64: string): ArrayBuffer {
  *   is what carries ``client-ready`` for protocol-version negotiation,
  *   typed text input, function-call results, and any other client→server
  *   RTVI traffic.
+ *
+ * Records on both tracks carry ``seq`` and ``epoch`` (see
+ * :type:`TranscriptRecord`): each side numbers what it sends and drops
+ * what it has already received, so a reconnect on either side, which
+ * replays the whole log, does not redeliver messages such as
+ * ``client-ready``.
+ *
+ * Each side appends a ``session-ending`` marker to its transcript before
+ * it leaves. The bot's tracks ending after the marker is a hangup; ending
+ * without it may be a failed relay between the peers, which looks the
+ * same on the wire, so the transport redials and the bot either reappears
+ * on the new session or is never announced on it.
  */
 export class MoqTransport extends Transport {
   public static SERVICE_NAME = "moq-transport";
@@ -254,8 +312,17 @@ export class MoqTransport extends Transport {
   // track, so we hold one Producer per subscription (`_transcriptOut`)
   // and replay the message log (`_transcriptLog`) into each — so a bot
   // that subscribes late still gets every message, in order.
-  private _transcriptOut: Set<Json.Stream.Producer<RTVIMessage>> | null = null;
-  private _transcriptLog: RTVIMessage[] | null = null;
+  private _transcriptOut: Set<Json.Stream.Producer<TranscriptRecord>> | null = null;
+  private _transcriptLog: TranscriptRecord[] | null = null;
+  // Identifies this connection's log to the bot's replay check; each
+  // record's `seq` is its index in `_transcriptLog`.
+  private _transcriptEpoch: string | null = null;
+  // Last record accepted from the bot. Kept across the bot's re-announces
+  // within one connection, since each re-subscribe replays its whole log.
+  private _peerWatermark: TranscriptWatermark = { epoch: undefined, lastSeq: -1 };
+  // Reload's enabled signal; flipping it off and on redials the relay.
+  private _reloadEnabled: Signal<boolean> | null = null;
+  private _lastRedialAt = 0;
   private _micEnabled = new Signal(true);
   private _micConstraints = new Signal<MediaTrackConstraints | undefined>(
     undefined,
@@ -284,6 +351,13 @@ export class MoqTransport extends Transport {
 
   // Transport lifecycle state. Mirrored to `_callbacks.onTransportStateChanged`.
   declare protected _state: TransportState;
+
+  // Whether `sendReadyMessage` has taken this session to `ready`. From then
+  // on the relay status no longer drives the state (see `_onRelayStatus`).
+  private _wasReady = false;
+
+  // Settles a pending `_waitForBotAudio`.
+  private _endBotAudioWait: (() => void) | null = null;
 
   constructor(options: MoqTransportOptions) {
     super();
@@ -367,6 +441,7 @@ export class MoqTransport extends Transport {
     }
     this._moqOptions = merged;
 
+    this._wasReady = false;
     this.state = "connecting";
 
     let url: URL;
@@ -395,26 +470,23 @@ export class MoqTransport extends Transport {
 
     // Reload auto-reconnects on disconnect; Publish.Broadcast and
     // Watch.Broadcast both react to its `established` signal.
+    this._reloadEnabled = new Signal(true);
     this._reload = new Moq.Connection.Reload({
-      enabled: new Signal(true),
+      enabled: this._reloadEnabled,
       url: new Signal(url),
       webtransport,
     });
+
+    // Reload heals a dropped connection on its own and rejects `closed`
+    // only once its retry window runs out.
+    const reload = this._reload;
+    reload.closed.catch((err: unknown) => this._onRelayGaveUp(reload, err));
 
     // One reactive root for status mirroring. Connect/Watch are
     // self-driving via their own internal effects.
     this._signals = new Effect();
     this._signals.run((eff) => {
-      const status = eff.get(this._reload!.status);
-      if (status === "connected") {
-        if (this._state === "connecting") this.state = "connected";
-      } else if (status === "connecting") {
-        this.state = "connecting";
-      } else if (status === "disconnected") {
-        if (this._state !== "disconnecting" && this._state !== "disconnected") {
-          this.state = "disconnected";
-        }
-      }
+      this._onRelayStatus(eff.get(reload.status));
     });
 
     const ourPath = Moq.Path.from(merged.namespace, merged.clientId);
@@ -464,14 +536,16 @@ export class MoqTransport extends Transport {
     // this track by its name — same convention as the bot's own transcript
     // track — so no catalog entry is needed.
     this._transcriptLog = [];
-    this._transcriptOut = new Set<Json.Stream.Producer<RTVIMessage>>();
+    this._transcriptEpoch = newTranscriptEpoch();
+    this._peerWatermark = { epoch: undefined, lastSeq: -1 };
+    this._transcriptOut = new Set<Json.Stream.Producer<TranscriptRecord>>();
     this._publishBroadcast.publishTrack(
       merged.transcriptTrack,
       (track, effect) => {
-        const producer = new Json.Stream.Producer<RTVIMessage>(track, {
+        const producer = new Json.Stream.Producer<TranscriptRecord>(track, {
           compression: true,
         });
-        for (const msg of this._transcriptLog ?? []) producer.append(msg);
+        for (const record of this._transcriptLog ?? []) producer.append(record);
         this._transcriptOut?.add(producer);
         effect.cleanup(() => {
           this._transcriptOut?.delete(producer);
@@ -608,7 +682,7 @@ export class MoqTransport extends Transport {
 
       const botBroadcast = conn.consume(botPath);
       const track = botBroadcast.subscribe(merged.transcriptTrack, 0);
-      const consumer = new Json.Stream.Consumer<RTVIMessage>(track, {
+      const consumer = new Json.Stream.Consumer<TranscriptRecord>(track, {
         compression: true,
       });
       const ac = new AbortController();
@@ -628,10 +702,64 @@ export class MoqTransport extends Transport {
     });
   }
 
+  /** Mirror the relay connection status into the transport state, until
+   *  the session is ready. After that the state holds `ready` while Reload
+   *  redials: `PipecatClient` only lets `sendText` and the like through in
+   *  `ready`, and a message sent meanwhile is kept in the transcript log
+   *  and replayed to the bot. A ready session ends through `_disconnect`
+   *  or `_onRelayGaveUp`. */
+  private _onRelayStatus(status: Moq.Connection.ReloadStatus): void {
+    if (this._wasReady) return;
+    if (status === "connected") {
+      if (this._state === "connecting") this.state = "connected";
+    } else if (status === "connecting") {
+      this.state = "connecting";
+    } else if (status === "disconnected") {
+      if (this._state !== "disconnecting" && this._state !== "disconnected") {
+        this.state = "disconnected";
+      }
+    }
+  }
+
+  /** Reload stopped redialing: the relay stayed unreachable for its whole
+   *  retry window. Reported as fatal, which is `PipecatClient`'s cue to
+   *  disconnect. Ignored from a Reload this transport has moved on from,
+   *  and during a disconnect already under way. */
+  private _onRelayGaveUp(reload: Moq.Connection.Reload, err: unknown): void {
+    if (this._reload !== reload || this._state === "disconnecting") return;
+    // `connect` races its dials with `Promise.any`, whose AggregateError
+    // carries the causes in `errors` and nothing useful in `message`.
+    const errors = (err as { errors?: unknown } | null)?.errors;
+    const causes: unknown[] = Array.isArray(errors) ? errors : [err];
+    const reason = causes
+      .map((cause) => (cause instanceof Error ? cause.message : String(cause)))
+      .join("; ");
+    this.state = "error";
+    this._callbacks?.onError?.(
+      RTVIMessage.error(
+        `MoqTransport could not connect to the relay: ${reason}`,
+        true,
+      ),
+    );
+  }
+
   async _disconnect(): Promise<void> {
     if (this._state === "disconnected") return;
     this.state = "disconnecting";
+    // Tell the bot this side is leaving, so it ends the call at once
+    // rather than treating the tracks ending as a possible relay failure.
+    // Best-effort: give the record a moment to reach the wire before the
+    // producers are finished.
+    if (
+      this._appendTranscriptRecord({
+        label: "moq-transport",
+        type: "session-ending",
+      } as RTVIMessage)
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
     try {
+      this._endBotAudioWait?.();
       this._audioEmitter?.close();
       this._audioDecoder?.close();
       this._audioSource?.close();
@@ -653,10 +781,13 @@ export class MoqTransport extends Transport {
       this._watchBroadcast = null;
       this._transcriptOut = null;
       this._transcriptLog = null;
+      this._transcriptEpoch = null;
       this._publishBroadcast = null;
       this._microphone = null;
       this._signals = null;
       this._reload = null;
+      this._reloadEnabled = null;
+      this._wasReady = false;
       this.state = "disconnected";
       // Fire the SDK's disconnected callback. `state = "disconnected"`
       // above already triggers `onTransportStateChanged`, but the SDK
@@ -675,7 +806,11 @@ export class MoqTransport extends Transport {
     // `client-ready` is the bot's cue to start speaking, and its audio is
     // live media with no replay — so hold it until our audio subscription
     // is on the wire, or the head of the first utterance is lost.
+    const reload = this._reload;
     await this._waitForBotAudio();
+    // Torn down while waiting: this session never became ready.
+    if (this._reload !== reload) return;
+    this._wasReady = true;
     this.state = "ready";
     this.sendMessage(RTVIMessage.clientReady());
   }
@@ -684,31 +819,40 @@ export class MoqTransport extends Transport {
    *  `Watch.Audio.Decoder` subscribes in an effect gated on exactly these
    *  three signals. Not gated on received audio: the bot won't speak
    *  until `client-ready` arrives. The timeout keeps `connect()` from
-   *  hanging against a bot with no audio track. */
+   *  hanging against a bot with no audio track. Its clock starts once the
+   *  relay is connected, so a relay that was never reached does not time
+   *  out into `ready`; `_disconnect` settles a wait still pending. */
   private _waitForBotAudio(timeoutMs = 10_000): Promise<void> {
     const source = this._audioSource;
     const broadcast = this._watchBroadcast;
-    // Both are set in _connect(); if they're null
+    const reload = this._reload;
+    // All are set in _connect(); if they're null
     // (bc a `disconnect` happened); resolve immediately;
-    if (!source || !broadcast) return Promise.resolve();
+    if (!source || !broadcast || !reload) return Promise.resolve();
     return new Promise((resolve) => {
       let done = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const eff = new Effect();
       const finish = () => {
         if (done) return;
         done = true;
         clearTimeout(timer);
         eff.close();
+        if (this._endBotAudioWait === finish) this._endBotAudioWait = null;
         resolve();
       };
-      const timer = setTimeout(() => {
-        console.warn(
-          "[MoqTransport] bot audio not subscribed after " +
-            `${timeoutMs}ms; sending client-ready anyway`
-        );
-        finish();
-      }, timeoutMs);
+      this._endBotAudioWait = finish;
       eff.run((e) => {
+        if (timer === undefined) {
+          if (e.get(reload.status) !== "connected") return;
+          timer = setTimeout(() => {
+            console.warn(
+              "[MoqTransport] bot audio not subscribed after " +
+                `${timeoutMs}ms; sending client-ready anyway`
+            );
+            finish();
+          }, timeoutMs);
+        }
         if (
           e.get(source.track) &&
           e.get(source.config) &&
@@ -801,18 +945,32 @@ export class MoqTransport extends Transport {
   // --------------------------------------------------------------------
 
   sendMessage(message: RTVIMessage): void {
-    if (!this._transcriptOut || !this._transcriptLog) {
+    if (!this._appendTranscriptRecord(message)) {
       console.warn(
         "[MoqTransport] sendMessage called before connect; dropping",
         message,
       );
-      return;
     }
-    // Append to the lossless stream. Keep a log too, so a bot that
-    // subscribes after this point is replayed every message in order
-    // (see the `publishTrack` serve callback above).
-    this._transcriptLog.push(message);
-    for (const producer of this._transcriptOut) producer.append(message);
+  }
+
+  /** Append a message to the client's transcript stream. Returns false
+   *  before connect, when there is no stream to append to.
+   *
+   *  The stream is lossless, and a log of it is kept so a bot that
+   *  subscribes later is replayed every message in order (see the
+   *  `publishTrack` serve callback in `_connect`). The record carries its
+   *  position in the log and the log's epoch, which is what lets the bot
+   *  skip the replay. */
+  private _appendTranscriptRecord(message: RTVIMessage): boolean {
+    if (!this._transcriptOut || !this._transcriptLog) return false;
+    const record: TranscriptRecord = {
+      ...message,
+      seq: this._transcriptLog.length,
+      epoch: this._transcriptEpoch ?? undefined,
+    };
+    this._transcriptLog.push(record);
+    for (const producer of this._transcriptOut) producer.append(record);
+    return true;
   }
 
   tracks(): Tracks {
@@ -830,16 +988,19 @@ export class MoqTransport extends Transport {
   // --------------------------------------------------------------------
 
   /** Pull RTVI messages off the @moq/json stream consumer and hand each
-   *  one to `PipecatClient` via `_onMessage`. The handler resolves the
+   *  one to `PipecatClient` via `_onMessage`, skipping records the
+   *  watermark shows were already delivered. The handler resolves the
    *  SDK's connect promise when bot-ready arrives. */
   private async _drainTranscript(
-    consumer: Json.Stream.Consumer<RTVIMessage>,
+    consumer: Json.Stream.Consumer<TranscriptRecord>,
     signal: AbortSignal,
   ): Promise<void> {
     for (;;) {
-      const message = await consumer.next();
-      if (!message || signal.aborted) break;
-      if (typeof message !== "object") continue;
+      const record = await consumer.next();
+      if (!record || signal.aborted) break;
+      if (typeof record !== "object") continue;
+      const message = acceptTranscriptRecord(this._peerWatermark, record);
+      if (!message) continue;
       // Intra-transport shutdown signal from the bot: bot is about to
       // close its MoQ session. Disable auto-reconnect, tear down the
       // audio decoder + subscribers on our side while WebTransport is
@@ -864,6 +1025,28 @@ export class MoqTransport extends Transport {
       }
       this._onMessage?.(message);
     }
+    // The bot's tracks ended without its marker while this side is still
+    // connected. A relay between the peers failing looks the same on the
+    // wire as the bot leaving, so redial: a fresh session re-establishes
+    // the subscriptions, and a bot that really left is simply never
+    // announced on it.
+    if (!signal.aborted) this._redial();
+  }
+
+  /** Drop the relay session and dial again, at most once every few
+   *  seconds. Every subscription is gated on the established session,
+   *  so it all comes back on the new one. */
+  private _redial(): void {
+    const enabled = this._reloadEnabled;
+    if (!enabled) return;
+    const now = Date.now();
+    if (now - this._lastRedialAt < 5000) return;
+    this._lastRedialAt = now;
+    console.warn(
+      "[MoqTransport] bot tracks ended without session-ending; redialing",
+    );
+    enabled.set(false);
+    setTimeout(() => enabled.set(true), 0);
   }
 
   /** Flush buffered bot audio and re-anchor playback at an utterance

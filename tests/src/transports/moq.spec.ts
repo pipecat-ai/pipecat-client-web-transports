@@ -75,7 +75,8 @@ vi.mock("@moq/net", () => ({
   Path: { from: (...parts: string[]) => parts.join("/") },
 }));
 
-import { MoqTransport } from "@pipecat-ai/moq-transport";
+import { Signal } from "@moq/signals";
+import { acceptTranscriptRecord, MoqTransport } from "@pipecat-ai/moq-transport";
 
 import { buildSpyCallbacks, wireTransport } from "../helpers/observeTransport";
 
@@ -275,5 +276,375 @@ describe("MoqTransport — characterization", () => {
 
     expect(resolved.clientId).toBe("bob");
     expect(resolved.relayUrl).toBe("https://relay.example/moq");
+  });
+});
+
+/**
+ * Transcript records carry `seq` and `epoch` so that the replay every
+ * (re)subscribe gets is dropped rather than redelivered. These tests drive
+ * the publish and drain paths with stand-ins for the @moq/json producer and
+ * consumer; the stream itself is exercised against a relay, not here.
+ */
+describe("MoqTransport — transcript records", () => {
+  type Record = { [key: string]: unknown };
+  const rtvi = (type: string, extra: Record = {}): Record => ({
+    id: "m1",
+    label: "rtvi-ai",
+    type,
+    data: {},
+    ...extra,
+  });
+
+  /** `_drainTranscript` and the transcript fields are internal. */
+  type Internals = {
+    _transcriptLog: Record[] | null;
+    _transcriptOut: Set<{ append: (r: Record) => void }> | null;
+    _transcriptEpoch: string | null;
+    _drainTranscript: (
+      consumer: { next: () => Promise<Record | null> },
+      signal: AbortSignal,
+    ) => Promise<void>;
+  };
+
+  let transport: MoqTransport;
+
+  beforeEach(() => {
+    transport = new MoqTransport({ relayUrl: "https://relay.example/moq" });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("acceptTranscriptRecord() delivers a new record with the fields stripped", () => {
+    const watermark = { epoch: undefined, lastSeq: -1 };
+    const message = acceptTranscriptRecord(
+      watermark,
+      rtvi("bot-ready", { seq: 0, epoch: "e1" }) as never,
+    );
+    expect(message).toEqual(rtvi("bot-ready"));
+    expect(watermark).toEqual({ epoch: "e1", lastSeq: 0 });
+  });
+
+  test("acceptTranscriptRecord() drops a replay of records already delivered", () => {
+    const watermark = { epoch: undefined, lastSeq: -1 };
+    for (const seq of [0, 1, 2]) {
+      expect(acceptTranscriptRecord(watermark, rtvi("x", { seq, epoch: "e" }) as never)).not.toBeNull();
+    }
+    // The whole log comes back on a resubscribe.
+    for (const seq of [0, 1, 2]) {
+      expect(acceptTranscriptRecord(watermark, rtvi("x", { seq, epoch: "e" }) as never)).toBeNull();
+    }
+    expect(acceptTranscriptRecord(watermark, rtvi("x", { seq: 3, epoch: "e" }) as never)).not.toBeNull();
+  });
+
+  test("acceptTranscriptRecord() starts the count over for a new epoch", () => {
+    const watermark = { epoch: undefined, lastSeq: -1 };
+    acceptTranscriptRecord(watermark, rtvi("x", { seq: 5, epoch: "old" }) as never);
+    expect(acceptTranscriptRecord(watermark, rtvi("x", { seq: 0, epoch: "new" }) as never)).not.toBeNull();
+    expect(acceptTranscriptRecord(watermark, rtvi("x", { seq: 0, epoch: "new" }) as never)).toBeNull();
+  });
+
+  test("acceptTranscriptRecord() passes a record without a sequence through unchanged", () => {
+    const watermark = { epoch: undefined, lastSeq: -1 };
+    const record = rtvi("client-ready");
+    expect(acceptTranscriptRecord(watermark, record as never)).toBe(record);
+    expect(acceptTranscriptRecord(watermark, record as never)).toBe(record);
+    const odd = rtvi("x", { seq: 1.5 });
+    expect(acceptTranscriptRecord(watermark, odd as never)).toBe(odd);
+  });
+
+  test("sendMessage() numbers each record from its position in the log and keeps the message itself unchanged", () => {
+    const internals = transport as unknown as Internals;
+    const producer = { append: vi.fn<(r: Record) => void>() };
+    internals._transcriptLog = [];
+    internals._transcriptEpoch = "e1";
+    internals._transcriptOut = new Set([producer]);
+
+    const first = rtvi("client-ready");
+    transport.sendMessage(first as never);
+    transport.sendMessage(rtvi("client-message") as never);
+
+    expect(producer.append.mock.calls.map(([r]) => [r.seq, r.epoch, r.type])).toEqual([
+      [0, "e1", "client-ready"],
+      [1, "e1", "client-message"],
+    ]);
+    expect(first).toEqual(rtvi("client-ready"));
+    // A later subscriber is replayed the same numbered records.
+    expect(internals._transcriptLog.map((r) => r.seq)).toEqual([0, 1]);
+  });
+
+  test("_drainTranscript() delivers each bot record once, stripped, across a replay", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    const { onMessage } = wireTransport(transport, callbacks);
+    const script: (Record | null)[] = [
+      rtvi("bot-ready", { seq: 0, epoch: "b1" }),
+      rtvi("bot-output", { seq: 1, epoch: "b1" }),
+      // The stream is re-read from its first record after a reconnect.
+      rtvi("bot-ready", { seq: 0, epoch: "b1" }),
+      rtvi("bot-output", { seq: 1, epoch: "b1" }),
+      rtvi("bot-output", { seq: 2, epoch: "b1" }),
+      null,
+    ];
+    const consumer = { next: vi.fn(async () => script.shift() ?? null) };
+
+    await (transport as unknown as Internals)._drainTranscript(
+      consumer,
+      new AbortController().signal,
+    );
+
+    expect(onMessage.mock.calls.map(([m]) => m)).toEqual([
+      rtvi("bot-ready"),
+      rtvi("bot-output"),
+      rtvi("bot-output"),
+    ]);
+  });
+
+  test("_drainTranscript() still honors the bot's session-ending marker when it carries the fields", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    const { onMessage } = wireTransport(transport, callbacks);
+    const disconnect = vi
+      .spyOn(transport as unknown as { _disconnect: () => Promise<void> }, "_disconnect")
+      .mockResolvedValue(undefined);
+    const script: (Record | null)[] = [
+      { label: "moq-transport", type: "session-ending", seq: 0, epoch: "b1" },
+      rtvi("bot-output", { seq: 1, epoch: "b1" }),
+      null,
+    ];
+    const consumer = { next: vi.fn(async () => script.shift() ?? null) };
+
+    await (transport as unknown as Internals)._drainTranscript(
+      consumer,
+      new AbortController().signal,
+    );
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(consumer.next).toHaveBeenCalledTimes(1);
+  });
+
+  test("_drainTranscript() redials when the bot's tracks end without the marker", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    const redial = vi
+      .spyOn(transport as unknown as { _redial: () => void }, "_redial")
+      .mockImplementation(() => {});
+    const script: (Record | null)[] = [rtvi("bot-output", { seq: 0, epoch: "b1" }), null];
+    const consumer = { next: vi.fn(async () => script.shift() ?? null) };
+
+    await (transport as unknown as Internals)._drainTranscript(
+      consumer,
+      new AbortController().signal,
+    );
+
+    expect(redial).toHaveBeenCalledTimes(1);
+  });
+
+  test("_drainTranscript() does not redial when its own teardown aborted it", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    const redial = vi
+      .spyOn(transport as unknown as { _redial: () => void }, "_redial")
+      .mockImplementation(() => {});
+    const ac = new AbortController();
+    const consumer = {
+      next: vi.fn(async () => {
+        ac.abort();
+        return null;
+      }),
+    };
+
+    await (transport as unknown as Internals)._drainTranscript(consumer, ac.signal);
+
+    expect(redial).not.toHaveBeenCalled();
+  });
+
+  test("_disconnect() sends the session-ending marker before tearing down", async () => {
+    const internals = transport as unknown as Internals;
+    const producer = { append: vi.fn<(r: Record) => void>() };
+    internals._transcriptLog = [];
+    internals._transcriptEpoch = "e1";
+    internals._transcriptOut = new Set([producer]);
+    (transport as unknown as { _state: string })._state = "connected";
+
+    await transport._disconnect();
+
+    expect(producer.append.mock.calls.map(([r]) => [r.label, r.type, r.seq, r.epoch])).toEqual([
+      ["moq-transport", "session-ending", 0, "e1"],
+    ]);
+    expect(transport.state).toBe("disconnected");
+  });
+});
+
+/**
+ * The relay connection is `@moq/net`'s `Connection.Reload`, mocked out
+ * above, so these drive the two handlers `_connect` wires to it.
+ */
+describe("MoqTransport — relay reconnects", () => {
+  type RelayStatus = "connecting" | "connected" | "disconnected";
+  type FakeReload = { status: Signal<RelayStatus>; close: () => void };
+  type Internals = {
+    _state: string;
+    _reload: FakeReload | null;
+    _audioSource: { track: Signal<unknown>; config: Signal<unknown>; close: () => void } | null;
+    _watchBroadcast: { active: Signal<boolean>; close: () => void } | null;
+    _onRelayStatus: (status: RelayStatus) => void;
+    _onRelayGaveUp: (reload: FakeReload, err: unknown) => void;
+  };
+
+  const fakeReload = (status: RelayStatus): FakeReload => ({
+    status: new Signal<RelayStatus>(status),
+    close: () => {},
+  });
+
+  /** Stand in for what `_connect` leaves behind, with the bot's audio not
+   *  yet subscribed, so `sendReadyMessage` has something to wait on. */
+  function connectTo(internals: Internals, reload: FakeReload): void {
+    internals._reload = reload;
+    internals._audioSource = {
+      track: new Signal<unknown>(undefined),
+      config: new Signal<unknown>(undefined),
+      close: () => {},
+    };
+    internals._watchBroadcast = { active: new Signal(false), close: () => {} };
+    internals._state = "connecting";
+  }
+
+  let transport: MoqTransport;
+
+  beforeEach(() => {
+    transport = new MoqTransport({ relayUrl: "https://relay.example/moq" });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("the relay status drives the state until the session is ready", () => {
+    const { callbacks, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    recorder.states.length = 0;
+    const internals = transport as unknown as Internals;
+
+    internals._onRelayStatus("connecting");
+    internals._onRelayStatus("connected");
+
+    expect(recorder.states).toEqual(["connecting", "connected"]);
+  });
+
+  test("a relay reconnect leaves a ready session's state alone", async () => {
+    const { callbacks, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    await transport.sendReadyMessage();
+    recorder.states.length = 0;
+    const internals = transport as unknown as Internals;
+
+    internals._onRelayStatus("disconnected");
+    internals._onRelayStatus("connecting");
+    internals._onRelayStatus("connected");
+
+    expect(transport.state).toBe("ready");
+    expect(recorder.states).toEqual([]);
+  });
+
+  test("the relay status drives the state again after a disconnect", async () => {
+    const { callbacks, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    await transport.sendReadyMessage();
+    await transport._disconnect();
+    recorder.states.length = 0;
+
+    (transport as unknown as Internals)._onRelayStatus("connecting");
+
+    expect(recorder.states).toEqual(["connecting"]);
+  });
+
+  test("Reload giving up moves to 'error' and reports the dial failures as fatal", () => {
+    const { callbacks, spies, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    recorder.states.length = 0;
+    const internals = transport as unknown as Internals;
+    const reload = fakeReload("connecting");
+    internals._reload = reload;
+
+    // The shape `@moq/net`'s connect rejects with: it races WebTransport
+    // and WebSocket through Promise.any.
+    internals._onRelayGaveUp(
+      reload,
+      new AggregateError(
+        [new Error("webtransport refused"), new Error("websocket refused")],
+        "All promises were rejected",
+      ),
+    );
+
+    expect(recorder.states).toEqual(["error"]);
+    expect(spies.onError).toHaveBeenCalledTimes(1);
+    const [message] = spies.onError.mock.calls[0];
+    expect(message.data.fatal).toBe(true);
+    expect(message.data.message).toContain("webtransport refused; websocket refused");
+    expect(message.data.message).not.toContain("All promises were rejected");
+  });
+
+  test("a Reload the transport has moved on from giving up is ignored", () => {
+    const { callbacks, spies, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    recorder.states.length = 0;
+    const internals = transport as unknown as Internals;
+    internals._reload = fakeReload("connected");
+
+    internals._onRelayGaveUp(fakeReload("connecting"), new Error("refused"));
+
+    expect(spies.onError).not.toHaveBeenCalled();
+    expect(recorder.states).toEqual([]);
+  });
+
+  test("Reload giving up during a disconnect is ignored", () => {
+    const { callbacks, spies } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    const internals = transport as unknown as Internals;
+    const reload = fakeReload("connecting");
+    internals._reload = reload;
+    internals._state = "disconnecting";
+
+    internals._onRelayGaveUp(reload, new Error("refused"));
+
+    expect(spies.onError).not.toHaveBeenCalled();
+  });
+
+  test("sendReadyMessage() does not time out into 'ready' before the relay connects", async () => {
+    vi.useFakeTimers();
+    try {
+      const { callbacks, recorder } = buildSpyCallbacks();
+      wireTransport(transport, callbacks);
+      const reload = fakeReload("connecting");
+      connectTo(transport as unknown as Internals, reload);
+      recorder.states.length = 0;
+
+      const ready = transport.sendReadyMessage();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(recorder.states).toEqual([]);
+
+      // The audio-subscribe timeout runs from the relay connecting.
+      reload.status.set("connected");
+      await vi.advanceTimersByTimeAsync(10_000);
+      await ready;
+
+      expect(recorder.states).toEqual(["ready"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("_disconnect() settles a pending sendReadyMessage() without reaching 'ready'", async () => {
+    const { callbacks, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    connectTo(transport as unknown as Internals, fakeReload("connecting"));
+    recorder.states.length = 0;
+
+    const ready = transport.sendReadyMessage();
+    await transport._disconnect();
+    await ready;
+
+    expect(recorder.states).toEqual(["disconnecting", "disconnected"]);
   });
 });
