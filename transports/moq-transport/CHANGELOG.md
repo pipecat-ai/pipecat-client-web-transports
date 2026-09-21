@@ -5,6 +5,23 @@ All notable changes to **Pipecat MoqTransport** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.1.1...moq-transport-v0.2.0) (2026-09-21)
+
+
+### Features
+
+* **moq-transport:** number transcript records and drop replays on resubscribe ([91476a3](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/91476a36324c357928affcac84fa3091125bdab5))
+* **moq-transport:** number transcript records and drop replays on resubscribe ([633cf2c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/633cf2c80987033ef2535f4e97c0f567afa8372b))
+* **moq-transport:** send session-ending on disconnect and redial when the bot's tracks end without it ([f2ff607](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/f2ff6077a3cf27ca611925a45d8fc18e573e0c4a))
+
+
+### Bug Fixes
+
+* add _wasReady flag to handle moq-relay reconnects ([ba308e1](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/ba308e1424114142abf8130db22dd527f54407c2))
+* **moq-transport:** hold client-ready until the bot audio subscription is live ([dc56c47](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/dc56c4700950ec55697705f3fb9f3f86f314eeb8))
+* **moq-transport:** hold client-ready until the bot audio subscription is live ([795b91a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/795b91a2cea0f7cc12849e869e88fc5ea8a1f5d7))
+* **moq-transport:** hold ready through relay reconnects ([f25ebc1](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/f25ebc159bd887e6023bff43d1ff0705243f5458))
+
 ## [0.1.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.1.0...moq-transport-v0.1.1) (2026-08-13)
 
 
