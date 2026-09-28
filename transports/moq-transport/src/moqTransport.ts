@@ -23,6 +23,11 @@ const DEFAULT_NAMESPACE = "pipecat";
 const DEFAULT_CLIENT_ID = "client0";
 const DEFAULT_BOT_ID = "bot0";
 const DEFAULT_TRANSCRIPT_TRACK = "transcript.json.z";
+// Track name for the client's mic audio rendition inside its broadcast's
+// catalog. The bot discovers the client's audio track by reading the
+// catalog, so the exact name is internal — it just has to be a valid
+// hang audio rendition path.
+const CLIENT_AUDIO_TRACK = "audio/data";
 // Bounded jitter buffer on the audio decoder. Lower = more interactive
 // but more drops on bad networks. Matches the bot's audio_in_max_latency_ms
 // in spirit (each side enforces its own deadline).
@@ -145,14 +150,13 @@ export interface MoqTransportOptions {
   /**
    * Latency floor (ms) — the jitter buffer the player keeps before
    * playback. Lower = more interactive, more drops; higher = smoother,
-   * more glass-to-glass delay. Maps to the `min` bound of the
-   * ``@moq/watch`` ``Sync.latency`` range.
+   * more glass-to-glass delay. Maps to the ``@moq/watch`` ``Sync.delay``.
    */
   audioLatencyMs?: number;
 
   /**
-   * Latency ceiling for buffered playback (the `max` bound of the
-   * ``@moq/watch`` ``Sync.latency`` range).
+   * Latency ceiling for buffered playback (the ``@moq/watch`` ``Sync.buffer``
+   * lookahead window).
    *
    * The bot writes TTS audio faster than real-time with future-dated
    * timestamps; the player buffers it and plays at the encoded pace
@@ -164,7 +168,7 @@ export interface MoqTransportOptions {
    *   dropping; an interruption (``user-started-speaking``) flushes early
    *   via ``reset()``. The bot paces a little under this so it never
    *   actually overruns the cap.
-   * - ``"real-time"`` — collapse to the floor (minimize latency, the old
+   * - ``"real-time"`` — collapse the buffer (minimize latency, the old
    *   skip-ahead behavior; only useful with a live, real-time publisher).
    */
   audioBufferMaxMs?: number | "real-time";
@@ -243,15 +247,23 @@ function decodeCertHash(b64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+// The relay connection status union (`@moq/net` `Connection.status`).
+type RelayStatus = "connecting" | "connected" | "disconnected";
+
 /**
  * ``MoqTransport`` — Pipecat Client SDK transport plugin for Media-over-QUIC.
  *
- * Built on the official ``moq`` library family:
+ * Built on the official ``moq`` library family (0.4/0.5):
  *
- * - ``@moq/net`` for connection management (``Connection.Reload``
- *   auto-reconnects on drops; races WebTransport + WebSocket).
- * - ``@moq/publish`` for mic capture and Opus encoding via
- *   ``Publish.Source.Microphone`` + ``Publish.Broadcast``.
+ * - ``@moq/net`` for connection management. ``Moq.Connection`` is a
+ *   reconnecting, shareable session handle that races WebTransport +
+ *   WebSocket and auto-reconnects on drops. Broadcasts are published and
+ *   consumed through an ``Origin`` table (``connection.origin``) rather
+ *   than through the live session object.
+ * - ``@moq/publish`` for mic capture and Opus encoding:
+ *   ``Publish.Source.Microphone`` owns getUserMedia, ``Publish.Audio.Capture``
+ *   pumps PCM, and ``Publish.Audio.Encoder`` registers the audio rendition
+ *   on a ``Publish.Broadcast``.
  * - ``@moq/watch`` for bot audio playback: ``Watch.Broadcast`` discovers
  *   the catalog, ``Watch.Audio.Source`` picks a rendition, and
  *   ``Watch.Audio.Decoder`` + ``Watch.Audio.Emitter`` drive an
@@ -296,23 +308,30 @@ export class MoqTransport extends Transport {
   // and overridden by `_validateConnectionParams` at connect time.
   private _moqOptions: ResolvedOptions;
 
-  // Connection + reactive root.
-  private _reload: Moq.Connection.Reload | null = null;
+  // Connection + reactive root. The connection's shared `origin` is
+  // bidirectional: the client's broadcast is published into it (and
+  // announced to the relay) and the bot's broadcast is consumed from it.
+  private _connection: Moq.Connection | null = null;
   private _signals: Effect | null = null;
 
   // Publish side (mic → bot).
   private _publishBroadcast: Publish.Broadcast | null = null;
   private _microphone: Publish.Source.Microphone | null = null;
+  private _capture: Publish.Audio.Capture | null = null;
+  private _encoder: Publish.Audio.Encoder | null = null;
+  // The reactive audio capture source, derived from the mic's `Media`
+  // output (its `.audio` member). Fed to `Publish.Audio.Capture`.
+  private _micAudioSource = new Signal<Publish.Audio.Source | undefined>(
+    undefined,
+  );
   // RTVI JSON side-channel from client → bot, symmetric with the bot's
   // outbound `transcript` track. Published as a lossless `@moq/json`
-  // append-stream (compression on); `sendMessage` appends each RTVI
-  // message and the bot's `_forward_peer_transcript` on the Python side
-  // drains it. The stream Producer binds to a single track with no
-  // built-in fan-out, and `publishTrack` serves each subscriber its own
-  // track, so we hold one Producer per subscription (`_transcriptOut`)
-  // and replay the message log (`_transcriptLog`) into each — so a bot
-  // that subscribes late still gets every message, in order.
-  private _transcriptOut: Set<Json.Stream.Producer<TranscriptRecord>> | null = null;
+  // append-stream (compression on) on a statically-inserted track: moq's
+  // group cache replays the whole log to a bot that subscribes late, so a
+  // single Producer serves every subscriber. `sendMessage` appends each
+  // RTVI message; the bot's `_forward_peer_transcript` on the Python side
+  // drains it.
+  private _transcriptOut: Json.Stream.Producer<TranscriptRecord> | null = null;
   private _transcriptLog: TranscriptRecord[] | null = null;
   // Identifies this connection's log to the bot's replay check; each
   // record's `seq` is its index in `_transcriptLog`.
@@ -320,9 +339,8 @@ export class MoqTransport extends Transport {
   // Last record accepted from the bot. Kept across the bot's re-announces
   // within one connection, since each re-subscribe replays its whole log.
   private _peerWatermark: TranscriptWatermark = { epoch: undefined, lastSeq: -1 };
-  // Reload's enabled signal; flipping it off and on redials the relay.
+  // Connection's enabled signal (the connection auto-reconnects on drops).
   private _reloadEnabled: Signal<boolean> | null = null;
-  private _lastRedialAt = 0;
   private _micEnabled = new Signal(true);
   private _micConstraints = new Signal<MediaTrackConstraints | undefined>(
     undefined,
@@ -334,7 +352,7 @@ export class MoqTransport extends Transport {
   private _audioSampleRate = new Signal<number | undefined>(undefined);
 
   // Watch side (bot → playback). Buffered playback via @moq/watch:
-  // Broadcast -> Audio.Source -> Decoder -> Emitter, with `Sync.latencyMax`
+  // Broadcast -> Audio.Source -> Decoder -> Emitter, with `Sync.buffer`
   // letting faster-than-real-time TTS build up instead of the player
   // skipping ahead, and `reset()` flushing the buffer on interruption.
   private _watchBroadcast: Watch.Broadcast | null = null;
@@ -345,7 +363,7 @@ export class MoqTransport extends Transport {
 
   // Synthesized `MediaStreamTrack` for the bot, so `tracks().bot.audio`
   // returns something a `<audio>` element / visualizer can consume.
-  // Tapped off `Watch.Audio.Decoder.root` (an `AudioNode`) into a
+  // Tapped off `Watch.Audio.Decoder.out.root` (an `AudioNode`) into a
   // `MediaStreamAudioDestinationNode`.
   private _botAudioTrack: MediaStreamTrack | undefined;
 
@@ -468,37 +486,45 @@ export class MoqTransport extends Transport {
         }
       : undefined;
 
-    // Reload auto-reconnects on disconnect; Publish.Broadcast and
-    // Watch.Broadcast both react to its `established` signal.
+    // The connection is a reconnecting, shareable handle. Its `origin` is a
+    // single bidirectional table: a broadcast published into it is announced
+    // to the relay, and the peer's announced broadcasts are consumed from it.
+    // Both the publish broadcast and the watch/transcript consumers read
+    // `connection.origin`, so it spans reconnects.
     this._reloadEnabled = new Signal(true);
-    this._reload = new Moq.Connection.Reload({
+    this._connection = new Moq.Connection({
       enabled: this._reloadEnabled,
       url: new Signal(url),
       webtransport,
     });
+    const connection = this._connection;
 
-    // Reload heals a dropped connection on its own and rejects `closed`
-    // only once its retry window runs out.
-    const reload = this._reload;
-    reload.closed.catch((err: unknown) => this._onRelayGaveUp(reload, err));
-
-    // One reactive root for status mirroring. Connect/Watch are
-    // self-driving via their own internal effects.
+    // One reactive root for status mirroring and the give-up watch.
+    // Publish/Watch are self-driving via their own internal effects.
     this._signals = new Effect();
     this._signals.run((eff) => {
-      this._onRelayStatus(eff.get(reload.status));
+      this._onRelayStatus(eff.get(connection.status));
+    });
+    // `connection.error` is set once the connection stops retrying the
+    // current URL (auth rejection, or the retry window expired). That is
+    // the "gave up reconnecting" signal that old `reload.closed` carried.
+    this._signals.run((eff) => {
+      const err = eff.get(connection.error);
+      if (err) this._onRelayGaveUp(connection, err);
     });
 
     const ourPath = Moq.Path.from(merged.namespace, merged.clientId);
     const botPath = Moq.Path.from(merged.namespace, merged.botId);
 
     // ----------------------------------------------------------------
-    // Publish — Microphone owns getUserMedia, device selection, and
-    // produces a reactive `source` signal that Publish.Broadcast
-    // consumes. Constraints (channelCount:1, sampleRate) and preferred
-    // deviceId flow through the signals we hold a reference to, so
-    // updateMic() re-routes audio without re-creating the broadcast.
-    // The encoder's sampleRate Signal pins what the catalog advertises.
+    // Publish — Microphone owns getUserMedia and device selection and
+    // produces a reactive `Media` output; we take its `.audio` source and
+    // feed it to Audio.Capture, which Audio.Encoder reads to produce the
+    // `audio/data` rendition on Publish.Broadcast. Constraints
+    // (channelCount:1, sampleRate) and preferred deviceId flow through the
+    // signals we hold references to, so updateMic() re-routes audio without
+    // re-creating the broadcast. The encoder's sampleRate Signal pins what
+    // the catalog advertises.
     // ----------------------------------------------------------------
     this._micConstraints.set({
       channelCount: { exact: 1 },
@@ -515,52 +541,71 @@ export class MoqTransport extends Transport {
         device: { preferred: this._preferredMicId },
       });
     }
+    const microphone = this._microphone;
 
-    this._publishBroadcast = new Publish.Broadcast({
-      connection: this._reload.established,
-      enabled: new Signal(true),
-      name: new Signal(ourPath),
-      audio: {
-        source: this._microphone.source,
-        enabled: this._micEnabled,
-        sampleRate: this._audioSampleRate,
-      },
+    // Derive the audio capture source from the mic's `Media` output.
+    this._signals.run((eff) => {
+      this._micAudioSource.set(eff.get(microphone.out.source)?.audio);
     });
 
-    // Client-side transcript: `sendMessage` appends each RTVI message to
-    // a lossless JSON append-stream. `publishTrack` hands us a fresh track
-    // per subscription (only one, in the normal single-bot flow), so we
-    // spin up a `Json.Stream.Producer` per subscriber and replay the
-    // message log into it — a bot that subscribes after we've already sent
-    // messages still gets the full log, in order. The bot subscribes to
-    // this track by its name — same convention as the bot's own transcript
-    // track — so no catalog entry is needed.
+    // The broadcast is bound to the connection's shared origin, which
+    // announces it to the relay. Its catalog is populated by the encoder.
+    this._publishBroadcast = new Publish.Broadcast({
+      origin: connection.origin,
+      enabled: new Signal(true),
+      name: new Signal(ourPath),
+    });
+
+    this._capture = new Publish.Audio.Capture({
+      source: this._micAudioSource,
+      enabled: this._micEnabled,
+      sampleRate: this._audioSampleRate,
+      channelCount: new Signal<number | undefined>(1),
+    });
+    this._encoder = new Publish.Audio.Encoder(CLIENT_AUDIO_TRACK, {
+      enabled: this._micEnabled,
+      broadcast: new Signal<Publish.Broadcast | undefined>(this._publishBroadcast),
+      capture: new Signal<Publish.Audio.Capture | undefined>(this._capture),
+      bandwidth: new Signal(undefined),
+      codec: "opus",
+    });
+
+    // Client-side transcript: `sendMessage` appends each RTVI message to a
+    // lossless JSON append-stream on a statically-inserted track. moq's
+    // group cache replays the whole group to a bot that subscribes late,
+    // so one Producer serves every subscriber — no per-subscription
+    // fan-out. The track lives on the broadcast's net-level producer
+    // (`broadcast.net`), which appears once the origin has a session; we
+    // create it in an effect and replay any messages queued before then.
+    // The bot subscribes to this track by its name — same convention as
+    // the bot's own transcript track — so no catalog entry is needed.
     this._transcriptLog = [];
     this._transcriptEpoch = newTranscriptEpoch();
     this._peerWatermark = { epoch: undefined, lastSeq: -1 };
-    this._transcriptOut = new Set<Json.Stream.Producer<TranscriptRecord>>();
-    this._publishBroadcast.publishTrack(
-      merged.transcriptTrack,
-      (track, effect) => {
-        const producer = new Json.Stream.Producer<TranscriptRecord>(track, {
-          compression: true,
-        });
-        for (const record of this._transcriptLog ?? []) producer.append(record);
-        this._transcriptOut?.add(producer);
-        effect.cleanup(() => {
-          this._transcriptOut?.delete(producer);
-          producer.finish();
-        });
-      },
-    );
+    this._transcriptOut = null;
+    this._signals.run((eff) => {
+      const net = eff.get(this._publishBroadcast!.net);
+      if (!net) return;
+      const track = net.createTrack(merged.transcriptTrack);
+      const producer = new Json.Stream.Producer<TranscriptRecord>({
+        track,
+        compression: "deflate",
+      });
+      for (const record of this._transcriptLog ?? []) producer.append(record);
+      this._transcriptOut = producer;
+      eff.cleanup(() => {
+        if (this._transcriptOut === producer) this._transcriptOut = null;
+        producer.finish();
+      });
+    });
 
     // Log the mic settings the browser actually granted, so we can see
     // when a UA ignores the constraint (e.g. macOS often pins 48k
     // regardless of `sampleRate.ideal`).
     this._signals.run((eff) => {
-      const src = eff.get(this._microphone!.source);
-      if (!src) return;
-      const track = "track" in src ? src.track : src;
+      const src = eff.get(microphone.out.source)?.audio;
+      const track = this._audioSourceTrack(src);
+      if (!track) return;
       const s = track.getSettings();
       console.log(
         `[MoqTransport] publish: requested=${merged.audioSampleRate}Hz, ` +
@@ -574,65 +619,71 @@ export class MoqTransport extends Transport {
     // tracking; Audio.Source picks the active audio rendition;
     // Audio.Decoder runs the WebCodecs decode loop and feeds an
     // AudioWorklet ring buffer; Audio.Emitter routes that to the
-    // speakers. `Sync.latencyMax` lets faster-than-real-time TTS build
-    // up a buffer instead of the player skipping ahead; `reset()`
-    // (invoked on `user-started-speaking`) flushes it on interruption.
-    // We also tap Decoder.root → MediaStreamAudioDestinationNode so
+    // speakers. `Sync.buffer` lets faster-than-real-time TTS build up a
+    // buffer instead of the player skipping ahead; `reset()` (invoked on
+    // `user-started-speaking`) flushes it on interruption. We also tap
+    // Decoder.out.root → MediaStreamAudioDestinationNode so
     // tracks().bot.audio returns a MediaStreamTrack.
     //
     // `catalogFormat: "hang"` is pinned because the pipecat bot publishes
-    // a hang-format catalog (camelCase `sampleRate`). The auto-detector
-    // would also land on "hang" here (no suffix on the broadcast name,
-    // and hang is the DEFAULT_FORMAT) but pinning removes ambiguity if
-    // a future publisher adds a suffix or a different default ships.
+    // a hang-format catalog (camelCase `sampleRate`).
+    //
+    // `announced: false` subscribes to the bot's path directly rather than
+    // waiting for its announcement to be discovered. The new @moq/net
+    // request survives until the publisher appears (a missing broadcast
+    // surfaces as a reset on the first track and the handle stays open,
+    // re-resolving when the bot serves), so a blind subscribe is safe here
+    // and does not depend on cross-implementation announce discovery — the
+    // bot (Rust moq_ffi) and this client (@moq/net) do not reliably surface
+    // each other's announcements over some relays.
     // ----------------------------------------------------------------
-    // Enabled only while the bot's broadcast is actually announced: the
-    // catalog subscribe otherwise fires as soon as the connection is up,
-    // and against a bot that starts in response to our own announcement
-    // (direct mode) the path doesn't exist yet — the relay resets the
-    // stream and the catalog fetch never retries, leaving audio dead
-    // while the (separately gated) transcript still works. Flipping
-    // `enabled` on the announcement makes Watch.Broadcast (re)subscribe
-    // when the bot really is there, and tear down if it goes away.
-    const botAnnounced = new Signal(false);
-    this._signals.run((eff) => {
-      botAnnounced.set(eff.get(this._reload!.announced).has(botPath));
-    });
     this._watchBroadcast = new Watch.Broadcast({
-      connection: this._reload.established,
-      enabled: botAnnounced,
+      origin: connection.origin,
+      enabled: new Signal(true),
+      announced: new Signal(false),
       name: new Signal(botPath),
       catalogFormat: new Signal<Watch.CatalogFormat>("hang"),
     });
 
-    // Latency range: floor = interactive jitter buffer (audioLatencyMs),
-    // ceiling = how much faster-than-real-time TTS the player will hold
-    // before dropping (audioBufferMaxMs). A number-typed max opens the
-    // buffer; "real-time" collapses to the floor (skip-ahead behavior).
-    const sync = new Watch.Sync({
-      connection: this._reload.established,
-      latency: new Signal<Watch.Latency>({
-        min: merged.audioLatencyMs as Moq.Time.Milli,
-        max:
-          merged.audioBufferMaxMs === "real-time"
-            ? "real-time"
-            : (merged.audioBufferMaxMs as Moq.Time.Milli),
-      }),
+    // Latency: `delay` is the interactive jitter floor (audioLatencyMs);
+    // `buffer` is how much faster-than-real-time TTS the player holds
+    // before dropping (audioBufferMaxMs). "real-time" collapses to
+    // "instant" (present ASAP, no lookahead).
+    const realTime = merged.audioBufferMaxMs === "real-time";
+    this._sync = new Watch.Sync({
+      probe: connection.probe,
+      delay: realTime
+        ? "instant"
+        : (merged.audioLatencyMs as Moq.Time.Milli),
+      buffer: (realTime ? 0 : merged.audioBufferMaxMs) as Moq.Time.Milli,
     });
-    this._sync = sync;
-    this._audioSource = new Watch.Audio.Source(sync, {
-      broadcast: this._watchBroadcast,
+    this._audioSource = new Watch.Audio.Source({
+      broadcast: new Signal<Watch.Broadcast | undefined>(this._watchBroadcast),
+      // Required: the Source only populates its rendition list when a
+      // `supported` probe is provided (it filters catalog renditions through
+      // it). Use the decoder's WebCodecs probe, same as `<moq-watch>`.
+      supported: new Signal(Watch.Audio.Decoder.supported),
     });
-    this._audioDecoder = new Watch.Audio.Decoder(this._audioSource, {
+    this._audioDecoder = new Watch.Audio.Decoder({
+      source: this._audioSource,
+      sync: this._sync,
       enabled: new Signal(true),
     });
-    this._audioEmitter = new Watch.Audio.Emitter(this._audioDecoder);
+    this._audioEmitter = new Watch.Audio.Emitter({
+      source: this._audioDecoder,
+    });
 
-    // Bridge Decoder.root (AudioNode) → MediaStreamTrack for tracks().bot.audio.
+    // Bridge Decoder.out.root (AudioNode) → MediaStreamTrack for tracks().bot.audio.
     this._signals.run((eff) => {
-      const ctx = eff.get(this._audioDecoder!.context);
-      const root = eff.get(this._audioDecoder!.root);
+      const ctx = eff.get(this._audioDecoder!.out.context);
+      const root = eff.get(this._audioDecoder!.out.root);
       if (!ctx || !root) return;
+      // The AudioContext is created several seconds after the user's
+      // Connect click (the bot cold-starts, then the catalog resolves), so
+      // it starts "suspended" under the browser's autoplay policy. Resume
+      // it (the page has sticky activation from the click) or playback is
+      // silent even though decode runs.
+      if (ctx.state === "suspended") void ctx.resume().catch(() => {});
       const dest = ctx.createMediaStreamDestination();
       root.connect(dest);
       this._botAudioTrack = dest.stream.getAudioTracks()[0];
@@ -653,8 +704,8 @@ export class MoqTransport extends Transport {
     // either a parser bug or the bot is advertising a rate that doesn't
     // match its actual Opus stream.
     this._signals.run((eff) => {
-      const config = eff.get(this._audioSource!.config);
-      const ctx = eff.get(this._audioDecoder!.context);
+      const config = eff.get(this._audioSource!.out.config);
+      const ctx = eff.get(this._audioDecoder!.out.context);
       if (!config && !ctx) return;
       console.log(
         `[MoqTransport] consume: catalog codec=${config?.codec}, ` +
@@ -668,47 +719,96 @@ export class MoqTransport extends Transport {
     // re-subscribed on every (re-)announce. @moq/json's stream Consumer
     // yields every appended record in order, losslessly.
     //
-    // Gated on the announcement rather than the connection, because
-    // subscribing to a path nobody publishes yet gets the stream reset:
-    // a bot started in response to our own announcement necessarily
-    // appears after us. Same gate as `Watch.Broadcast`'s `enabled` above;
-    // this track goes straight through `@moq/net`, so it needs the gate
-    // spelled out. Reading it off `Reload` rather than the established
-    // session means the gate spans reconnects.
+    // Consuming goes through the origin: `request(botPath, {announced:false})`
+    // subscribes to the bot's path directly (see the Watch.Broadcast note
+    // above on why we don't wait for announce discovery). `req.active`
+    // resolves once the bot serves the path and swaps across reconnects,
+    // since the request is held on the origin, which spans sessions.
     this._signals.run((eff) => {
-      const conn = eff.get(this._reload!.established);
-      if (!conn) return;
-      if (!eff.get(this._reload!.announced).has(botPath)) return;
-
-      const botBroadcast = conn.consume(botPath);
-      const track = botBroadcast.subscribe(merged.transcriptTrack, 0);
-      const consumer = new Json.Stream.Consumer<TranscriptRecord>(track, {
-        compression: true,
-      });
-      const ac = new AbortController();
-      this._drainTranscript(consumer, ac.signal).catch((e) => {
-        if (!ac.signal.aborted) {
-          console.warn("MoqTransport bot-transcript loop:", e);
-        }
+      const origin = eff.get(connection.origin);
+      if (!origin) return;
+      const req = origin.request(botPath, { announced: false });
+      const inner = new Effect();
+      inner.run((e2) => {
+        const botBroadcast = e2.get(req.active);
+        if (!botBroadcast) return;
+        // Re-subscribe until the track appears (bot cold-start; this relay
+        // hard-fails an early subscribe without retrying) and again if a
+        // relay between the peers drops it mid-call. Stops on cleanup or
+        // when the transport is tearing down.
+        let stopped = false;
+        let retryTimer: ReturnType<typeof setTimeout> | undefined;
+        let sub: Moq.Track.Subscriber | null = null;
+        const attempt = () => {
+          if (stopped) return;
+          const track = botBroadcast
+            .track(merged.transcriptTrack)
+            .subscribe({ priority: 0 });
+          sub = track;
+          const consumer = new Json.Stream.Consumer<TranscriptRecord>({
+            track,
+            compression: "deflate",
+          });
+          this._drainTranscript(consumer, new AbortController().signal)
+            .catch(() => {
+              // does_not_exist while the bot is still starting, or a reset;
+              // fall through to the retry below.
+            })
+            .finally(() => {
+              try {
+                track.close();
+              } catch {
+                // best-effort.
+              }
+              if (
+                stopped ||
+                this._state === "disconnecting" ||
+                this._state === "disconnected"
+              ) {
+                return;
+              }
+              retryTimer = setTimeout(attempt, 1000);
+            });
+        };
+        attempt();
+        e2.cleanup(() => {
+          stopped = true;
+          clearTimeout(retryTimer);
+          try {
+            sub?.close();
+          } catch {
+            // best-effort.
+          }
+        });
       });
       eff.cleanup(() => {
-        ac.abort();
-        try {
-          track.close();
-        } catch {
-          // best-effort.
-        }
+        inner.close();
+        req.close();
       });
     });
   }
 
+  /** Get the underlying `MediaStreamTrack` from a publish audio source, if
+   *  it is a capture track (vs a decoded/file source). */
+  private _audioSourceTrack(
+    src: Publish.Audio.Source | undefined,
+  ): MediaStreamTrack | undefined {
+    if (!src) return undefined;
+    if (src instanceof MediaStreamTrack) return src;
+    if (typeof src === "object" && "track" in src) {
+      const t = (src as { track?: unknown }).track;
+      if (t instanceof MediaStreamTrack) return t;
+    }
+    return undefined;
+  }
+
   /** Mirror the relay connection status into the transport state, until
-   *  the session is ready. After that the state holds `ready` while Reload
-   *  redials: `PipecatClient` only lets `sendText` and the like through in
-   *  `ready`, and a message sent meanwhile is kept in the transcript log
-   *  and replayed to the bot. A ready session ends through `_disconnect`
-   *  or `_onRelayGaveUp`. */
-  private _onRelayStatus(status: Moq.Connection.ReloadStatus): void {
+   *  the session is ready. After that the state holds `ready` while the
+   *  connection redials: `PipecatClient` only lets `sendText` and the like
+   *  through in `ready`, and a message sent meanwhile is kept in the
+   *  transcript log and replayed to the bot. A ready session ends through
+   *  `_disconnect` or `_onRelayGaveUp`. */
+  private _onRelayStatus(status: RelayStatus): void {
     if (this._wasReady) return;
     if (status === "connected") {
       if (this._state === "connecting") this.state = "connected";
@@ -721,12 +821,13 @@ export class MoqTransport extends Transport {
     }
   }
 
-  /** Reload stopped redialing: the relay stayed unreachable for its whole
-   *  retry window. Reported as fatal, which is `PipecatClient`'s cue to
-   *  disconnect. Ignored from a Reload this transport has moved on from,
-   *  and during a disconnect already under way. */
-  private _onRelayGaveUp(reload: Moq.Connection.Reload, err: unknown): void {
-    if (this._reload !== reload || this._state === "disconnecting") return;
+  /** The connection stopped retrying: the relay stayed unreachable for its
+   *  whole retry window (or auth was rejected). Reported as fatal, which
+   *  is `PipecatClient`'s cue to disconnect. Ignored from a connection this
+   *  transport has moved on from, and during a disconnect already under
+   *  way. */
+  private _onRelayGaveUp(connection: Moq.Connection, err: unknown): void {
+    if (this._connection !== connection || this._state === "disconnecting") return;
     // `connect` races its dials with `Promise.any`, whose AggregateError
     // carries the causes in `errors` and nothing useful in `message`.
     const errors = (err as { errors?: unknown } | null)?.errors;
@@ -765,14 +866,15 @@ export class MoqTransport extends Transport {
       this._audioSource?.close();
       this._sync?.close();
       this._watchBroadcast?.close();
-      // Each producer's own effect.cleanup (registered in the `publishTrack`
-      // callback above) already calls producer.finish() when this cascades
-      // through the broadcast's internal effect scope — no need to also
-      // finish them explicitly here.
+      // The transcript producer's own effect.cleanup (registered in
+      // `_connect`) calls producer.finish() when the signals scope closes
+      // below — no need to finish it explicitly here.
+      this._encoder?.close();
+      this._capture?.close();
       this._publishBroadcast?.close();
       this._microphone?.close();
       this._signals?.close();
-      this._reload?.close();
+      this._connection?.close();
     } finally {
       this._audioEmitter = null;
       this._audioDecoder = null;
@@ -782,10 +884,12 @@ export class MoqTransport extends Transport {
       this._transcriptOut = null;
       this._transcriptLog = null;
       this._transcriptEpoch = null;
+      this._encoder = null;
+      this._capture = null;
       this._publishBroadcast = null;
       this._microphone = null;
       this._signals = null;
-      this._reload = null;
+      this._connection = null;
       this._reloadEnabled = null;
       this._wasReady = false;
       this.state = "disconnected";
@@ -806,10 +910,10 @@ export class MoqTransport extends Transport {
     // `client-ready` is the bot's cue to start speaking, and its audio is
     // live media with no replay — so hold it until our audio subscription
     // is on the wire, or the head of the first utterance is lost.
-    const reload = this._reload;
+    const connection = this._connection;
     await this._waitForBotAudio();
     // Torn down while waiting: this session never became ready.
-    if (this._reload !== reload) return;
+    if (this._connection !== connection) return;
     this._wasReady = true;
     this.state = "ready";
     this.sendMessage(RTVIMessage.clientReady());
@@ -822,13 +926,13 @@ export class MoqTransport extends Transport {
    *  hanging against a bot with no audio track. Its clock starts once the
    *  relay is connected, so a relay that was never reached does not time
    *  out into `ready`; `_disconnect` settles a wait still pending. */
-  private _waitForBotAudio(timeoutMs = 10_000): Promise<void> {
+  private _waitForBotAudio(timeoutMs = 20_000): Promise<void> {
     const source = this._audioSource;
     const broadcast = this._watchBroadcast;
-    const reload = this._reload;
+    const connection = this._connection;
     // All are set in _connect(); if they're null
     // (bc a `disconnect` happened); resolve immediately;
-    if (!source || !broadcast || !reload) return Promise.resolve();
+    if (!source || !broadcast || !connection) return Promise.resolve();
     return new Promise((resolve) => {
       let done = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -844,7 +948,7 @@ export class MoqTransport extends Transport {
       this._endBotAudioWait = finish;
       eff.run((e) => {
         if (timer === undefined) {
-          if (e.get(reload.status) !== "connected") return;
+          if (e.get(connection.status) !== "connected") return;
           timer = setTimeout(() => {
             console.warn(
               "[MoqTransport] bot audio not subscribed after " +
@@ -853,11 +957,7 @@ export class MoqTransport extends Transport {
             finish();
           }, timeoutMs);
         }
-        if (
-          e.get(source.track) &&
-          e.get(source.config) &&
-          e.get(broadcast.active)
-        ) {
+        if (e.get(source.out.track) && e.get(source.out.config)) {
           // One macrotask, so the decoder's subscribe effect runs first.
           setTimeout(finish, 0);
         }
@@ -884,7 +984,7 @@ export class MoqTransport extends Transport {
   // --------------------------------------------------------------------
 
   async getAllMics(): Promise<MediaDeviceInfo[]> {
-    return this._microphone?.device.available.peek() ?? [];
+    return this._microphone?.device.out.available.peek() ?? [];
   }
 
   async getAllCams(): Promise<MediaDeviceInfo[]> {
@@ -904,11 +1004,12 @@ export class MoqTransport extends Transport {
   updateSpeaker(_speakerId: string): void {}
 
   get selectedMic(): MediaDeviceInfo | Record<string, never> {
-    const id = this._microphone?.device.active.peek();
+    const id = this._microphone?.device.out.active.peek();
     if (!id) return {};
     return (
-      this._microphone?.device.available.peek()?.find((d) => d.deviceId === id) ??
-      {}
+      this._microphone?.device.out.available
+        .peek()
+        ?.find((d) => d.deviceId === id) ?? {}
     );
   }
 
@@ -933,7 +1034,7 @@ export class MoqTransport extends Transport {
   }
 
   get isMicEnabled(): boolean {
-    return this._micEnabled.get();
+    return this._micEnabled.peek();
   }
 
   get isSharingScreen(): boolean {
@@ -954,29 +1055,29 @@ export class MoqTransport extends Transport {
   }
 
   /** Append a message to the client's transcript stream. Returns false
-   *  before connect, when there is no stream to append to.
+   *  before connect, when there is no log to append to.
    *
    *  The stream is lossless, and a log of it is kept so a bot that
-   *  subscribes later is replayed every message in order (see the
-   *  `publishTrack` serve callback in `_connect`). The record carries its
-   *  position in the log and the log's epoch, which is what lets the bot
-   *  skip the replay. */
+   *  subscribes later is replayed every message in order (via the single
+   *  Producer created in `_connect`, or the log replayed into it when it
+   *  first appears). The record carries its position in the log and the
+   *  log's epoch, which is what lets the bot skip the replay. */
   private _appendTranscriptRecord(message: RTVIMessage): boolean {
-    if (!this._transcriptOut || !this._transcriptLog) return false;
+    if (!this._transcriptLog) return false;
     const record: TranscriptRecord = {
       ...message,
       seq: this._transcriptLog.length,
       epoch: this._transcriptEpoch ?? undefined,
     };
     this._transcriptLog.push(record);
-    for (const producer of this._transcriptOut) producer.append(record);
+    this._transcriptOut?.append(record);
     return true;
   }
 
   tracks(): Tracks {
-    const localSource = this._microphone?.source.peek();
-    const localAudio =
-      localSource && "track" in localSource ? localSource.track : localSource;
+    const localAudio = this._audioSourceTrack(
+      this._microphone?.out.source.peek()?.audio,
+    );
     return {
       local: localAudio ? { audio: localAudio } : {},
       bot: this._botAudioTrack ? { audio: this._botAudioTrack } : {},
@@ -1025,28 +1126,9 @@ export class MoqTransport extends Transport {
       }
       this._onMessage?.(message);
     }
-    // The bot's tracks ended without its marker while this side is still
-    // connected. A relay between the peers failing looks the same on the
-    // wire as the bot leaving, so redial: a fresh session re-establishes
-    // the subscriptions, and a bot that really left is simply never
-    // announced on it.
-    if (!signal.aborted) this._redial();
-  }
-
-  /** Drop the relay session and dial again, at most once every few
-   *  seconds. Every subscription is gated on the established session,
-   *  so it all comes back on the new one. */
-  private _redial(): void {
-    const enabled = this._reloadEnabled;
-    if (!enabled) return;
-    const now = Date.now();
-    if (now - this._lastRedialAt < 5000) return;
-    this._lastRedialAt = now;
-    console.warn(
-      "[MoqTransport] bot tracks ended without session-ending; redialing",
-    );
-    enabled.set(false);
-    setTimeout(() => enabled.set(true), 0);
+    // The stream ended (bot not up yet, the bot left, or a relay between
+    // the peers dropped it). The caller's retry loop re-subscribes; the
+    // connection reconnects the relay session on its own.
   }
 
   /** Flush buffered bot audio and re-anchor playback at an utterance
