@@ -640,7 +640,13 @@ export class MoqTransport extends Transport {
     this._watchBroadcast = new Watch.Broadcast({
       origin: connection.origin,
       enabled: new Signal(true),
-      announced: new Signal(false),
+      // Wait for the bot's announcement before subscribing. The bot
+      // cold-starts after we connect (it is spun up in response to our
+      // session), and subscribing to a not-yet-served path gets the stream
+      // reset. `Watch.Broadcast` self-gates the catalog + audio on the
+      // announcement, (re)subscribing when the bot appears and again across
+      // reconnects — no manual retry needed.
+      announced: new Signal(true),
       name: new Signal(botPath),
       catalogFormat: new Signal<Watch.CatalogFormat>("hang"),
     });
@@ -727,55 +733,33 @@ export class MoqTransport extends Transport {
     this._signals.run((eff) => {
       const origin = eff.get(connection.origin);
       if (!origin) return;
-      const req = origin.request(botPath, { announced: false });
+      // Gate on the bot's announcement (same as the catalog/audio above):
+      // `announced: true` makes the request resolve `active` only once the
+      // bot serves the path, so the subscribe never races the cold-start.
+      // `active` re-resolves across reconnects/republishes, and the inner
+      // effect re-subscribes each time.
+      const req = origin.request(botPath, { announced: true });
       const inner = new Effect();
       inner.run((e2) => {
         const botBroadcast = e2.get(req.active);
         if (!botBroadcast) return;
-        // Re-subscribe until the track appears (bot cold-start; this relay
-        // hard-fails an early subscribe without retrying) and again if a
-        // relay between the peers drops it mid-call. Stops on cleanup or
-        // when the transport is tearing down.
-        let stopped = false;
-        let retryTimer: ReturnType<typeof setTimeout> | undefined;
-        let sub: Moq.Track.Subscriber | null = null;
-        const attempt = () => {
-          if (stopped) return;
-          const track = botBroadcast
-            .track(merged.transcriptTrack)
-            .subscribe({ priority: 0 });
-          sub = track;
-          const consumer = new Json.Stream.Consumer<TranscriptRecord>({
-            track,
-            compression: "deflate",
-          });
-          this._drainTranscript(consumer, new AbortController().signal)
-            .catch(() => {
-              // does_not_exist while the bot is still starting, or a reset;
-              // fall through to the retry below.
-            })
-            .finally(() => {
-              try {
-                track.close();
-              } catch {
-                // best-effort.
-              }
-              if (
-                stopped ||
-                this._state === "disconnecting" ||
-                this._state === "disconnected"
-              ) {
-                return;
-              }
-              retryTimer = setTimeout(attempt, 1000);
-            });
-        };
-        attempt();
+        const track = botBroadcast
+          .track(merged.transcriptTrack)
+          .subscribe({ priority: 0 });
+        const consumer = new Json.Stream.Consumer<TranscriptRecord>({
+          track,
+          compression: "deflate",
+        });
+        const ac = new AbortController();
+        this._drainTranscript(consumer, ac.signal).catch((e) => {
+          if (!ac.signal.aborted) {
+            console.warn("MoqTransport bot-transcript loop:", e);
+          }
+        });
         e2.cleanup(() => {
-          stopped = true;
-          clearTimeout(retryTimer);
+          ac.abort();
           try {
-            sub?.close();
+            track.close();
           } catch {
             // best-effort.
           }
