@@ -1,7 +1,7 @@
 /**
  * Fake daily-js call object for characterization tests. Covers only the
  * surface that DailyTransport / OpenAI-WebRTC transport exercises during
- * initialize() and initDevices().
+ * initialize(), initDevices() and connect() / disconnect().
  */
 
 import { vi, type Mock } from "vitest";
@@ -15,6 +15,11 @@ export interface FakeDailyCallObject {
   isRemoteParticipantsAudioLevelObserverRunning: Mock;
   startLocalAudioLevelObserver: Mock;
   startRemoteParticipantsAudioLevelObserver: Mock;
+  stopLocalAudioLevelObserver: Mock;
+  stopRemoteParticipantsAudioLevelObserver: Mock;
+  join: Mock;
+  leave: Mock;
+  room: Mock;
   participants: Mock;
   setLocalAudio: Mock;
   setLocalVideo: Mock;
@@ -47,6 +52,15 @@ export function createFakeDailyCallObject(): FakeDailyCallObject {
     isRemoteParticipantsAudioLevelObserverRunning: vi.fn(() => false),
     startLocalAudioLevelObserver: vi.fn(async () => {}),
     startRemoteParticipantsAudioLevelObserver: vi.fn(async () => {}),
+    stopLocalAudioLevelObserver: vi.fn(),
+    stopRemoteParticipantsAudioLevelObserver: vi.fn(),
+    join: vi.fn(async () => {
+      joined = true;
+    }),
+    leave: vi.fn(async () => {
+      joined = false;
+    }),
+    room: vi.fn(async () => ({})),
     participants: vi.fn(() => (joined ? { local: { id: "local-1" } } : {})),
     setLocalAudio: vi.fn((enable: boolean) => {
       audioOn = enable;
