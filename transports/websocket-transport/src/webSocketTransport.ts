@@ -127,17 +127,19 @@ export class WebSocketTransport extends Transport {
     this.state = "connecting";
 
     this._wsUrl = connectParams?.wsUrl ?? connectParams?.ws_url ?? this._wsUrl;
-    if (connectParams?.token) {
-      const separator = this._wsUrl!.includes("?") ? "&" : "?";
-      this._wsUrl = `${this._wsUrl}${separator}token=${encodeURIComponent(connectParams.token)}`;
-    }
     if (!this._wsUrl) {
       logger.error("No url provided for connection");
       this.state = "error";
       throw new TransportStartError();
     }
+    // Build the connect url locally so a token never sticks to the base url
+    let url = this._wsUrl;
+    if (connectParams?.token) {
+      const separator = url.includes("?") ? "&" : "?";
+      url = `${url}${separator}token=${encodeURIComponent(connectParams.token)}`;
+    }
     try {
-      this._ws = this.initializeWebsocket();
+      this._ws = this.initializeWebsocket(url);
 
       await this._ws.connect();
       await this._mediaManager.connect();
@@ -211,8 +213,8 @@ export class WebSocketTransport extends Transport {
     return this._mediaManager.tracks();
   }
 
-  initializeWebsocket(): ReconnectingWebSocket {
-    const ws = new ReconnectingWebSocket(this._wsUrl!, undefined, {
+  initializeWebsocket(url: string = this._wsUrl!): ReconnectingWebSocket {
+    const ws = new ReconnectingWebSocket(url, undefined, {
       parseBlobToJson: false,
     });
     // disabling the keep alive, there is no API for it inside Pipecat
