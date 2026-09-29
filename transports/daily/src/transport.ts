@@ -453,10 +453,14 @@ export class DailyTransport extends Transport {
   }
 
   private async startAudioLevelObservers() {
-    if (!this._daily.isLocalAudioLevelObserverRunning())
-      await this._daily.startLocalAudioLevelObserver(100);
-    if (!this._daily.isRemoteParticipantsAudioLevelObserverRunning())
-      await this._daily.startRemoteParticipantsAudioLevelObserver(100);
+    try {
+      if (!this._daily.isLocalAudioLevelObserverRunning())
+        await this._daily.startLocalAudioLevelObserver(100);
+      if (!this._daily.isRemoteParticipantsAudioLevelObserverRunning())
+        await this._daily.startRemoteParticipantsAudioLevelObserver(100);
+    } catch (e) {
+      logger.warn("[Daily Transport] Failed to start audio level observers", e);
+    }
   }
 
   _validateConnectionParams(
@@ -521,11 +525,7 @@ export class DailyTransport extends Transport {
     // reconnect once devices are already initialized. _disconnect() stops
     // the observers, so make sure they are running for this session or
     // onLocalAudioLevel / onRemoteAudioLevel never fire.
-    try {
-      await this.startAudioLevelObservers();
-    } catch (e) {
-      logger.warn("[Daily Transport] Failed to start audio level observers", e);
-    }
+    await this.startAudioLevelObservers();
 
     const r = await this._daily.room();
     this._maxMessageSize =
