@@ -160,6 +160,8 @@ export class WebSocketTransport extends Transport {
     this.state = "disconnecting";
     await this._mediaManager.disconnect();
     await this._ws?.close();
+    // Audio captured for this session must not be sent to the next one.
+    this.audioQueue = [];
     this.state = "disconnected";
     this._callbacks.onDisconnected?.();
   }
