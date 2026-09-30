@@ -46,6 +46,12 @@ const DEFAULT_AUDIO_BUFFER_MAX_MS = 30 * 1000;
 // don't need to match it exactly — but pinning it keeps the catalog
 // unambiguous.
 const DEFAULT_AUDIO_SAMPLE_RATE = 48000;
+// Give-up window for the relay reconnect loop (ms). The loop retries
+// with backoff until this much time passes without a successful
+// connection, then sets `connection.error` — the signal `_onRelayGaveUp`
+// watches. Resets after each successful connect, a URL change, or a
+// disable/re-enable.
+const DEFAULT_RELAY_RETRY_TIMEOUT_MS = 10_000;
 
 /**
  * A transcript record as it travels on the wire: the RTVI message plus
@@ -298,8 +304,8 @@ type RelayStatus = "connecting" | "connected" | "disconnected";
  * Each side appends a ``session-ending`` marker to its transcript before
  * it leaves. The bot's tracks ending after the marker is a hangup; ending
  * without it may be a failed relay between the peers, which looks the
- * same on the wire, so the transport redials and the bot either reappears
- * on the new session or is never announced on it.
+ * same on the wire — the origin-held request stays open, so a bot that
+ * redials and republishes re-resolves it and the subscriptions re-attach.
  */
 export class MoqTransport extends Transport {
   public static SERVICE_NAME = "moq-transport";
@@ -492,10 +498,16 @@ export class MoqTransport extends Transport {
     // Both the publish broadcast and the watch/transcript consumers read
     // `connection.origin`, so it spans reconnects.
     this._reloadEnabled = new Signal(true);
+    // `share: false` gets a private reconnect loop, which honors a pinned
+    // certificate (`webtransport`) and `delay`. `delay.timeout` bounds the
+    // retry window: a relay down that long surfaces on `connection.error`
+    // and the give-up watch below.
     this._connection = new Moq.Connection({
       enabled: this._reloadEnabled,
       url: new Signal(url),
       webtransport,
+      share: false,
+      delay: { timeout: DEFAULT_RELAY_RETRY_TIMEOUT_MS as Moq.Time.Milli },
     });
     const connection = this._connection;
 
@@ -627,15 +639,6 @@ export class MoqTransport extends Transport {
     //
     // `catalogFormat: "hang"` is pinned because the pipecat bot publishes
     // a hang-format catalog (camelCase `sampleRate`).
-    //
-    // `announced: false` subscribes to the bot's path directly rather than
-    // waiting for its announcement to be discovered. The new @moq/net
-    // request survives until the publisher appears (a missing broadcast
-    // surfaces as a reset on the first track and the handle stays open,
-    // re-resolving when the bot serves), so a blind subscribe is safe here
-    // and does not depend on cross-implementation announce discovery — the
-    // bot (Rust moq_ffi) and this client (@moq/net) do not reliably surface
-    // each other's announcements over some relays.
     // ----------------------------------------------------------------
     this._watchBroadcast = new Watch.Broadcast({
       origin: connection.origin,
@@ -725,11 +728,11 @@ export class MoqTransport extends Transport {
     // re-subscribed on every (re-)announce. @moq/json's stream Consumer
     // yields every appended record in order, losslessly.
     //
-    // Consuming goes through the origin: `request(botPath, {announced:false})`
-    // subscribes to the bot's path directly (see the Watch.Broadcast note
-    // above on why we don't wait for announce discovery). `req.active`
-    // resolves once the bot serves the path and swaps across reconnects,
-    // since the request is held on the origin, which spans sessions.
+    // Consuming goes through the origin: `request(botPath, {announced: true})`
+    // gates the subscribe on the bot's announcement. `req.active` resolves
+    // once the bot serves the path and swaps across reconnects and
+    // republishes, since the request is held on the origin, which spans
+    // sessions.
     this._signals.run((eff) => {
       const origin = eff.get(connection.origin);
       if (!origin) return;
@@ -1110,9 +1113,10 @@ export class MoqTransport extends Transport {
       }
       this._onMessage?.(message);
     }
-    // The stream ended (bot not up yet, the bot left, or a relay between
-    // the peers dropped it). The caller's retry loop re-subscribes; the
-    // connection reconnects the relay session on its own.
+    // The stream ended (the bot left, or a relay between the peers
+    // dropped it). The origin request re-resolves when the bot
+    // republishes and the subscribe effect re-runs; the connection
+    // reconnects the relay session on its own.
   }
 
   /** Flush buffered bot audio and re-anchor playback at an utterance

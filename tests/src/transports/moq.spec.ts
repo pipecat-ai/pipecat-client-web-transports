@@ -9,12 +9,21 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+// Constructor props captured by the mocks below, so tests can assert
+// what `_connect` wires up and drive the connection's signals.
+const captured = vi.hoisted(() => ({
+  connections: [] as Array<Record<string, any>>,
+  watchBroadcasts: [] as Array<Record<string, any>>,
+}));
+
 // @moq/hang's root barrel uses directory imports (`import * from
 // "./catalog"`) that Node ESM rejects, and @moq/publish + @moq/watch
 // both pull it in transitively, so any load of the transport hits the
 // broken chain. None of the moq libs are exercised by these lifecycle
 // tests, so mock them out here — the tests assert behavior at the
-// abstract Transport boundary, not against the network stack.
+// abstract Transport boundary, not against the network stack. The mocks
+// use real `@moq/signals` Signals wherever the transport reads them
+// through an Effect, so `_connect`'s reactive wiring runs for real.
 vi.mock("@moq/hang", () => ({}));
 vi.mock("@moq/hang/catalog", () => ({
   PRIORITY: { catalog: 0, audio: 1 },
@@ -29,10 +38,10 @@ vi.mock("@moq/hang/container", () => ({
   },
   Legacy: { Format: class {} },
 }));
-vi.mock("@moq/publish", () => {
+vi.mock("@moq/publish", async () => {
+  const { Signal } = await import("@moq/signals");
   class Microphone {
     private _permissionRequested = false;
-    private _track: MediaStreamTrack | undefined;
     device = {
       requestPermission: () => {
         if (this._permissionRequested) return;
@@ -40,28 +49,32 @@ vi.mock("@moq/publish", () => {
         navigator.mediaDevices
           .getUserMedia({ audio: true })
           .then((stream) => {
-            this._track = stream.getAudioTracks()[0];
+            this.out.source.set({ audio: stream.getAudioTracks()[0] });
           })
           .catch(() => {});
       },
     };
     // 0.4 moved component outputs under `out`.
     out = {
-      source: {
-        peek: () => (this._track ? { audio: this._track } : undefined),
-      },
+      source: new Signal<{ audio: MediaStreamTrack } | undefined>(undefined),
     };
     constructor(_opts: unknown) {}
+    close() {}
   }
   return {
     Broadcast: class {
-      // The network broadcast, re-created per connection. Undefined here
-      // since these tests never connect.
-      net = { peek: () => undefined };
+      // The network broadcast, re-created per connection. Stays unset
+      // here, so the transcript Producer is never built against the mock.
+      net = new Signal(undefined);
+      constructor(_opts: unknown) {}
       close() {}
     },
     Audio: {
       StreamTrack: class {},
+      Capture: class {
+        constructor(_opts: unknown) {}
+        close() {}
+      },
       // 0.4 registers the audio rendition through an encoder rather than
       // an inline `audio` prop on the broadcast.
       Encoder: class {
@@ -73,30 +86,80 @@ vi.mock("@moq/publish", () => {
     Source: { Microphone },
   };
 });
-vi.mock("@moq/watch", () => ({
-  Broadcast: class {
+vi.mock("@moq/watch", async () => {
+  const { Signal } = await import("@moq/signals");
+  return {
+    Broadcast: class {
+      props: Record<string, any>;
+      constructor(props: Record<string, any>) {
+        this.props = props;
+        captured.watchBroadcasts.push(this);
+      }
+      close() {}
+    },
+    Sync: class {
+      constructor(_opts: unknown) {}
+      close() {}
+      reset() {}
+    },
+    Audio: {
+      Source: class {
+        out = { track: new Signal(undefined), config: new Signal(undefined) };
+        constructor(_opts: unknown) {}
+        close() {}
+      },
+      Decoder: class {
+        // Read by the transport to tell the source which codecs it can play.
+        static supported = undefined;
+        out = { context: new Signal(undefined), root: new Signal(undefined) };
+        constructor(_opts: unknown) {}
+        close() {}
+        reset() {}
+      },
+      Emitter: class {
+        constructor(_opts: unknown) {}
+        close() {}
+      },
+    },
+  };
+});
+vi.mock("@moq/net", async () => {
+  const { Signal } = await import("@moq/signals");
+  class Connection {
+    props: Record<string, any>;
+    status = new Signal<"connecting" | "connected" | "disconnected">(
+      "connecting",
+    );
+    error = new Signal<Error | undefined>(undefined);
+    origin = new Signal<Record<string, any> | undefined>(undefined);
+    probe = {};
+    constructor(props: Record<string, any>) {
+      this.props = props;
+      captured.connections.push(this);
+    }
     close() {}
+  }
+  return {
+    Connection,
+    Path: { from: (...parts: string[]) => parts.join("/") },
+  };
+});
+// The transcript stream codec. The Consumer's `next()` never settles, so
+// a drain loop started against the mock just parks.
+vi.mock("@moq/json", () => ({
+  Stream: {
+    Producer: class {
+      constructor(_opts: unknown) {}
+      append(_r: unknown) {}
+      finish() {}
+    },
+    Consumer: class {
+      constructor(_opts: unknown) {}
+      next() {
+        return new Promise(() => {});
+      }
+    },
   },
-  Sync: class {},
-  Audio: {
-    Source: class {
-      out = { jitter: undefined, config: { peek: () => undefined } };
-      close() {}
-    },
-    Decoder: class {
-      // Read by the transport to tell the source which codecs it can play.
-      static supported = undefined;
-      out = { context: undefined, root: undefined };
-      close() {}
-    },
-    Emitter: class {
-      close() {}
-    },
-  },
-}));
-vi.mock("@moq/net", () => ({
-  Connection: { Reload: class {} },
-  Path: { from: (...parts: string[]) => parts.join("/") },
 }));
 
 import { Signal } from "@moq/signals";
@@ -662,5 +725,120 @@ describe("MoqTransport — relay reconnects", () => {
     await ready;
 
     expect(recorder.states).toEqual(["disconnecting", "disconnected"]);
+  });
+});
+
+/**
+ * These run `_connect()` for real against the mocks above (which expose
+ * real Signals wherever the transport reads them through an Effect), so
+ * they cover what `_connect` wires to the `@moq/net` Connection and how
+ * the transcript subscription follows the origin request.
+ */
+describe("MoqTransport — _connect wiring", () => {
+  /** Flush the microtask queue so scheduled Effect re-runs fire. */
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  let transport: MoqTransport;
+
+  beforeEach(() => {
+    captured.connections.length = 0;
+    captured.watchBroadcasts.length = 0;
+    transport = new MoqTransport({ relayUrl: "https://relay.example/moq" });
+  });
+
+  afterEach(async () => {
+    await transport._disconnect();
+    vi.restoreAllMocks();
+  });
+
+  test("_connect() opens a private connection with a bounded retry window and the pinned certificate", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+
+    await transport._connect({
+      relayUrl: "https://relay.example/moq",
+      serverCertificateHashes: [
+        { algorithm: "sha-256", value: new Uint8Array([1, 2, 3]).buffer },
+      ],
+    });
+
+    const [connection] = captured.connections;
+    // A pooled (shared) connection throws on `webtransport` options and
+    // pins the retry window to unlimited; both need `share: false`.
+    expect(connection.props.share).toBe(false);
+    expect(connection.props.delay?.timeout).toBeGreaterThan(0);
+    expect(
+      connection.props.webtransport?.serverCertificateHashes,
+    ).toHaveLength(1);
+  });
+
+  test("the connection giving up on its own drives the transport to 'error'", async () => {
+    // `connection.error` is the give-up signal: with the private loop's
+    // `delay.timeout`, it is set when the relay stays down for the whole
+    // retry window (as well as on an auth rejection).
+    const { callbacks, spies, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    await transport._connect();
+    recorder.states.length = 0;
+
+    const [connection] = captured.connections;
+    connection.error.set(new Error("relay unreachable"));
+    await tick();
+
+    expect(recorder.states).toEqual(["error"]);
+    expect(spies.onError).toHaveBeenCalledTimes(1);
+    expect(spies.onError.mock.calls[0][0].data.fatal).toBe(true);
+  });
+
+  test("discovery is gated on the bot's announcement", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+
+    await transport._connect();
+
+    const [watchBroadcast] = captured.watchBroadcasts;
+    expect(watchBroadcast.props.announced.peek()).toBe(true);
+
+    const request = vi.fn(() => ({
+      active: new Signal<unknown>(undefined),
+      close: vi.fn(),
+    }));
+    captured.connections[0].origin.set({ request });
+    await tick();
+
+    expect(request).toHaveBeenCalledWith("pipecat/bot0", { announced: true });
+  });
+
+  test("a bot republish re-resolves the origin request and re-subscribes the transcript", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    await transport._connect();
+
+    const active = new Signal<unknown>(undefined);
+    const request = vi.fn(() => ({ active, close: vi.fn() }));
+    captured.connections[0].origin.set({ request });
+    await tick();
+
+    const makeBroadcast = () => {
+      const subscription = { close: vi.fn() };
+      const track = vi.fn(() => ({ subscribe: vi.fn(() => subscription) }));
+      return { broadcast: { track }, track, subscription };
+    };
+
+    // The bot appears: the request resolves and the transcript track is
+    // subscribed.
+    const first = makeBroadcast();
+    active.set(first.broadcast);
+    await tick();
+    expect(first.track).toHaveBeenCalledWith("transcript.json.z");
+
+    // The bot redials with a fresh publisher, replacing its broadcast on
+    // the relay: the request re-resolves, the old subscription is closed,
+    // and the new broadcast's transcript track is subscribed.
+    const second = makeBroadcast();
+    active.set(second.broadcast);
+    await tick();
+    expect(first.subscription.close).toHaveBeenCalled();
+    expect(second.track).toHaveBeenCalledWith("transcript.json.z");
   });
 });
