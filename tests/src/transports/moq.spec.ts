@@ -815,6 +815,16 @@ describe("MoqTransport — _connect wiring", () => {
     },
   );
 
+  test("relayRetryTimeoutMs of 0 in connect params is refused before dialing", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+
+    await expect(
+      transport._connect({ relayUrl: "https://relay.example/moq", relayRetryTimeoutMs: 0 }),
+    ).rejects.toThrow(/relayRetryTimeoutMs/);
+    expect(captured.connections).toHaveLength(0);
+  });
+
   test("the connection giving up on its own drives the transport to 'error'", async () => {
     // `connection.error` is the give-up signal: with the private loop's
     // `delay.timeout`, it is set when the relay stays down for the whole

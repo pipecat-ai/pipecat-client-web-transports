@@ -195,7 +195,7 @@ export interface MoqTransportOptions {
    * How long (ms) the transport keeps trying to reach the relay before
    * giving up, which reports a fatal error and ends the session. It bounds
    * the first connection as well as each reconnect after the relay is lost.
-   * A positive number; defaults to ``60000``. The loop retries with backoff
+   * Finite and positive; defaults to ``60000``. The loop retries with backoff
    * and starts a fresh window after a session that held, a URL change, or a
    * disable/re-enable.
    *
@@ -225,7 +225,7 @@ function applyDefaults(opts: MoqTransportOptions): ResolvedOptions {
   // @moq/net reads a window of zero (or less) as "retry forever", which
   // would leave a page reconnecting silently with nothing to end it.
   if (!Number.isFinite(relayRetryTimeoutMs) || relayRetryTimeoutMs <= 0) {
-    throw new RTVIError("MoqTransport `relayRetryTimeoutMs` must be a positive number of milliseconds");
+    throw new RTVIError("MoqTransport `relayRetryTimeoutMs` must be a finite, positive number of milliseconds");
   }
   return {
     relayUrl: opts.relayUrl,

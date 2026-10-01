@@ -80,7 +80,7 @@ interface MoqTransportOptions {
   audioLatencyMs?: number;                       // Optional: jitter buffer floor latency in ms (default 80)
   audioBufferMaxMs?: number | "real-time";       // Optional: buffered-playback latency ceiling in ms, or "real-time" to collapse to the floor (default 30000)
   audioSampleRate?: number;                      // Optional: mic publish sample rate in Hz; one of 8000/12000/16000/24000/48000 (default 48000)
-  relayRetryTimeoutMs?: number;                  // Optional: how long to keep trying to reach the relay before giving up, in ms; a positive number (default 60000)
+  relayRetryTimeoutMs?: number;                  // Optional: how long to keep trying to reach the relay before giving up, in ms; finite and positive (default 60000)
 }
 ```
 
