@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.1.1...transport-lib-v0.1.2) (2026-10-02)
+
+
+### Bug Fixes
+
+* **transport-lib:** credit OpenAI's MIT license in wavtools ([6c2906f](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/6c2906f6c4e49dfe11202d4f335e661ae598c850))
+* **transport-lib:** credit OpenAI's MIT license in wavtools ([9d5e553](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/9d5e553561536a935c297b5bbbafb6a92e6c2af8))
+
 ## [0.1.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.1.0...transport-lib-v0.1.1) (2026-09-15)
 
 
