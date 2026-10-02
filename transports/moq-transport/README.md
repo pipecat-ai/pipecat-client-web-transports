@@ -80,6 +80,7 @@ interface MoqTransportOptions {
   audioLatencyMs?: number;                       // Optional: jitter buffer floor latency in ms (default 80)
   audioBufferMaxMs?: number | "real-time";       // Optional: buffered-playback latency ceiling in ms, or "real-time" to collapse to the floor (default 30000)
   audioSampleRate?: number;                      // Optional: mic publish sample rate in Hz; one of 8000/12000/16000/24000/48000 (default 48000)
+  relayRetryTimeoutMs?: number;                  // Optional: how long to keep trying to reach the relay before giving up, in ms; finite and positive (default 60000)
 }
 ```
 
@@ -119,7 +120,7 @@ The transport can be in one of these states:
 - "disconnecting"
 - "error"
 
-Once the session is `ready`, a relay reconnect does not change the state. `Connection.Reload` redials in the background. A message sent meanwhile is kept in the transcript log and replayed to the bot when it resubscribes; audio from the gap is not. If the relay cannot be reached for Reload's whole retry window (five minutes), the transport moves to `error` and reports a fatal error through `onError`, and `PipecatClient` disconnects.
+Once the session is `ready`, a relay reconnect does not change the state. The connection redials in the background. A message sent meanwhile is kept in the transcript log and replayed to the bot when it resubscribes; audio from the gap is not. If the relay cannot be reached for the whole retry window (`relayRetryTimeoutMs`, 60 seconds by default), the transport moves to `error` and reports a fatal error through `onError`, and `PipecatClient` disconnects. The same window bounds the first connection. Behind a layer-4 load balancer with source-IP stickiness, a lost relay keeps receiving the client's reconnects until the balancer takes it out of rotation, so the window has to outlast that.
 
 ## Error Handling
 

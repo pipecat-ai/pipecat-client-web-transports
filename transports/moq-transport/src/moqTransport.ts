@@ -46,12 +46,8 @@ const DEFAULT_AUDIO_BUFFER_MAX_MS = 30 * 1000;
 // don't need to match it exactly — but pinning it keeps the catalog
 // unambiguous.
 const DEFAULT_AUDIO_SAMPLE_RATE = 48000;
-// Give-up window for the relay reconnect loop (ms). The loop retries
-// with backoff until this much time passes without a successful
-// connection, then sets `connection.error` — the signal `_onRelayGaveUp`
-// watches. Resets after each successful connect, a URL change, or a
-// disable/re-enable.
-const DEFAULT_RELAY_RETRY_TIMEOUT_MS = 10_000;
+// Give-up window for reaching the relay (ms); see `relayRetryTimeoutMs`.
+const DEFAULT_RELAY_RETRY_TIMEOUT_MS = 60_000;
 
 /**
  * A transcript record as it travels on the wire: the RTVI message plus
@@ -194,6 +190,21 @@ export interface MoqTransportOptions {
    * playback ``AudioContext`` accordingly.
    */
   audioSampleRate?: number;
+
+  /**
+   * How long (ms) the transport keeps trying to reach the relay before
+   * giving up, which reports a fatal error and ends the session. It bounds
+   * the first connection as well as each reconnect after the relay is lost.
+   * Finite and positive; defaults to ``60000``. The loop retries with backoff
+   * and starts a fresh window after a session that held, a URL change, or a
+   * disable/re-enable.
+   *
+   * Behind a layer-4 load balancer with source-IP stickiness, a lost relay
+   * keeps receiving the client's reconnects until the balancer takes it out
+   * of rotation, so the window has to outlast that. 60 s also matches how
+   * long a pipecat bot's transport waits for a missing peer.
+   */
+  relayRetryTimeoutMs?: number;
 }
 
 interface ResolvedOptions {
@@ -206,9 +217,16 @@ interface ResolvedOptions {
   audioLatencyMs: number;
   audioBufferMaxMs: number | "real-time";
   audioSampleRate: number;
+  relayRetryTimeoutMs: number;
 }
 
 function applyDefaults(opts: MoqTransportOptions): ResolvedOptions {
+  const relayRetryTimeoutMs = opts.relayRetryTimeoutMs ?? DEFAULT_RELAY_RETRY_TIMEOUT_MS;
+  // @moq/net reads a window of zero (or less) as "retry forever", which
+  // would leave a page reconnecting silently with nothing to end it.
+  if (!Number.isFinite(relayRetryTimeoutMs) || relayRetryTimeoutMs <= 0) {
+    throw new RTVIError("MoqTransport `relayRetryTimeoutMs` must be a finite, positive number of milliseconds");
+  }
   return {
     relayUrl: opts.relayUrl,
     serverCertificateHashes: opts.serverCertificateHashes,
@@ -219,6 +237,7 @@ function applyDefaults(opts: MoqTransportOptions): ResolvedOptions {
     audioLatencyMs: opts.audioLatencyMs ?? DEFAULT_AUDIO_LATENCY_MS,
     audioBufferMaxMs: opts.audioBufferMaxMs ?? DEFAULT_AUDIO_BUFFER_MAX_MS,
     audioSampleRate: opts.audioSampleRate ?? DEFAULT_AUDIO_SAMPLE_RATE,
+    relayRetryTimeoutMs,
   };
 }
 
@@ -507,7 +526,7 @@ export class MoqTransport extends Transport {
       url: new Signal(url),
       webtransport,
       share: false,
-      delay: { timeout: DEFAULT_RELAY_RETRY_TIMEOUT_MS as Moq.Time.Milli },
+      delay: { timeout: merged.relayRetryTimeoutMs as Moq.Time.Milli },
     });
     const connection = this._connection;
 

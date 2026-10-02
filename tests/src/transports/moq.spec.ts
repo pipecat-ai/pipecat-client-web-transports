@@ -766,10 +766,63 @@ describe("MoqTransport — _connect wiring", () => {
     // A pooled (shared) connection throws on `webtransport` options and
     // pins the retry window to unlimited; both need `share: false`.
     expect(connection.props.share).toBe(false);
-    expect(connection.props.delay?.timeout).toBeGreaterThan(0);
+    // The default `relayRetryTimeoutMs` (see its doc for why 60 s).
+    expect(connection.props.delay?.timeout).toBe(60_000);
     expect(
       connection.props.webtransport?.serverCertificateHashes,
     ).toHaveLength(1);
+  });
+
+  test("relayRetryTimeoutMs in connect params sets the retry window", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+
+    await transport._connect({ relayUrl: "https://relay.example/moq", relayRetryTimeoutMs: 90_000 });
+
+    const [connection] = captured.connections;
+    expect(connection.props.delay?.timeout).toBe(90_000);
+  });
+
+  test("relayRetryTimeoutMs from the constructor survives a raw /start response", async () => {
+    const t = new MoqTransport({ relayUrl: "https://unused.example/moq", relayRetryTimeoutMs: 120_000 });
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(t, callbacks);
+
+    await t._connect(
+      t._validateConnectionParams({
+        moq: {
+          relayUrl: "https://relay.example/moq",
+          certHash: null,
+          namespace: "pcc/session",
+          clientId: "request",
+          botId: "response",
+          transcriptTrack: "transcript",
+        },
+      }),
+    );
+
+    const connection = captured.connections.at(-1);
+    expect(connection?.props.delay?.timeout).toBe(120_000);
+    await t._disconnect();
+  });
+
+  test.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    "relayRetryTimeoutMs of %s is refused rather than meaning retry forever",
+    (value) => {
+      expect(() => new MoqTransport({ relayUrl: "https://relay.example/moq", relayRetryTimeoutMs: value })).toThrow(
+        /relayRetryTimeoutMs/,
+      );
+    },
+  );
+
+  test("relayRetryTimeoutMs of 0 in connect params is refused before dialing", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+
+    await expect(
+      transport._connect({ relayUrl: "https://relay.example/moq", relayRetryTimeoutMs: 0 }),
+    ).rejects.toThrow(/relayRetryTimeoutMs/);
+    expect(captured.connections).toHaveLength(0);
   });
 
   test("the connection giving up on its own drives the transport to 'error'", async () => {
