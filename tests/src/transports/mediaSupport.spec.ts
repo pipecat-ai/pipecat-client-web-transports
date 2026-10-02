@@ -4,6 +4,7 @@
  */
 
 import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
+import { WebSocketTransport } from "@pipecat-ai/websocket-transport";
 import { describe, expect, test } from "vitest";
 
 import { createFakeMediaManager } from "../helpers/fakeMediaManager";
@@ -37,5 +38,24 @@ describe("SmallWebRTCTransport.mediaSupport", () => {
       mediaManager: mediaManagerCapturing() as never,
     });
     expect(transport.mediaSupport).toEqual({ botAudio: true, botVideo: true });
+  });
+});
+
+describe("WebSocketTransport.mediaSupport", () => {
+  test("rules out the camera, screen share and bot video whatever the media manager captures", () => {
+    const transport = new WebSocketTransport({
+      mediaManager: mediaManagerCapturing({
+        mic: true,
+        cam: true,
+        screenShare: true,
+      }) as never,
+    });
+    expect(transport.mediaSupport).toEqual({
+      mic: true,
+      cam: false,
+      screenShare: false,
+      botAudio: true,
+      botVideo: false,
+    });
   });
 });
