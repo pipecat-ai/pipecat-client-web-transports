@@ -1,3 +1,4 @@
+export { browserSupportsScreenShare } from "./media-mgmt/browserSupport";
 export { MediaManager, WavMediaManager } from "./media-mgmt/mediaManager";
 export { DailyMediaManager } from "./media-mgmt/dailyMediaManager";
 export { ReconnectingWebSocket } from "./websocket-utils/reconnectingWebSocket";

@@ -1,3 +1,4 @@
+import { browserSupportsScreenShare } from "./browserSupport";
 import { MediaManager } from "./mediaManager";
 import { MediaStreamRecorder, WavStreamPlayer } from "../wavtools";
 
@@ -59,7 +60,7 @@ export class DailyMediaManager extends MediaManager {
     this.onTrackStoppedCallback = onTrackStoppedCallback;
     this._recorderChunkSize = recorderChunkSize;
 
-    this._supportsScreenShare = true;
+    this._supportsScreenShare = browserSupportsScreenShare();
 
     this._daily = Daily.getCallInstance() ?? Daily.createCallObject();
 
