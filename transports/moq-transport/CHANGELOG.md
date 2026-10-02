@@ -11,7 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Bug Fixes
 
 * **moq-transport:** keep trying to reach the relay for 60 seconds ([43b6060](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/43b6060b051510000e73ea26bd7d8ffade96d568))
-* **moq-transport:** keep trying to reach the relay for 60 seconds ([a5207c6](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/a5207c683098c303a862fcea33296a1141c86c90))
 
 ## [0.2.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.1.1...moq-transport-v0.2.0) (2026-09-30)
 
