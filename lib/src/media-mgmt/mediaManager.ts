@@ -3,10 +3,14 @@ import { WavRecorder, WavStreamPlayer } from "../wavtools";
 import {
   DeviceError,
   DeviceErrorType,
+  MediaSupport,
   PipecatClientOptions,
   RTVIEventCallbacks,
   Tracks,
 } from "@pipecat-ai/client-js";
+
+/** The kinds of media a media manager can capture from the user. */
+export type CaptureSupport = Pick<MediaSupport, "mic" | "cam" | "screenShare">;
 
 export abstract class MediaManager {
   declare protected _userAudioCallback: (data: ArrayBuffer) => void;
@@ -70,6 +74,17 @@ export abstract class MediaManager {
   get supportsScreenShare(): boolean {
     return this._supportsScreenShare;
   }
+
+  /**
+   * The kinds of media this media manager can capture, for the transport's
+   * `mediaSupport`. `false` rules a kind out, and a missing key leaves it unknown.
+   * By default only screen share can be ruled out: `screenShare` is `false` when
+   * `supportsScreenShare` is, because this media manager or the browser can't
+   * share the screen. Media managers that know more override this.
+   */
+  get mediaSupport(): CaptureSupport {
+    return this._supportsScreenShare ? {} : { screenShare: false };
+  }
 }
 
 export class WavMediaManager extends MediaManager {
@@ -87,6 +102,11 @@ export class WavMediaManager extends MediaManager {
     this._recorderChunkSize = recorderChunkSize;
     this._wavRecorder = new WavRecorder({ sampleRate: recorderSampleRate });
     this._wavStreamPlayer = new WavStreamPlayer({ sampleRate: 24000 });
+  }
+
+  /** Captures the microphone only. */
+  get mediaSupport(): CaptureSupport {
+    return { mic: true, cam: false, screenShare: false };
   }
 
   async initialize(): Promise<void> {
