@@ -21,6 +21,7 @@ import Daily, {
 import {
   DeviceArray,
   DeviceError,
+  MediaSupport,
   MessageTooLargeError,
   Participant,
   PipecatClientOptions,
@@ -34,7 +35,10 @@ import {
   logger,
 } from "@pipecat-ai/client-js";
 
-import { MediaStreamRecorder } from "@pipecat-ai/transport-lib";
+import {
+  browserSupportsScreenShare,
+  MediaStreamRecorder,
+} from "@pipecat-ai/transport-lib";
 
 import packageJson from "../package.json";
 
@@ -378,6 +382,17 @@ export class DailyTransport extends Transport {
 
   public get isSharingScreen(): boolean {
     return this._daily.localScreenAudio() || this._daily.localScreenVideo();
+  }
+
+  /** Carries every kind of media; screen share where the browser can. */
+  get mediaSupport(): MediaSupport {
+    return {
+      mic: true,
+      cam: true,
+      screenShare: browserSupportsScreenShare(),
+      botAudio: true,
+      botVideo: true,
+    };
   }
 
   tracks() {
