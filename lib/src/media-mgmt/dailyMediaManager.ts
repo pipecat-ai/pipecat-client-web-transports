@@ -1,4 +1,5 @@
-import { MediaManager } from "./mediaManager";
+import { browserSupportsScreenShare } from "./browserSupport";
+import { CaptureSupport, MediaManager } from "./mediaManager";
 import { MediaStreamRecorder, WavStreamPlayer } from "../wavtools";
 
 import Daily, {
@@ -59,7 +60,7 @@ export class DailyMediaManager extends MediaManager {
     this.onTrackStoppedCallback = onTrackStoppedCallback;
     this._recorderChunkSize = recorderChunkSize;
 
-    this._supportsScreenShare = true;
+    this._supportsScreenShare = browserSupportsScreenShare();
 
     this._daily = Daily.getCallInstance() ?? Daily.createCallObject();
 
@@ -300,6 +301,12 @@ export class DailyMediaManager extends MediaManager {
   get isMicEnabled(): boolean {
     return this._micEnabled;
   }
+
+  /** Captures the microphone, the camera and, where the browser can, the screen. */
+  get mediaSupport(): CaptureSupport {
+    return { mic: true, cam: true, screenShare: this._supportsScreenShare };
+  }
+
   get isSharingScreen(): boolean {
     return this._daily.localScreenAudio() || this._daily.localScreenVideo();
   }

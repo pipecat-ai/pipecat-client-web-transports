@@ -1,5 +1,6 @@
 import {
   logger,
+  MediaSupport,
   PipecatClientOptions,
   RTVIError,
   RTVIMessage,
@@ -340,6 +341,20 @@ export class WebSocketTransport extends Transport {
   public get isSharingScreen(): boolean {
     logger.warn("isSharingScreen not implemented for WebSocketTransport");
     return false;
+  }
+
+  /**
+   * Carries audio only, so the camera, screen share and bot video are ruled
+   * out whatever the media manager can capture.
+   */
+  get mediaSupport(): MediaSupport {
+    return {
+      ...this._mediaManager.mediaSupport,
+      cam: false,
+      screenShare: false,
+      botAudio: true,
+      botVideo: false,
+    };
   }
 
   enableCam(enable: boolean) {

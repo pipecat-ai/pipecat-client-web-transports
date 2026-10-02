@@ -10,6 +10,7 @@ import * as Publish from "@moq/publish";
 import { Effect, Signal } from "@moq/signals";
 import * as Watch from "@moq/watch";
 import {
+  type MediaSupport,
   type PipecatClientOptions,
   type RTVIEventCallbacks,
   RTVIMessage,
@@ -1045,6 +1046,17 @@ export class MoqTransport extends Transport {
 
   get isSharingScreen(): boolean {
     return false;
+  }
+
+  /** Carries the user's microphone and the bot's audio only. */
+  get mediaSupport(): MediaSupport {
+    return {
+      mic: true,
+      cam: false,
+      screenShare: false,
+      botAudio: true,
+      botVideo: false,
+    };
   }
 
   // --------------------------------------------------------------------

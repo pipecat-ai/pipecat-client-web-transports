@@ -158,3 +158,43 @@ describe("DailyTransport.initDevices() — characterization", () => {
     expect(recorder.states).toEqual(["initializing"]);
   });
 });
+
+/** Give the browser a getDisplayMedia, or take it away, for one test. */
+function withScreenShareSupport(supported: boolean, run: () => void) {
+  vi.stubGlobal("navigator", {
+    ...navigator,
+    mediaDevices: {
+      ...(navigator.mediaDevices ?? {}),
+      getDisplayMedia: supported ? vi.fn() : undefined,
+    },
+  });
+  try {
+    run();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
+describe("DailyTransport.mediaSupport", () => {
+  beforeEach(() => {
+    currentFakeDaily = createFakeDailyCallObject();
+  });
+
+  test("carries every kind of media where the browser can share a screen", () => {
+    withScreenShareSupport(true, () => {
+      expect(new DailyTransport().mediaSupport).toEqual({
+        mic: true,
+        cam: true,
+        screenShare: true,
+        botAudio: true,
+        botVideo: true,
+      });
+    });
+  });
+
+  test("rules out screen share where the browser can't share a screen", () => {
+    withScreenShareSupport(false, () => {
+      expect(new DailyTransport().mediaSupport.screenShare).toBe(false);
+    });
+  });
+});
