@@ -5,6 +5,22 @@ All notable changes to **Pipecat Daily WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.10](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/daily-transport-v1.6.9...daily-transport-v1.6.10) (2026-10-02)
+
+
+### Bug Fixes
+
+* **daily-transport:** catch observer start failures inside startAudioLevelObservers ([1ec396f](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/1ec396f99f1feca64148334b0ddcee9bdb33254a))
+* **daily-transport:** start audio level observers on connect ([7273d38](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/7273d38ab0b6c3a0b60338b201cbf96a16af6114))
+* **daily-transport:** start audio level observers on connect ([c69b589](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c69b589160cf994b7b476bba685b7c83f9b8cdde)), closes [#216](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/216)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pipecat-ai/transport-lib bumped from ^0.1.0 to ^0.1.2
+
 ## [1.6.9](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/daily-transport-v1.6.8...daily-transport-v1.6.9) (2026-09-15)
 
 
