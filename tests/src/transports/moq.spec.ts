@@ -895,3 +895,18 @@ describe("MoqTransport — _connect wiring", () => {
     expect(second.track).toHaveBeenCalledWith("transcript.json.z");
   });
 });
+
+describe("MoqTransport.mediaSupport", () => {
+  test("carries the user's microphone and the bot's audio only", () => {
+    const transport = new MoqTransport({
+      relayUrl: "https://relay.example/moq",
+    });
+    expect(transport.mediaSupport).toEqual({
+      mic: true,
+      cam: false,
+      screenShare: false,
+      botAudio: true,
+      botVideo: false,
+    });
+  });
+});
