@@ -1,5 +1,5 @@
 import { browserSupportsScreenShare } from "./browserSupport";
-import { MediaManager } from "./mediaManager";
+import { CaptureSupport, MediaManager } from "./mediaManager";
 import { MediaStreamRecorder, WavStreamPlayer } from "../wavtools";
 
 import Daily, {
@@ -301,6 +301,12 @@ export class DailyMediaManager extends MediaManager {
   get isMicEnabled(): boolean {
     return this._micEnabled;
   }
+
+  /** Captures the microphone, the camera and, where the browser can, the screen. */
+  get mediaSupport(): CaptureSupport {
+    return { mic: true, cam: true, screenShare: this._supportsScreenShare };
+  }
+
   get isSharingScreen(): boolean {
     return this._daily.localScreenAudio() || this._daily.localScreenVideo();
   }
