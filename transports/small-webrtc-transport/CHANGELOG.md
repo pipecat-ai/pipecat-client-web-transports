@@ -5,6 +5,26 @@ All notable changes to **Pipecat Small WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.8...small-webrtc-transport-v1.11.0) (2026-10-05)
+
+
+### Features
+
+* report media support from each transport ([33dff50](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33dff50eff8231ecd708e90a10a38104b25b5e0e))
+* **small-webrtc-transport:** add mediaSupport ([14a218c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/14a218cbd9ce71b29d0f013420e493426c942eb3))
+
+
+### Miscellaneous Chores
+
+* **main:** release  small-webrtc-transport 1.10.8 ([41a30de](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/41a30ded98ee7a1dc487ef0afd13e226abd3b134))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pipecat-ai/transport-lib bumped from ^0.1.1 to ^0.2.0
+
 ## [1.10.8](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.7...small-webrtc-transport-v1.10.8) (2026-09-15)
 
 
