@@ -5,6 +5,14 @@ All notable changes to **Pipecat MoqTransport** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.2.1...moq-transport-v0.3.0) (2026-10-05)
+
+
+### Features
+
+* **moq-transport:** add mediaSupport ([4fd131a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/4fd131a658b1ffc2acedbe8cbc1504347f9e0c0c))
+* report media support from each transport ([33dff50](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33dff50eff8231ecd708e90a10a38104b25b5e0e))
+
 ## [0.2.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.2.0...moq-transport-v0.2.1) (2026-10-02)
 
 
