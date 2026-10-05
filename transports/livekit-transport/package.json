@@ -1,6 +1,6 @@
 {
   "name": "@pipecat-ai/livekit-transport",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "BSD-2-Clause",
   "main": "dist/index.js",
   "module": "dist/index.module.js",
@@ -35,7 +35,9 @@
   },
   "description": "Pipecat Livekit Transport Package",
   "author": "Daily.co",
-  "contributors": ["Himanshu Gunwant"],
+  "contributors": [
+    "Himanshu Gunwant"
+  ],
   "bugs": {
     "url": "https://github.com/pipecat-ai/pipecat-client-web-transports/issues"
   }
