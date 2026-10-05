@@ -4,6 +4,7 @@ import {
   isAPIRequest,
   logger,
   makeRequest,
+  MediaSupport,
   messageSizeWithinLimit,
   MessageTooLargeError,
   RTVIError,
@@ -1111,6 +1112,18 @@ export class SmallWebRTCTransport extends Transport {
   }
   get isSharingScreen(): boolean {
     return this.mediaManager.isSharingScreen;
+  }
+
+  /**
+   * Carries every kind of media, so what the user can send is what the media
+   * manager can capture.
+   */
+  get mediaSupport(): MediaSupport {
+    return {
+      ...this.mediaManager.mediaSupport,
+      botAudio: true,
+      botVideo: true,
+    };
   }
 
   get state(): TransportState {

@@ -2,6 +2,7 @@ import {
   DeviceArray,
   DeviceError,
   DeviceErrorType,
+  MediaSupport,
   Participant,
   PipecatClientOptions,
   RTVI_MESSAGE_LABEL,
@@ -774,6 +775,21 @@ export class LiveKitTransport extends Transport {
 
   get isSharingScreen(): boolean {
     return this._room.localParticipant.isScreenShareEnabled;
+  }
+
+  /**
+   * Carries every kind of media; screen share where the browser can. Most
+   * mobile browsers, including iOS Safari, have no getDisplayMedia.
+   */
+  get mediaSupport(): MediaSupport {
+    return {
+      mic: true,
+      cam: true,
+      screenShare:
+        typeof navigator?.mediaDevices?.getDisplayMedia === "function",
+      botAudio: true,
+      botVideo: true,
+    };
   }
 
   enableScreenShare(enable: boolean): void {
