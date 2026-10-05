@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.1.1...transport-lib-v0.2.0) (2026-10-05)
+
+
+### Features
+
+* report media support from each transport ([33dff50](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33dff50eff8231ecd708e90a10a38104b25b5e0e))
+* **transport-lib:** add mediaSupport to media managers ([55412ff](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/55412ffd8990142c20eddbee60146380001f01b6))
+
+
+### Bug Fixes
+
+* **transport-lib:** credit OpenAI's MIT license in wavtools ([6c2906f](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/6c2906f6c4e49dfe11202d4f335e661ae598c850))
+* **transport-lib:** credit OpenAI's MIT license in wavtools ([9d5e553](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/9d5e553561536a935c297b5bbbafb6a92e6c2af8))
+* **transport-lib:** only claim screen share where the browser supports it ([d69d37b](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/d69d37b38e6b9be66091dc578e43eb11d00ce126))
+
 ## [0.1.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.1.0...transport-lib-v0.1.1) (2026-09-15)
 
 
