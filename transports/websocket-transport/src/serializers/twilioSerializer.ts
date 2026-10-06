@@ -1,4 +1,7 @@
-import { WebSocketSerializer } from "./websocketSerializer.ts";
+import {
+  DeserializedData,
+  WebSocketSerializer,
+} from "./websocketSerializer.ts";
 import { RTVIMessage } from "@pipecat-ai/client-js";
 import { mulaw } from "x-law";
 
@@ -47,19 +50,11 @@ export class TwilioSerializer implements WebSocketSerializer {
     return bytes;
   }
 
-  async deserialize(
-    data: any
-  ): Promise<
-    | { type: "audio"; audio: Int16Array }
-    | { type: "message"; message: RTVIMessage }
-    | { type: "raw"; message: any }
-  > {
+  async deserialize(data: any): Promise<DeserializedData> {
     const jsonMessage = JSON.parse(data); // Assuming 'data' is a JSON string
     if (jsonMessage.event === "clear") {
-      return {
-        type: "raw",
-        message: jsonMessage,
-      };
+      // Twilio's "clear" asks us to discard buffered audio, i.e. an interruption.
+      return { type: "interruption" };
     } else if (jsonMessage.event === "media") {
       // Deserialize 'media' event
       const payload = jsonMessage.media.payload;
