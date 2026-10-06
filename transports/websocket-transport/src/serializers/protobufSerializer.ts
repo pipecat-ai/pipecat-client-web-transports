@@ -1,6 +1,9 @@
 import { Frame } from "../generated/proto/frames";
-import { WebSocketSerializer } from "./websocketSerializer.ts";
-import { RTVIMessage } from "@pipecat-ai/client-js";
+import {
+  DeserializedData,
+  WebSocketSerializer,
+} from "./websocketSerializer.ts";
+import { logger, RTVIMessage } from "@pipecat-ai/client-js";
 
 export class ProtobufFrameSerializer implements WebSocketSerializer {
   serialize(data: any): any {}
@@ -35,12 +38,7 @@ export class ProtobufFrameSerializer implements WebSocketSerializer {
     });
     return new Uint8Array(Frame.toBinary(frame));
   }
-  async deserialize(
-    data: any
-  ): Promise<
-    | { type: "audio"; audio: Int16Array }
-    | { type: "message"; message: RTVIMessage }
-  > {
+  async deserialize(data: any): Promise<DeserializedData> {
     if (!(data instanceof Blob)) {
       throw new Error("Unknown data type");
     }
@@ -54,8 +52,13 @@ export class ProtobufFrameSerializer implements WebSocketSerializer {
     } else if (parsed.oneofKind === "message") {
       const msg = JSON.parse(parsed.message.data);
       return { type: "message", message: msg };
+    } else if (parsed.oneofKind === "interruption") {
+      return { type: "interruption" };
+    } else if (parsed.oneofKind === undefined) {
+      logger.warn("Ignoring frame of unknown kind");
     } else {
-      throw new Error("Unknown frame kind");
+      logger.warn(`Ignoring unsupported frame kind: ${parsed.oneofKind}`);
     }
+    return { type: "raw", message: parsed };
   }
 }
