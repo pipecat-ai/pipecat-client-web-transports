@@ -26,8 +26,7 @@ export type WebSocketTransportOptions = {
   token?: string;
 };
 
-export interface WebSocketTransportConstructorOptions
-  extends WebSocketTransportOptions {
+export interface WebSocketTransportConstructorOptions extends WebSocketTransportOptions {
   mediaManager?: MediaManager;
   serializer?: WebSocketSerializer;
   recorderSampleRate?: number;
@@ -232,6 +231,10 @@ export class WebSocketTransport extends Transport {
           if (parsed.message.label === "rtvi-ai") {
             this._onMessage(parsed.message);
           }
+        } else if (parsed.type === "interruption") {
+          // The bot was interrupted server-side; flush any buffered bot audio
+          // so playback stops immediately.
+          await this._mediaManager.userStartedSpeaking();
         }
       } catch (e) {
         logger.error("Failed to deserialize incoming message", e);
