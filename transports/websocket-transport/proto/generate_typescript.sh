@@ -1,5 +1,6 @@
 # Use this script to generate the typescript each time we change the frames.proto file
 rm -rf ./src/generated/*
 protoc \
+  --proto_path=. \
   --ts_out=generate_dependencies:./src/generated \
   proto/frames.proto
