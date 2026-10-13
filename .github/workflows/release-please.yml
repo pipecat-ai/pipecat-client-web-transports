@@ -6,6 +6,13 @@ on:
       - main
   workflow_dispatch:
 
+
+# Two quick pushes to main would otherwise race: one run's curate push can be
+# rejected after the other run force-pushes the release branch.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
@@ -15,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
+      prs_created: ${{ steps.release.outputs.prs_created }}
       paths_released: ${{ steps.release.outputs.paths_released }}
       transport_lib_release_created: ${{ steps.release.outputs['transport-lib--release_created'] }}
       daily_release_created: ${{ steps.release.outputs['daily-transport--release_created'] }}
@@ -28,6 +36,55 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+
+  # KEEP IN SYNC with the curate-release-notes job in
+  # pipecat-ai/pipecat-client-web .github/workflows/release-please.yml.
+  # Rewrites each release PR's generated changelog section with the curated
+  # "## Release Notes" sections authored on the feature PRs it covers.
+  # Release-please force-pushes the release branch on every run, so this job
+  # reapplies curation right after, every time; nothing is ever lost because
+  # the source of truth lives in the feature PR bodies.
+  curate-release-notes:
+    needs: release-please
+    # Also run on manual dispatch even when release-please reports no PR
+    # update: it skips updating a release PR whose generated body is
+    # unchanged, and dispatch is exactly how notes added after the fact get
+    # applied to it.
+    if: ${{ needs.release-please.outputs.prs_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Curate release notes on each release PR
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Run the script from main's copy, whatever the release branch holds.
+          cp .github/scripts/curate-release-notes.mjs "$RUNNER_TEMP/curate-release-notes.mjs"
+          # Enumerate open release PRs directly rather than from the action's
+          # outputs, which omit PRs it found already up to date.
+          gh pr list --label "autorelease: pending" --state open \
+            --json number,headRefName \
+            --jq '.[] | [.number, .headRefName] | @tsv' |
+          while IFS=$'\t' read -r number branch; do
+            echo "::group::Curating release PR #$number ($branch)"
+            git fetch origin "$branch"
+            git checkout -B "$branch" "origin/$branch"
+            node "$RUNNER_TEMP/curate-release-notes.mjs" --pr "$number"
+            if ! git diff --quiet; then
+              git add -A
+              git commit -m "chore: curate release notes"
+              git push origin "HEAD:$branch"
+            else
+              echo "No changelog changes needed."
+            fi
+            echo "::endgroup::"
+          done
 
   publish-daily:
     needs: release-please
