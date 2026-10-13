@@ -173,7 +173,7 @@ export class DailyMediaManager extends MediaManager {
     this._connected = false;
   }
 
-  async userStartedSpeaking(): Promise<unknown> {
+  async interruptBotAudio(): Promise<unknown> {
     return this._wavStreamPlayer?.interrupt();
   }
 

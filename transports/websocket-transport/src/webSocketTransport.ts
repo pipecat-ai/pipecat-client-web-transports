@@ -234,7 +234,7 @@ export class WebSocketTransport extends Transport {
         } else if (parsed.type === "interruption") {
           // The bot was interrupted server-side; flush any buffered bot audio
           // so playback stops immediately.
-          await this._mediaManager.userStartedSpeaking();
+          await this._mediaManager.interruptBotAudio();
         }
       } catch (e) {
         logger.error("Failed to deserialize incoming message", e);
