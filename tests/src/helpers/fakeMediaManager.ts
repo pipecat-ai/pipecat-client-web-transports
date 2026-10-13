@@ -38,7 +38,7 @@ export function createFakeMediaManager(): FakeMediaManager {
     connect: vi.fn(async () => {}),
     disconnect: vi.fn(async () => {}),
 
-    userStartedSpeaking: vi.fn(async () => undefined),
+    interruptBotAudio: vi.fn(async () => undefined),
     bufferBotAudio: vi.fn(() => undefined),
 
     getAllMics: vi.fn(async () => []),

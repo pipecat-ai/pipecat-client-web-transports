@@ -43,7 +43,12 @@ export abstract class MediaManager {
   abstract connect(): Promise<void>;
   abstract disconnect(): Promise<void>;
 
-  abstract userStartedSpeaking(): Promise<unknown>;
+  /**
+   * Stop bot audio playback and discard any buffered bot audio, e.g. when
+   * the bot has been interrupted.
+   */
+  abstract interruptBotAudio(): Promise<unknown>;
+
   abstract bufferBotAudio(
     data: ArrayBuffer | Int16Array,
     id?: string
@@ -148,7 +153,7 @@ export class WavMediaManager extends MediaManager {
     this._initialized = false;
   }
 
-  async userStartedSpeaking(): Promise<unknown> {
+  async interruptBotAudio(): Promise<unknown> {
     return this._wavStreamPlayer.interrupt();
   }
 
