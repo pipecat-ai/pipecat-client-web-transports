@@ -529,21 +529,27 @@ export class SmallWebRTCTransport extends Transport {
       }
       logger.debug(`Received new remote track for ${streamType}`);
       this._incomingTracks.set(streamType, new WebRTCTrack(evt.track));
+      // After a reconnection the map entry for this stream type is replaced
+      // by the new connection's track, but the old track's listeners still
+      // fire while the old connection is torn down. Each handler must verify
+      // the entry still belongs to its track before acting on it.
       evt.track.addEventListener("unmute", () => {
         const t = this._incomingTracks.get(streamType);
-        if (!t) return;
+        if (t?.track !== evt.track) return;
         logger.debug(`Remote track unmuted: ${streamType}`);
         t.status = "unmuted";
         this._callbacks.onTrackStarted?.(evt.track);
       });
       evt.track.addEventListener("mute", () => {
         const t = this._incomingTracks.get(streamType);
-        if (!t || t.status !== "unmuted") return;
+        if (t?.track !== evt.track || t.status !== "unmuted") return;
         logger.debug(`Remote track muted: ${streamType}`);
         t.status = "muted";
         this._callbacks.onTrackStopped?.(evt.track);
       });
       evt.track.addEventListener("ended", () => {
+        const t = this._incomingTracks.get(streamType);
+        if (t?.track !== evt.track) return;
         logger.debug(`Remote track ended: ${streamType}`);
         this._callbacks.onTrackStopped?.(evt.track);
         this._incomingTracks.delete(streamType);
@@ -991,6 +997,15 @@ export class SmallWebRTCTransport extends Transport {
   }
 
   private closePeerConnection(pc: RTCPeerConnection) {
+    // During reconnection, the new peer connection may reuse the same local
+    // tracks as the previous connection. Closing the old connection is safe,
+    // but stopping those tracks would also stop media on the recovered call.
+    const tracksInUse = new Set(
+      pc !== this.pc
+        ? (this.pc?.getSenders() ?? []).map((sender) => sender.track)
+        : []
+    );
+
     pc.getTransceivers().forEach((transceiver) => {
       if (transceiver.stop) {
         transceiver.stop();
@@ -998,7 +1013,9 @@ export class SmallWebRTCTransport extends Transport {
     });
 
     pc.getSenders().forEach((sender) => {
-      sender.track?.stop();
+      if (sender.track && !tracksInUse.has(sender.track)) {
+        sender.track.stop();
+      }
     });
 
     pc.close();
