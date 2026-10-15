@@ -10,6 +10,59 @@
 
 import { vi } from "vitest";
 
+/**
+ * Stand-in for MediaStreamTrack, usable both as a local track (handed out by
+ * a fake MediaManager and moved between connections via replaceTrack) and as
+ * a remote track (delivered through a "track" event and later fired with
+ * "unmute"/"mute"/"ended" by the test).
+ */
+export class FakeMediaStreamTrack {
+  kind: string;
+  readyState: "live" | "ended" = "live";
+
+  constructor(kind: string = "audio") {
+    this.kind = kind;
+  }
+
+  private listeners = new Map<string, Set<(ev?: unknown) => void>>();
+
+  addEventListener = vi.fn((type: string, cb: (ev?: unknown) => void) => {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type)!.add(cb);
+  });
+  removeEventListener = vi.fn((type: string, cb: (ev?: unknown) => void) => {
+    this.listeners.get(type)?.delete(cb);
+  });
+
+  stop = vi.fn(() => {
+    // Per spec, stop() ends the track silently — no "ended" event fires.
+    this.readyState = "ended";
+  });
+
+  /** Simulates the browser firing `type` on this track. */
+  dispatch(type: string, ev?: unknown) {
+    this.listeners.get(type)?.forEach((cb) => cb(ev));
+  }
+}
+
+export class FakeRTCRtpSender {
+  track: FakeMediaStreamTrack | null = null;
+
+  replaceTrack = vi.fn(async (track: FakeMediaStreamTrack | null) => {
+    this.track = track;
+  });
+}
+
+export class FakeRTCRtpTransceiver {
+  mid: string;
+  sender = new FakeRTCRtpSender();
+  stop = vi.fn();
+
+  constructor(mid: string) {
+    this.mid = mid;
+  }
+}
+
 export class FakeRTCDataChannel {
   readyState: string = "connecting";
   send = vi.fn();
@@ -46,7 +99,7 @@ export class FakeRTCPeerConnection {
   // so tests can simulate the browser actually firing events — e.g. close()
   // firing "signalingstatechange" on itself, which is what a stale peer
   // connection does mid-reconnection.
-  private listeners = new Map<string, Set<() => void>>();
+  private listeners = new Map<string, Set<(ev?: unknown) => void>>();
 
   createOffer = vi.fn(async () => ({ type: "offer", sdp: "v=0\r\n" }));
   setLocalDescription = vi.fn(async (desc: RTCSessionDescriptionInit) => {
@@ -58,9 +111,19 @@ export class FakeRTCPeerConnection {
     this.signalingState = "stable";
     this.dispatch("signalingstatechange");
   });
-  addTransceiver = vi.fn();
-  getTransceivers = vi.fn(() => []);
-  getSenders = vi.fn(() => []);
+  // Transceivers get mids "0"/"1"/"2" in creation order, matching the
+  // transport's audio/video/screenVideo convention (see
+  // addInitialTransceivers and the "track" event's mid -> streamType map).
+  transceivers: FakeRTCRtpTransceiver[] = [];
+  addTransceiver = vi.fn(() => {
+    const transceiver = new FakeRTCRtpTransceiver(
+      String(this.transceivers.length)
+    );
+    this.transceivers.push(transceiver);
+    return transceiver;
+  });
+  getTransceivers = vi.fn(() => this.transceivers);
+  getSenders = vi.fn(() => this.transceivers.map((t) => t.sender));
 
   /** The most recently created data channel, for tests to reach into. */
   lastDataChannel: FakeRTCDataChannel | null = null;
@@ -69,17 +132,17 @@ export class FakeRTCPeerConnection {
     return this.lastDataChannel;
   });
 
-  addEventListener = vi.fn((type: string, cb: () => void) => {
+  addEventListener = vi.fn((type: string, cb: (ev?: unknown) => void) => {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set());
     this.listeners.get(type)!.add(cb);
   });
-  removeEventListener = vi.fn((type: string, cb: () => void) => {
+  removeEventListener = vi.fn((type: string, cb: (ev?: unknown) => void) => {
     this.listeners.get(type)?.delete(cb);
   });
 
   /** Simulates the browser firing `type` on this connection. */
-  dispatch(type: string) {
-    this.listeners.get(type)?.forEach((cb) => cb());
+  dispatch(type: string, ev?: unknown) {
+    this.listeners.get(type)?.forEach((cb) => cb(ev));
   }
 
   close = vi.fn(() => {
@@ -108,9 +171,8 @@ export function installFakeRTCPeerConnection(): {
     }
   }
 
-  (
-    globalThis as unknown as { RTCPeerConnection: unknown }
-  ).RTCPeerConnection = TrackingFakeRTCPeerConnection;
+  (globalThis as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection =
+    TrackingFakeRTCPeerConnection;
 
   return {
     current: () => {
