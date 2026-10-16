@@ -5,6 +5,30 @@ All notable changes to **Pipecat Websocket Transport** will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.7.2...websocket-transport-v1.8.0) (2026-10-16)
+
+
+### Features
+
+* report media support from each transport ([33dff50](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33dff50eff8231ecd708e90a10a38104b25b5e0e))
+* **websocket-transport:** add mediaSupport ([0b5fe6c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/0b5fe6c0c5e4866a71dc491fbead54938b51a863))
+
+
+### Bug Fixes
+
+* **websocket-transport:** build connect url per connect so the token does not accumulate ([2e9a012](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/2e9a0128220454f5bd5cea405c6dd652db60b7d2))
+* **websocket-transport:** build the connect url per connect so the token does not accumulate ([0b77e6f](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/0b77e6fe7624dfc4c916a2ce7ab670a67968239f))
+* **websocket-transport:** Fix missing transport option exports for websocket-transport ([0e9b366](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/0e9b3661821ab153b4828dd3f7c917d4a2fd3485))
+* **websocket-transport:** Update protobuf to match latest pipecat and handle interruption frames ([33de4c5](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33de4c5a138945c8177a820bbc7f1ff5a8e6820a))
+
+
+### Miscellaneous Chores
+
+* bump @pipecat-ai/client-js dependencies to 1.14.0 ([a58f148](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/a58f148120c748390b5ba1303ff4e49dcbd93703))
+* Bump daily-js dependencies to 0.94.0 ([eff5bf5](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/eff5bf5c3f6bdf977907c09c50da3a884c96b6d7))
+* **main:** release  websocket-transport 1.7.2 ([bfc84d3](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/bfc84d3280ac72c93a7fbde07071160dce3cc273))
+* update transport-lib dependencies to 0.2.0 ([730e0e4](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/730e0e4ca2a2abc9f1c1a5b9b88eff4495e19c5a))
+
 ## [1.7.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.7.1...websocket-transport-v1.7.2) (2026-09-15)
 
 
