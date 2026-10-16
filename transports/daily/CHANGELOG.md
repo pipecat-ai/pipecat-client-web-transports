@@ -5,6 +5,34 @@ All notable changes to **Pipecat Daily WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/daily-transport-v1.6.9...daily-transport-v1.7.0) (2026-10-16)
+
+
+### Features
+
+* **daily-transport:** add mediaSupport ([24829e8](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/24829e8d60ada336fe9fd48e5bc3e0cd8e3adc8b))
+* report media support from each transport ([33dff50](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33dff50eff8231ecd708e90a10a38104b25b5e0e))
+
+
+### Bug Fixes
+
+* **daily-transport:** catch observer start failures inside startAudioLevelObservers ([1ec396f](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/1ec396f99f1feca64148334b0ddcee9bdb33254a))
+* **daily-transport:** start audio level observers on connect ([7273d38](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/7273d38ab0b6c3a0b60338b201cbf96a16af6114))
+* **daily-transport:** start audio level observers on connect ([c69b589](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c69b589160cf994b7b476bba685b7c83f9b8cdde)), closes [#216](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/216)
+
+
+### Miscellaneous Chores
+
+* bump @pipecat-ai/client-js dependencies to 1.14.0 ([a58f148](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/a58f148120c748390b5ba1303ff4e49dcbd93703))
+* Bump daily-js dependencies to 0.94.0 ([eff5bf5](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/eff5bf5c3f6bdf977907c09c50da3a884c96b6d7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pipecat-ai/transport-lib bumped from ^0.1.0 to ^0.2.0
+
 ## [1.6.9](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/daily-transport-v1.6.8...daily-transport-v1.6.9) (2026-09-15)
 
 
