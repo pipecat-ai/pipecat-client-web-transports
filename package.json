@@ -29,7 +29,7 @@
     "typescript": "^5.5.4"
   },
   "peerDependencies": {
-    "@daily-co/daily-js": "^0.90.0",
+    "@daily-co/daily-js": "^0.94.0",
     "@pipecat-ai/client-js": "^1.13.0"
   }
 }
