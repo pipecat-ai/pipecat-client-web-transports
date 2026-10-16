@@ -9,7 +9,7 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@pipecat-ai/client-js": "^1.7.0",
+    "@pipecat-ai/client-js": "^1.14.0",
     "@pipecat-ai/daily-transport": "*",
     "@pipecat-ai/livekit-transport": "*",
     "@pipecat-ai/moq-transport": "*",
