@@ -5,6 +5,27 @@ All notable changes to **Pipecat Small WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.8...small-webrtc-transport-v1.11.0) (2026-10-16)
+
+
+### Features
+
+* report media support from each transport ([33dff50](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33dff50eff8231ecd708e90a10a38104b25b5e0e))
+* **small-webrtc-transport:** add mediaSupport ([14a218c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/14a218cbd9ce71b29d0f013420e493426c942eb3))
+
+
+### Bug Fixes
+
+* **small-webrtc-transport:** keep media alive after an ICE-restart reconnection ([c348208](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c348208fe3633ace36a13ddf3c915a11869e2932)), closes [#236](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/236)
+
+
+### Miscellaneous Chores
+
+* bump @pipecat-ai/client-js dependencies to 1.14.0 ([a58f148](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/a58f148120c748390b5ba1303ff4e49dcbd93703))
+* Bump daily-js dependencies to 0.94.0 ([eff5bf5](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/eff5bf5c3f6bdf977907c09c50da3a884c96b6d7))
+* **main:** release  small-webrtc-transport 1.10.8 ([41a30de](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/41a30ded98ee7a1dc487ef0afd13e226abd3b134))
+* update transport-lib dependencies to 0.2.0 ([730e0e4](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/730e0e4ca2a2abc9f1c1a5b9b88eff4495e19c5a))
+
 ## [1.10.8](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.7...small-webrtc-transport-v1.10.8) (2026-09-15)
 
 
