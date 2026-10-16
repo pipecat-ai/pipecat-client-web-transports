@@ -7,22 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.11.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.8...small-webrtc-transport-v1.11.0) (2026-10-16)
 
-
 ### Features
 
 * report media support from each transport ([33dff50](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33dff50eff8231ecd708e90a10a38104b25b5e0e))
 * **small-webrtc-transport:** add mediaSupport ([14a218c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/14a218cbd9ce71b29d0f013420e493426c942eb3))
 
-
 ### Bug Fixes
 
-* **small-webrtc-transport:** keep media alive after an ICE-restart reconnection ([c348208](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c348208fe3633ace36a13ddf3c915a11869e2932)), closes [#236](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/236)
+* Fixed calls losing media after an ICE-restart reconnection. When the transport replaced a failed peer connection, closing the old connection stopped the local microphone and camera tracks the new connection was sending, and the old remote track ending removed the new remote track so `onTrackStarted` never fired for the recovered audio. Local tracks still in use now stay live, and events from the old connection's remote tracks no longer affect the replacement tracks. ([7f5011e](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/7f5011ee19cbe7221df78826cd100bd2eacfc0cb))
 
+### Other
+
+* Bumped the `@pipecat-ai/client-js` peer dependency to `~1.14.0`. Projects using `@pipecat-ai/small-webrtc-transport` should upgrade `@pipecat-ai/client-js` to 1.14.x. ([6f1bf1a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/6f1bf1a37e7077e54e27a92b810c1e146be781fe))
+* `@pipecat-ai/small-webrtc-transport` now depends on `@daily-co/daily-js` `^0.94.0` (previously `^0.90.0`), which its `DailyMediaManager`-based media handling uses. ([1ffa4f8](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/1ffa4f87edd988bf289768877c16c6d4dd37567d))
 
 ### Miscellaneous Chores
 
-* bump @pipecat-ai/client-js dependencies to 1.14.0 ([a58f148](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/a58f148120c748390b5ba1303ff4e49dcbd93703))
-* Bump daily-js dependencies to 0.94.0 ([eff5bf5](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/eff5bf5c3f6bdf977907c09c50da3a884c96b6d7))
 * **main:** release  small-webrtc-transport 1.10.8 ([41a30de](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/41a30ded98ee7a1dc487ef0afd13e226abd3b134))
 * update transport-lib dependencies to 0.2.0 ([730e0e4](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/730e0e4ca2a2abc9f1c1a5b9b88eff4495e19c5a))
 
