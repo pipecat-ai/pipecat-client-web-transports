@@ -7,12 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.8.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/daily-transport-v1.7.0...daily-transport-v1.8.0) (2026-10-16)
 
-
 ### Features
 
 * **daily-transport:** add mediaSupport ([24829e8](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/24829e8d60ada336fe9fd48e5bc3e0cd8e3adc8b))
 * report media support from each transport ([33dff50](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33dff50eff8231ecd708e90a10a38104b25b5e0e))
-
 
 ### Bug Fixes
 
@@ -26,10 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * persist enableMic/enableCam across the pre-session boundary ([6cf0d9a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/6cf0d9a6337b7fc4fe04d440809234f82c734c81))
 * persist enableMic/enableCam preference across the pre-session boundary ([610b7e3](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/610b7e3f17f23c5c5b507e4821c71a7be32eeafd))
 
+### Other
+
+* Bumped the `@pipecat-ai/client-js` peer dependency to `~1.14.0`. Projects using `@pipecat-ai/daily-transport` should upgrade `@pipecat-ai/client-js` to 1.14.x. ([6f1bf1a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/6f1bf1a37e7077e54e27a92b810c1e146be781fe))
+* `@pipecat-ai/daily-transport` now depends on `@daily-co/daily-js` `^0.94.0` (previously `^0.90.0`). ([1ffa4f8](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/1ffa4f87edd988bf289768877c16c6d4dd37567d))
 
 ### Miscellaneous Chores
 
-* bump @pipecat-ai/client-js dependencies to 1.14.0 ([a58f148](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/a58f148120c748390b5ba1303ff4e49dcbd93703))
 * Bump client-js dependencies to lastest 1.8.0 ([72c2026](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/72c20269539367048c923b6afa3e9e5bad41f933))
 * Bump client-js dependency for all transports to 1.10.0 ([5c4568e](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/5c4568e3d5a049118c2983e275805848aacac823))
 * Bump client-js dependency for all transports to 1.10.0 ([7cfe831](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/7cfe83100d4e9f2f598db5013833444fccd5257e))
@@ -40,7 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Bump client-js dependency in transports to 1.13.0 and fix changelogs ([0dba28c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/0dba28c4b3fcedd8851e43ad7935b537679efe1b))
 * Bump client-js dependency to latest 1.9.0 and clean up changelogs ([175795b](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/175795bd22a660b2f66152864e66cec112b6ecae))
 * Bump client-js dependency to latest 1.9.0 and clean up changelogs ([fe9347f](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/fe9347f73493d2b64a1304a9c6f80ce84fa721a3))
-* Bump daily-js dependencies to 0.94.0 ([eff5bf5](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/eff5bf5c3f6bdf977907c09c50da3a884c96b6d7))
 * bump daily-js to latest 0.90.0 ([5f05e59](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/5f05e599ae5f3a1d2c1403c662ad4f81914bed41))
 * curate release notes ([0f9fde6](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/0f9fde66dbb715e02b16796b43a09ce4220285d7))
 * **daily,gemini,openai,small-webrtc,websocket:** Bump client-js dep… ([9180f89](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/9180f890bb01c1e8c2f74a9abe7fc8e0777a86c3))
