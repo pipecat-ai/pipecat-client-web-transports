@@ -53,7 +53,7 @@
     "@pipecat-ai/client-js": "~1.13.0"
   },
   "dependencies": {
-    "@daily-co/daily-js": "^0.90.0",
+    "@daily-co/daily-js": "^0.94.0",
     "dequal": "^2.0.3",
     "lodash": "^4.17.21"
   },
