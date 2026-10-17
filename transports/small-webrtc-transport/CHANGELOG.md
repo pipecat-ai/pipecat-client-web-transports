@@ -9,8 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Features
 
-* report media support from each transport ([33dff50](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33dff50eff8231ecd708e90a10a38104b25b5e0e))
-* **small-webrtc-transport:** add mediaSupport ([14a218c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/14a218cbd9ce71b29d0f013420e493426c942eb3))
+* `SmallWebRTCTransport` now implements the `mediaSupport` getter. The bot's audio and video are always supported, and the user's microphone, camera, and screen share follow what the media manager reports through `MediaManager.mediaSupport`. With the default `DailyMediaManager`, screen share is reported as unsupported on browsers without `getDisplayMedia`, such as most mobile browsers. Requires `@pipecat-ai/client-js` 1.14.0 or later. ([14a218c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/14a218cbd9ce71b29d0f013420e493426c942eb3))
 
 ### Bug Fixes
 
@@ -23,7 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Miscellaneous Chores
 
-* **main:** release  small-webrtc-transport 1.10.8 ([41a30de](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/41a30ded98ee7a1dc487ef0afd13e226abd3b134))
 * update transport-lib dependencies to 0.2.0 ([730e0e4](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/730e0e4ca2a2abc9f1c1a5b9b88eff4495e19c5a))
 
 ## [1.10.8](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.10.7...small-webrtc-transport-v1.10.8) (2026-09-15)

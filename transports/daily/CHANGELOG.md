@@ -9,14 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Features
 
-* **daily-transport:** add mediaSupport ([24829e8](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/24829e8d60ada336fe9fd48e5bc3e0cd8e3adc8b))
-* report media support from each transport ([33dff50](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33dff50eff8231ecd708e90a10a38104b25b5e0e))
+* `DailyTransport` now implements the `mediaSupport` getter, reporting that it carries the user's microphone and camera and the bot's audio and video, plus screen share where the browser can share a screen. `PipecatClient.mediaSupport` combines this with what the bot supports so your UI can hide controls that can't work. Requires `@pipecat-ai/client-js` 1.14.0 or later. ([24829e8](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/24829e8d60ada336fe9fd48e5bc3e0cd8e3adc8b))
 
 ### Bug Fixes
 
-* **daily-transport:** catch observer start failures inside startAudioLevelObservers ([1ec396f](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/1ec396f99f1feca64148334b0ddcee9bdb33254a))
-* **daily-transport:** start audio level observers on connect ([7273d38](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/7273d38ab0b6c3a0b60338b201cbf96a16af6114))
-* **daily-transport:** start audio level observers on connect ([c69b589](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c69b589160cf994b7b476bba685b7c83f9b8cdde)), closes [#216](https://github.com/pipecat-ai/pipecat-client-web-transports/issues/216)
+* Fixed `onLocalAudioLevel` and `onRemoteAudioLevel` never firing when `DailyTransport` connected without running `initDevices()` first, such as when the client starts with `enableMic: false` and `enableCam: false`, and on every reconnect after a `disconnect()`. The audio level observers now also start after a successful join, skipping any that are already running. If an observer can't start, the transport logs a warning instead of failing `connect()` or `initDevices()`. ([c69b589](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c69b589160cf994b7b476bba685b7c83f9b8cdde), [1ec396f](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/1ec396f99f1feca64148334b0ddcee9bdb33254a))
 
 ### Dependencies
 
