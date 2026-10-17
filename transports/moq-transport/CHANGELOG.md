@@ -7,16 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.2.1...moq-transport-v0.3.0) (2026-10-17)
 
-
 ### Features
 
-* **moq-transport:** add mediaSupport ([4fd131a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/4fd131a658b1ffc2acedbe8cbc1504347f9e0c0c))
-* report media support from each transport ([33dff50](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33dff50eff8231ecd708e90a10a38104b25b5e0e))
+* `MoqTransport` now implements the `mediaSupport` getter, reporting that it carries the user's microphone and the bot's audio only; the camera, screen share, and bot video are reported as unsupported. Requires `@pipecat-ai/client-js` 1.14.0 or later. ([4fd131a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/4fd131a658b1ffc2acedbe8cbc1504347f9e0c0c))
 
+### Other
 
-### Miscellaneous Chores
-
-* bump @pipecat-ai/client-js dependencies to 1.14.0 ([a58f148](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/a58f148120c748390b5ba1303ff4e49dcbd93703))
+* Bumped the `@pipecat-ai/client-js` peer dependency to `~1.14.0`. Projects using `@pipecat-ai/moq-transport` should upgrade `@pipecat-ai/client-js` to 1.14.x. ([6f1bf1a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/6f1bf1a37e7077e54e27a92b810c1e146be781fe))
 
 ## [0.2.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.2.0...moq-transport-v0.2.1) (2026-10-02)
 
