@@ -9,13 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Features
 
-* report media support from each transport ([33dff50](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/33dff50eff8231ecd708e90a10a38104b25b5e0e))
-* **websocket-transport:** add mediaSupport ([0b5fe6c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/0b5fe6c0c5e4866a71dc491fbead54938b51a863))
+* `WebSocketTransport` now implements the `mediaSupport` getter, reporting that it carries audio only: the camera, screen share, and bot video are always reported as unsupported, the bot's audio is supported, and the microphone follows what the media manager reports. Requires `@pipecat-ai/client-js` 1.14.0 or later. ([0b5fe6c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/0b5fe6c0c5e4866a71dc491fbead54938b51a863))
 
 ### Bug Fixes
 
-* **websocket-transport:** build connect url per connect so the token does not accumulate ([2e9a012](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/2e9a0128220454f5bd5cea405c6dd652db60b7d2))
-* **websocket-transport:** build the connect url per connect so the token does not accumulate ([0b77e6f](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/0b77e6fe7624dfc4c916a2ce7ab670a67968239f))
+* Fixed `WebSocketTransport` piling up tokens on its stored URL across connects. Connecting again with a new `token` and no new `wsUrl` used to open a URL like `wss://host/ws?token=old&token=new`, so most servers read the stale token. The token is now added to the base URL on each connect, which gives `wss://host/ws?token=new`. As a result, a connect without a `token` no longer reuses one from an earlier connect. `initializeWebsocket()` now takes an optional `url` argument that defaults to the stored base URL. ([2e9a012](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/2e9a0128220454f5bd5cea405c6dd652db60b7d2))
+* Fixed `WebSocketTransport` throwing a `TypeError` when a `token` was passed without any URL. It now throws `TransportStartError` and sets the transport state to `"error"`, which is what already happened when neither a URL nor a token was given. ([2e9a012](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/2e9a0128220454f5bd5cea405c6dd652db60b7d2))
 * `@pipecat-ai/websocket-transport` now exports the `WebSocketTransportOptions` and `WebSocketTransportConstructorOptions` types, so you can type the options passed to the `WebSocketTransport` constructor. ([cddd96f](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/cddd96fadbbf06d73d89378f42891aba66460a10))
 * `@pipecat-ai/websocket-transport` now exports the `WebSocketSerializer` interface and the `DeserializedData` type, so you can implement a custom serializer and pass it via the `serializer` option. ([cddd96f](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/cddd96fadbbf06d73d89378f42891aba66460a10))
 * `ProtobufFrameSerializer` now understands the `InterruptionFrame` sent by recent Pipecat servers. Previously these frames caused `Unknown frame kind` deserialization errors. When one arrives, `WebSocketTransport` now stops bot playback and flushes buffered bot audio right away. ([214d7ab](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/214d7abf9db1f655b342b0820a7fc22b0356f575))
@@ -29,7 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Miscellaneous Chores
 
-* **main:** release  websocket-transport 1.7.2 ([bfc84d3](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/bfc84d3280ac72c93a7fbde07071160dce3cc273))
 * update transport-lib dependencies to 0.2.0 ([730e0e4](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/730e0e4ca2a2abc9f1c1a5b9b88eff4495e19c5a))
 
 ## [1.7.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.7.1...websocket-transport-v1.7.2) (2026-09-15)
