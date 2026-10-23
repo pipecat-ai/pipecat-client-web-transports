@@ -120,14 +120,16 @@ The transport can be in one of these states:
 - "disconnecting"
 - "error"
 
-Once the session is `ready`, a relay reconnect does not change the state. The connection redials in the background. A message sent meanwhile is kept in the transcript log and replayed to the bot when it resubscribes; audio from the gap is not. If the relay cannot be reached for the whole retry window (`relayRetryTimeoutMs`, 60 seconds by default), the transport moves to `error` and reports a fatal error through `onError`, and `PipecatClient` disconnects. The same window bounds the first connection. Behind a layer-4 load balancer with source-IP stickiness, a lost relay keeps receiving the client's reconnects until the balancer takes it out of rotation, so the window has to outlast that.
+Once the session is `ready`, a relay reconnect does not change the state. The connection redials in the background. A message sent meanwhile is kept in the transcript log and replayed to the bot when it resubscribes; audio from the gap is not. If the relay cannot be reached for the whole retry window (`relayRetryTimeoutMs`, 60 seconds by default), the transport moves to `error` and reports a fatal error through `onError`, and `PipecatClient` disconnects. The same window bounds the first connection.
+
+Each attempt to reach the relay also has its own deadline: 5 seconds, doubling for each attempt that runs out until the relay is reached, up to 20 seconds. An attempt still connecting at its deadline is abandoned and dialed again as a new connection. A layer-4 load balancer can still send some new connections to a relay that has just died, and every packet of such a connection goes to the dead relay. Chrome on macOS takes 75 seconds to give up on a WebSocket that gets no answer, so without the deadline one such attempt would hold up the reconnect for over a minute.
 
 ## Error Handling
 
 The transport includes error handling for:
 - Microphone acquisition failures (`initDevices`, `_connect`)
 - Invalid `relayUrl`
-- WebTransport / WebSocket connection failures (retried by `@moq/net` auto-reconnect; fatal once its retry window runs out)
+- WebTransport / WebSocket connection failures (retried by `@moq/net` auto-reconnect, with a deadline on each attempt; fatal once the retry window runs out)
 - Catalog decode and audio decode errors (logged; the consume loop continues)
 
 ## License
