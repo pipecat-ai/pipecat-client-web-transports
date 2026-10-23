@@ -289,11 +289,16 @@ describe("MoqTransport — characterization", () => {
   });
 
   test("_disconnect() from 'disconnected' is a no-op", async () => {
-    expect(transport.state).toBe("disconnected");
+    const { callbacks, spies, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    (transport as unknown as { _state: string })._state = "disconnected";
+    recorder.states.length = 0;
 
     await transport._disconnect();
 
     expect(transport.state).toBe("disconnected");
+    expect(recorder.states).toEqual([]);
+    expect(spies.onDisconnected).not.toHaveBeenCalled();
   });
 
   test("constructor option overrides are applied (clientId, botId, namespace)", () => {
@@ -677,6 +682,20 @@ describe("MoqTransport — relay reconnects", () => {
     expect(recorder.states).toEqual([]);
   });
 
+  test("'error' holds whatever the relay status does until the disconnect", () => {
+    const { callbacks, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    const internals = transport as unknown as Internals;
+    internals._state = "error";
+    recorder.states.length = 0;
+
+    internals._onRelayStatus("disconnected");
+    internals._onRelayStatus("connecting");
+
+    expect(transport.state).toBe("error");
+    expect(recorder.states).toEqual([]);
+  });
+
   test("the connection giving up during a disconnect is ignored", () => {
     const { callbacks, spies } = buildSpyCallbacks();
     wireTransport(transport, callbacks);
@@ -825,6 +844,58 @@ describe("MoqTransport — _connect wiring", () => {
     expect(captured.connections).toHaveLength(0);
   });
 
+  test("_disconnect() before 'ready' tears down a connection that is between attempts", async () => {
+    const { callbacks, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    await transport._connect();
+    const [connection] = captured.connections;
+    const close = vi.spyOn(connection, "close");
+    // Between attempts, the relay status reads as a disconnected transport.
+    connection.status.set("disconnected");
+    await tick();
+    expect(transport.state).toBe("disconnected");
+    recorder.states.length = 0;
+
+    await transport._disconnect();
+
+    expect(close).toHaveBeenCalled();
+    expect(recorder.states).toEqual(["disconnecting", "disconnected"]);
+  });
+
+  test("a second _disconnect() after a completed one is a no-op", async () => {
+    const { callbacks, spies, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    await transport._connect();
+    await transport._disconnect();
+    const disconnects = spies.onDisconnected.mock.calls.length;
+    recorder.states.length = 0;
+
+    await transport._disconnect();
+
+    expect(recorder.states).toEqual([]);
+    expect(spies.onDisconnected).toHaveBeenCalledTimes(disconnects);
+  });
+
+  test("a disconnect under way holds against the relay status", async () => {
+    const { callbacks, spies, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    await transport._connect();
+    const [connection] = captured.connections;
+    connection.status.set("disconnected");
+    await tick();
+    recorder.states.length = 0;
+
+    // The connection's backoff ends while the session-ending record goes out.
+    const done = transport._disconnect();
+    connection.status.set("connecting");
+    await tick();
+    expect(transport.state).toBe("disconnecting");
+    await done;
+
+    expect(recorder.states).toEqual(["disconnecting", "disconnected"]);
+    expect(spies.onError).not.toHaveBeenCalled();
+  });
+
   test("the connection giving up on its own drives the transport to 'error'", async () => {
     // `connection.error` is the give-up signal: with the private loop's
     // `delay.timeout`, it is set when the relay stays down for the whole
@@ -893,6 +964,314 @@ describe("MoqTransport — _connect wiring", () => {
     await tick();
     expect(first.subscription.close).toHaveBeenCalled();
     expect(second.track).toHaveBeenCalledWith("transcript.json.z");
+  });
+});
+
+/**
+ * `@moq/net` gives a connect attempt no deadline, so the transport keeps
+ * one: an attempt still connecting at its deadline is abandoned by turning
+ * the connection off and on, and the retry window is kept by the transport.
+ * These run `_connect()` against the mocked Connection on fake timers.
+ */
+describe("MoqTransport — relay attempt deadlines", () => {
+  let transport: MoqTransport;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    captured.connections.length = 0;
+    captured.watchBroadcasts.length = 0;
+    transport = new MoqTransport({ relayUrl: "https://relay.example/moq" });
+  });
+
+  afterEach(async () => {
+    // `_disconnect` gives the session-ending record 250 ms to go out.
+    const done = transport._disconnect();
+    await vi.advanceTimersByTimeAsync(250);
+    await done;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /** Connect, then stand in for the reconnect loop behind the mocked
+   *  Connection: turning it off cancels the attempt in flight
+   *  (`disconnected`), turning it on dials again (`connecting`). Every
+   *  change to the switch is recorded in `switched`, and when it happened
+   *  (on the fake clock) in `switchedAt`. Fake timers run a 0 ms timeout
+   *  set during a tick 1 ms later, so dialing again lands 1 ms after the
+   *  attempt is abandoned. */
+  async function connect(params: Record<string, unknown> = {}) {
+    const { callbacks, spies, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    await transport._connect({ relayUrl: "https://relay.example/moq", ...params });
+    const connection = captured.connections[0];
+    const switched: boolean[] = [];
+    const switchedAt: number[] = [];
+    connection.props.enabled.subscribe((on: boolean) => {
+      switched.push(on);
+      switchedAt.push(Date.now());
+      connection.status.set(on ? "connecting" : "disconnected");
+    });
+    return { connection, switched, switchedAt, spies, recorder };
+  }
+
+  test("an attempt still connecting at its deadline is abandoned and dialed again", async () => {
+    const { switched } = await connect();
+
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(switched).toEqual([]);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(switched).toEqual([false, true]);
+  });
+
+  test("the deadline doubles for each attempt in a row that runs out, up to 20 s", async () => {
+    const start = Date.now();
+    const { switched, switchedAt } = await connect({ relayRetryTimeoutMs: 120_000 });
+    await vi.advanceTimersByTimeAsync(100_000);
+
+    // Each attempt runs from the first dial, or from dialing again, to
+    // being abandoned.
+    const deadlines = switched.flatMap((on, i) =>
+      on ? [] : [switchedAt[i] - (i === 0 ? start : switchedAt[i - 1])],
+    );
+    expect(deadlines).toEqual([5_000, 10_000, 20_000, 20_000, 20_000, 20_000]);
+  });
+
+  test("reaching the relay resets the deadline", async () => {
+    const { connection, switched } = await connect();
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(switched).toHaveLength(2);
+
+    connection.status.set("connected");
+    await vi.advanceTimersByTimeAsync(1_000);
+    connection.status.set("disconnected");
+    connection.status.set("connecting");
+    await vi.advanceTimersByTimeAsync(5_001);
+
+    expect(switched).toHaveLength(4);
+  });
+
+  test("attempts that fail on their own are not cut short", async () => {
+    const { connection, switched } = await connect();
+    // The loop's own cycle: an attempt fails within 3 s, then it backs off.
+    for (let i = 0; i < 10; i++) {
+      await vi.advanceTimersByTimeAsync(3_000);
+      connection.status.set("disconnected");
+      await vi.advanceTimersByTimeAsync(1_000);
+      connection.status.set("connecting");
+    }
+
+    expect(switched).toEqual([]);
+  });
+
+  test("a relay out of reach for the retry window ends the session once, however its attempts end", async () => {
+    const { connection, switched, spies, recorder } = await connect();
+    // Attempts hang and are abandoned (at 5, 15 and 35 s); one fails on
+    // its own in between.
+    await vi.advanceTimersByTimeAsync(40_000);
+    connection.status.set("disconnected");
+    await vi.advanceTimersByTimeAsync(1_000);
+    connection.status.set("connecting");
+    await vi.advanceTimersByTimeAsync(18_999);
+    expect(spies.onError).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(recorder.states.at(-1)).toBe("error");
+    expect(spies.onError).toHaveBeenCalledTimes(1);
+    const [message] = spies.onError.mock.calls[0];
+    expect(message.data.fatal).toBe(true);
+    expect(message.data.message).toContain("still unreachable after 60 s");
+    // It stops dialing, and the connection's own give-up is not reported again.
+    expect(switched.at(-1)).toBe(false);
+    connection.error.set(new Error("reconnect timed out"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(spies.onError).toHaveBeenCalledTimes(1);
+    expect(switched.at(-1)).toBe(false);
+  });
+
+  test("with no attempt abandoned, the connection's own give-up ends the session and says why", async () => {
+    const { connection, switched, spies } = await connect();
+    // Every attempt fails by itself within 3 s, then the loop backs off.
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(3_000);
+      connection.status.set("disconnected");
+      await vi.advanceTimersByTimeAsync(1_000);
+      connection.status.set("connecting");
+    }
+    expect(spies.onError).not.toHaveBeenCalled();
+
+    connection.error.set(
+      new AggregateError([new Error("unsupported server version")], "All promises were rejected"),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(switched).toEqual([]);
+    expect(spies.onError).toHaveBeenCalledTimes(1);
+    expect(spies.onError.mock.calls[0][0].data.message).toContain("unsupported server version");
+  });
+
+  test("a relay that drops every session at once stays one outage", async () => {
+    const { connection, spies } = await connect();
+    // Reached at 3 s but dropped half a second later: not a session that held.
+    await vi.advanceTimersByTimeAsync(3_000);
+    connection.status.set("connected");
+    await vi.advanceTimersByTimeAsync(500);
+    connection.status.set("disconnected");
+    connection.status.set("connecting");
+
+    // The next attempt hangs and is abandoned, so the window is kept from
+    // the first dial: it gives up at 60 s, not 60 s after the drop.
+    await vi.advanceTimersByTimeAsync(56_499);
+    expect(spies.onError).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(spies.onError).toHaveBeenCalledTimes(1);
+  });
+
+  test("a session that reaches the relay in the window's last second survives the window", async () => {
+    const { connection, switched, spies } = await connect();
+    // Attempts hang and are abandoned at 5, 15, 35 and 55 s.
+    await vi.advanceTimersByTimeAsync(59_500);
+    connection.status.set("connected");
+    await vi.advanceTimersByTimeAsync(10_500);
+
+    expect(spies.onError).not.toHaveBeenCalled();
+    expect(switched.at(-1)).toBe(true);
+  });
+
+  test("a session reached in the window's last second that drops before it held ends at the window", async () => {
+    const { connection, spies } = await connect();
+    // Attempts hang and are abandoned at 5, 15, 35 and 55 s.
+    await vi.advanceTimersByTimeAsync(59_500);
+    connection.status.set("connected");
+    await vi.advanceTimersByTimeAsync(300);
+    connection.status.set("disconnected");
+    connection.status.set("connecting");
+    await vi.advanceTimersByTimeAsync(199);
+    expect(spies.onError).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(spies.onError).toHaveBeenCalledTimes(1);
+    expect(spies.onError.mock.calls[0][0].data.message).toContain("still unreachable after 60 s");
+  });
+
+  test("an outage that ended leaves nothing behind for the next one", async () => {
+    const { connection, spies } = await connect();
+    await vi.advanceTimersByTimeAsync(5_001);
+    connection.status.set("connected");
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(spies.onError).not.toHaveBeenCalled();
+    expect(connection.props.enabled.peek()).toBe(true);
+
+    // A later outage whose attempts all fail by themselves is the
+    // connection's to end, with its reasons.
+    connection.status.set("disconnected");
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(1_000);
+      connection.status.set("connecting");
+      await vi.advanceTimersByTimeAsync(3_000);
+      connection.status.set("disconnected");
+    }
+    expect(spies.onError).not.toHaveBeenCalled();
+    connection.error.set(new Error("unsupported server version"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(spies.onError.mock.calls[0][0].data.message).toContain("unsupported server version");
+  });
+
+  test("a window shorter than the first deadline ends the session at the window, without dialing again", async () => {
+    const { switched, spies } = await connect({ relayRetryTimeoutMs: 3_000 });
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(spies.onError).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(spies.onError).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(switched).toEqual([false]);
+  });
+
+  test("a window longer than a timer can wait does not give up early", async () => {
+    const { switched, spies } = await connect({ relayRetryTimeoutMs: Number.MAX_SAFE_INTEGER });
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(switched.filter((on) => !on).length).toBeGreaterThan(3);
+    expect(spies.onError).not.toHaveBeenCalled();
+  });
+
+  test("the retry window starts over once the relay is reached", async () => {
+    const { connection, spies } = await connect();
+    await vi.advanceTimersByTimeAsync(1_000);
+    connection.status.set("connected");
+    await vi.advanceTimersByTimeAsync(29_000);
+    connection.status.set("disconnected");
+    connection.status.set("connecting");
+
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(spies.onError).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(spies.onError).toHaveBeenCalledTimes(1);
+  });
+
+  test("a ready session stays ready while attempts are abandoned", async () => {
+    const { connection, switched, recorder } = await connect();
+    connection.status.set("connected");
+    const ready = transport.sendReadyMessage();
+    // The bot-audio wait times out 20 s after the relay connects.
+    await vi.advanceTimersByTimeAsync(20_000);
+    await ready;
+    expect(transport.state).toBe("ready");
+    recorder.states.length = 0;
+
+    connection.status.set("disconnected");
+    connection.status.set("connecting");
+    // Abandoned after 5 s, then after 10 s more.
+    await vi.advanceTimersByTimeAsync(15_002);
+
+    expect(switched).toEqual([false, true, false, true]);
+    expect(transport.state).toBe("ready");
+    expect(recorder.states).toEqual([]);
+  });
+
+  test("a ready session whose relay stays out of reach ends in 'error' at the end of the window", async () => {
+    const { connection, spies, recorder } = await connect();
+    connection.status.set("connected");
+    const ready = transport.sendReadyMessage();
+    await vi.advanceTimersByTimeAsync(20_000);
+    await ready;
+    recorder.states.length = 0;
+
+    // Lost at 20 s; every attempt after that hangs.
+    connection.status.set("disconnected");
+    connection.status.set("connecting");
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(recorder.states).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(recorder.states).toEqual(["error"]);
+    expect(spies.onError).toHaveBeenCalledTimes(1);
+    expect(spies.onError.mock.calls[0][0].data.fatal).toBe(true);
+  });
+
+  test("a disconnect stops the deadlines", async () => {
+    const { switched, spies } = await connect();
+    await vi.advanceTimersByTimeAsync(4_000);
+    const done = transport._disconnect();
+    await vi.advanceTimersByTimeAsync(250);
+    await done;
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(switched).toEqual([]);
+    expect(spies.onError).not.toHaveBeenCalled();
+  });
+
+  test("a disconnect between abandoning an attempt and dialing again leaves the connection off", async () => {
+    const { connection, switched } = await connect();
+    await vi.advanceTimersByTimeAsync(4_999);
+    // Fire the deadline alone; dialing again waits for the next task.
+    await vi.advanceTimersToNextTimerAsync();
+    const done = transport._disconnect();
+    await vi.advanceTimersByTimeAsync(250);
+    await done;
+
+    expect(switched).toEqual([false]);
+    expect(connection.props.enabled.peek()).toBe(false);
   });
 });
 
