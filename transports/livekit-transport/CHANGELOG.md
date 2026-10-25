@@ -5,6 +5,13 @@ All notable changes to **Pipecat LiveKit Transport** will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/livekit-transport-v1.1.0...livekit-transport-v1.1.1) (2026-10-25)
+
+
+### Miscellaneous Chores
+
+* bump client-js dependency to 1.15 and resolve vulnerabilities ([9265a43](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/9265a43e71be431d9c765eb91e313ec02c0fa17c))
+
 ## [1.1.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/livekit-transport-v1.0.0...livekit-transport-v1.1.0) (2026-10-17)
 
 ### Features
