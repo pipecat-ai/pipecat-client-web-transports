@@ -7,10 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.7.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/daily-transport-v1.7.0...daily-transport-v1.7.1) (2026-10-25)
 
+### Changed
 
-### Miscellaneous Chores
-
-* bump client-js dependency to 1.15 and resolve vulnerabilities ([9265a43](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/9265a43e71be431d9c765eb91e313ec02c0fa17c))
+* `@pipecat-ai/daily-transport` now requires `@pipecat-ai/client-js` `~1.15.0` as a peer dependency. Upgrade `@pipecat-ai/client-js` to 1.15.x alongside this release. ([d2a5122](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/d2a51222639c6013e1202d74a6abea17204b41df))
 
 ## [1.7.0](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/daily-transport-v1.6.9...daily-transport-v1.7.0) (2026-10-16)
 
