@@ -22,13 +22,13 @@
     "prepare": "npm run build"
   },
   "devDependencies": {
-    "@pipecat-ai/client-js": "^1.15.0",
+    "@pipecat-ai/client-js": "^1.16.0",
     "eslint": "9.39.1",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-simple-import-sort": "^12.1.1"
   },
   "peerDependencies": {
-    "@pipecat-ai/client-js": "~1.15.0"
+    "@pipecat-ai/client-js": "~1.16.0"
   },
   "dependencies": {
     "livekit-client": "^2.21.0"
