@@ -2,10 +2,9 @@
 
 ## [0.2.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.2.1...transport-lib-v0.2.2) (2026-10-29)
 
+### Other
 
-### Miscellaneous Chores
-
-* bump client-js dependency to version 1.16.0 ([9085f2a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/9085f2a0e58151fce984a9300fd5dd2cde393493))
+* `@pipecat-ai/transport-lib` now requires `@pipecat-ai/client-js` `~1.16.0` as a peer dependency. Upgrade `@pipecat-ai/client-js` to 1.16.x alongside this release. ([c5465cd](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c5465cddb143693cc1cac445b47c64e13af59ca4))
 
 ## [0.2.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.2.0...transport-lib-v0.2.1) (2026-10-25)
 
