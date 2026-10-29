@@ -1,6 +1,6 @@
 {
   "lib": "0.2.2",
-  "transports/daily": "1.7.1",
+  "transports/daily": "1.7.2",
   "transports/livekit-transport": "1.1.1",
   "transports/moq-transport": "0.3.1",
   "transports/small-webrtc-transport": "1.11.1",
