@@ -3,6 +3,6 @@
   "transports/daily": "1.7.2",
   "transports/livekit-transport": "1.1.1",
   "transports/moq-transport": "0.3.2",
-  "transports/small-webrtc-transport": "1.11.1",
+  "transports/small-webrtc-transport": "1.11.2",
   "transports/websocket-transport": "1.8.1"
 }
