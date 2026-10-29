@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.2.1...transport-lib-v0.2.2) (2026-10-29)
+
+
+### Miscellaneous Chores
+
+* bump client-js dependency to version 1.16.0 ([9085f2a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/9085f2a0e58151fce984a9300fd5dd2cde393493))
+
 ## [0.2.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.2.0...transport-lib-v0.2.1) (2026-10-25)
 
 ### Changed
