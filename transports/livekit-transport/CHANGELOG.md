@@ -7,10 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/livekit-transport-v1.1.1...livekit-transport-v1.1.2) (2026-10-29)
 
+### Other
 
-### Miscellaneous Chores
-
-* bump client-js dependency to version 1.16.0 ([9085f2a](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/9085f2a0e58151fce984a9300fd5dd2cde393493))
+* `@pipecat-ai/livekit-transport` now requires `@pipecat-ai/client-js` `~1.16.0` as a peer dependency. Upgrade `@pipecat-ai/client-js` to 1.16.x alongside this release. ([c5465cd](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c5465cddb143693cc1cac445b47c64e13af59ca4))
 
 ## [1.1.1](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/livekit-transport-v1.1.0...livekit-transport-v1.1.1) (2026-10-25)
 
