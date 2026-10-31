@@ -49,6 +49,17 @@ const DEFAULT_AUDIO_BUFFER_MAX_MS = 30 * 1000;
 const DEFAULT_AUDIO_SAMPLE_RATE = 48000;
 // Give-up window for reaching the relay (ms); see `relayRetryTimeoutMs`.
 const DEFAULT_RELAY_RETRY_TIMEOUT_MS = 60_000;
+// How long one attempt to reach the relay may take before it is abandoned
+// and dialed again (ms), doubling for each one that runs out until the
+// relay is reached, up to the max. See `_boundRelayAttempts`.
+const RELAY_ATTEMPT_TIMEOUT_MS = 5_000;
+const RELAY_ATTEMPT_TIMEOUT_MAX_MS = 20_000;
+// How long a session must hold before the relay counts as reached (ms), so
+// a relay that accepts and drops every session stays one outage. `@moq/net`
+// judges a healthy session by its initial backoff, 1 s, the same way.
+const RELAY_HELD_MS = 1_000;
+// The longest delay `setTimeout` takes (ms); a longer one fires at once.
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 /**
  * A transcript record as it travels on the wire: the RTVI message plus
@@ -196,14 +207,15 @@ export interface MoqTransportOptions {
    * How long (ms) the transport keeps trying to reach the relay before
    * giving up, which reports a fatal error and ends the session. It bounds
    * the first connection as well as each reconnect after the relay is lost.
-   * Finite and positive; defaults to ``60000``. The loop retries with backoff
-   * and starts a fresh window after a session that held, a URL change, or a
-   * disable/re-enable.
+   * Finite and positive; defaults to ``60000``. The loop retries with backoff,
+   * and the window starts again once a session to the relay has held.
    *
-   * Behind a layer-4 load balancer with source-IP stickiness, a lost relay
-   * keeps receiving the client's reconnects until the balancer takes it out
-   * of rotation, so the window has to outlast that. 60 s also matches how
-   * long a pipecat bot's transport waits for a missing peer.
+   * A layer-4 load balancer can keep sending some new connections to a
+   * relay that has just died, until it takes the relay out of rotation, so
+   * the window has to outlast that. Each attempt also has its own, shorter
+   * deadline, so one sent to the dead relay is abandoned and dialed again.
+   * 60 s also matches how long a pipecat bot's transport waits for a missing
+   * peer.
    */
   relayRetryTimeoutMs?: number;
 }
@@ -521,7 +533,9 @@ export class MoqTransport extends Transport {
     // `share: false` gets a private reconnect loop, which honors a pinned
     // certificate (`webtransport`) and `delay`. `delay.timeout` bounds the
     // retry window: a relay down that long surfaces on `connection.error`
-    // and the give-up watch below.
+    // and the give-up watch below. The transport adds a deadline per attempt,
+    // and keeps the window itself once one is abandoned
+    // (`_boundRelayAttempts`).
     this._connection = new Moq.Connection({
       enabled: this._reloadEnabled,
       url: new Signal(url),
@@ -544,6 +558,7 @@ export class MoqTransport extends Transport {
       const err = eff.get(connection.error);
       if (err) this._onRelayGaveUp(connection, err);
     });
+    this._boundRelayAttempts(connection, merged.relayRetryTimeoutMs);
 
     const ourPath = Moq.Path.from(merged.namespace, merged.clientId);
     const botPath = Moq.Path.from(merged.namespace, merged.botId);
@@ -814,27 +829,33 @@ export class MoqTransport extends Transport {
    *  connection redials: `PipecatClient` only lets `sendText` and the like
    *  through in `ready`, and a message sent meanwhile is kept in the
    *  transcript log and replayed to the bot. A ready session ends through
-   *  `_disconnect` or `_onRelayGaveUp`. */
+   *  `_disconnect` or `_onRelayGaveUp`. `disconnecting` and `error` hold
+   *  until the disconnect completes, whatever the connection does
+   *  meanwhile. */
   private _onRelayStatus(status: RelayStatus): void {
-    if (this._wasReady) return;
+    if (
+      this._wasReady ||
+      this._state === "disconnecting" ||
+      this._state === "error"
+    ) {
+      return;
+    }
     if (status === "connected") {
       if (this._state === "connecting") this.state = "connected";
     } else if (status === "connecting") {
       this.state = "connecting";
     } else if (status === "disconnected") {
-      if (this._state !== "disconnecting" && this._state !== "disconnected") {
-        this.state = "disconnected";
-      }
+      if (this._state !== "disconnected") this.state = "disconnected";
     }
   }
 
   /** The connection stopped retrying: the relay stayed unreachable for its
    *  whole retry window (or auth was rejected). Reported as fatal, which
    *  is `PipecatClient`'s cue to disconnect. Ignored from a connection this
-   *  transport has moved on from, and during a disconnect already under
-   *  way. */
+   *  transport has moved on from, during a disconnect already under way,
+   *  and once already reported. */
   private _onRelayGaveUp(connection: Moq.Connection, err: unknown): void {
-    if (this._connection !== connection || this._state === "disconnecting") return;
+    if (!this._isLiveRelay(connection)) return;
     // `connect` races its dials with `Promise.any`, whose AggregateError
     // carries the causes in `errors` and nothing useful in `message`.
     const errors = (err as { errors?: unknown } | null)?.errors;
@@ -851,8 +872,131 @@ export class MoqTransport extends Transport {
     );
   }
 
+  /** Put a deadline on each attempt to reach the relay, and keep the retry
+   *  window once an attempt has been abandoned.
+   *
+   *  `@moq/net` races WebTransport against WebSocket and waits for both to
+   *  fail, with no deadline of its own. Against an address that never
+   *  answers, Chrome on macOS gives up on WebTransport after 4 s but on
+   *  WebSocket only after 75 s (the OS's TCP connect timeout). A load
+   *  balancer can still send some new connections to a relay that has just
+   *  died, and every packet of such a connection goes to the dead relay, so
+   *  waiting on it never helps. An attempt still connecting at its deadline
+   *  is abandoned and dialed again, as a new connection. The deadline doubles
+   *  for each one that runs out until the relay is reached, so a slow but
+   *  working network still gets through.
+   *
+   *  The connection checks its retry window only when an attempt fails by
+   *  itself, which an abandoned one never does, and abandoning one restarts
+   *  that window anyway. So once an attempt has been abandoned, the window is
+   *  kept here, from the start of the outage: the first dial, or losing the
+   *  relay. Until then the connection's own window applies, and its give-up
+   *  carries the reasons the dials failed. */
+  private _boundRelayAttempts(
+    connection: Moq.Connection,
+    retryTimeoutMs: number,
+  ): void {
+    const signals = this._signals;
+    if (!signals) return;
+
+    let outageSince: number | undefined = performance.now();
+    let attemptMs = RELAY_ATTEMPT_TIMEOUT_MS;
+    const abandoned = new Signal(false);
+    const windowLeft = (since: number) =>
+      Math.max(since + retryTimeoutMs - performance.now(), 0);
+    const giveUp = () =>
+      this._giveUpOnRelay(
+        connection,
+        new Error(`still unreachable after ${retryTimeoutMs / 1000} s`),
+      );
+
+    signals.run((eff) => {
+      const status = eff.get(connection.status);
+      if (status === "connected") {
+        eff.timer(() => {
+          outageSince = undefined;
+          attemptMs = RELAY_ATTEMPT_TIMEOUT_MS;
+          abandoned.set(false);
+        }, RELAY_HELD_MS);
+        return;
+      }
+      const since = (outageSince ??= performance.now());
+      if (status !== "connecting") return;
+      // No longer than the whole window, so a short window is not overrun.
+      const ms = Math.min(attemptMs, retryTimeoutMs);
+      // Decided now rather than when the timer fires, which a browser may do
+      // a fraction of a millisecond early by `performance.now()`.
+      const last = windowLeft(since) <= ms;
+      eff.timer(() => {
+        // Out of time: end the session rather than dialing again.
+        if (last) {
+          giveUp();
+          return;
+        }
+        attemptMs = Math.min(attemptMs * 2, RELAY_ATTEMPT_TIMEOUT_MAX_MS);
+        abandoned.set(true);
+        this._abandonRelayAttempt(connection, ms);
+      }, ms);
+    });
+
+    // A window longer than a timer can wait is waited out in steps. A
+    // session that reaches the relay disarms it, and one that drops before
+    // it held re-arms it with whatever is left.
+    const recheck = new Signal(0);
+    signals.run((eff) => {
+      eff.get(recheck);
+      if (eff.get(connection.status) === "connected") return;
+      if (!eff.get(abandoned) || outageSince === undefined) return;
+      const left = windowLeft(outageSince);
+      if (left > MAX_TIMER_MS) {
+        eff.timer(() => recheck.update((n) => n + 1), MAX_TIMER_MS);
+        return;
+      }
+      eff.timer(giveUp, left);
+    });
+  }
+
+  /** Cancel the attempt in flight and dial again at once. Turning the
+   *  connection off cancels its attempt. Signal writes coalesce until a
+   *  microtask flushes them, so it is turned back on a task later, after
+   *  the connection has seen it off. From `@moq/net` 0.4.4 it also drops a
+   *  relay a GOAWAY redirected the connection to, so the next dial goes to
+   *  the configured URL: the relay it was sent to did not answer. */
+  private _abandonRelayAttempt(connection: Moq.Connection, ms: number): void {
+    const enabled = this._reloadEnabled;
+    if (!enabled || !this._isLiveRelay(connection)) return;
+    console.warn(
+      `[MoqTransport] no answer from the relay within ${ms / 1000} s; dialing again`,
+    );
+    enabled.set(false);
+    setTimeout(() => {
+      if (this._isLiveRelay(connection)) enabled.set(true);
+    }, 0);
+  }
+
+  /** The relay stayed out of reach for the whole retry window: stop
+   *  dialing and report it. */
+  private _giveUpOnRelay(connection: Moq.Connection, err: Error): void {
+    if (!this._isLiveRelay(connection)) return;
+    this._reloadEnabled?.set(false);
+    this._onRelayGaveUp(connection, err);
+  }
+
+  /** Whether `connection` still carries this session: not replaced, and
+   *  with no disconnect or give-up under way. */
+  private _isLiveRelay(connection: Moq.Connection): boolean {
+    return (
+      this._connection === connection &&
+      this._state !== "disconnecting" &&
+      this._state !== "error"
+    );
+  }
+
   async _disconnect(): Promise<void> {
-    if (this._state === "disconnected") return;
+    // Before `ready`, `disconnected` can also mean the connection is
+    // between attempts (see `_onRelayStatus`), so a live connection is
+    // still torn down.
+    if (this._state === "disconnected" && !this._connection) return;
     this.state = "disconnecting";
     // Tell the bot this side is leaving, so it ends the call at once
     // rather than treating the tracks ending as a possible relay failure.
