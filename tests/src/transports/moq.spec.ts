@@ -1080,6 +1080,7 @@ describe("MoqTransport — relay attempt deadlines", () => {
     const [message] = spies.onError.mock.calls[0];
     expect(message.data.fatal).toBe(true);
     expect(message.data.message).toContain("still unreachable after 60 s");
+    expect(message.data.message).toContain("3 attempts got no answer");
     // It stops dialing, and the connection's own give-up is not reported again.
     expect(switched.at(-1)).toBe(false);
     connection.error.set(new Error("reconnect timed out"));
@@ -1151,6 +1152,23 @@ describe("MoqTransport — relay attempt deadlines", () => {
 
     expect(spies.onError).toHaveBeenCalledTimes(1);
     expect(spies.onError.mock.calls[0][0].data.message).toContain("still unreachable after 60 s");
+  });
+
+  test("a page hidden away mid-outage gets a fresh window when it shows again", async () => {
+    const { spies } = await connect();
+    // Attempts hang and are abandoned at 5 and 15 s.
+    await vi.advanceTimersByTimeAsync(20_000);
+    window.dispatchEvent(new Event("pagehide"));
+    // Suspended: no deadline runs, however long the page stays hidden away.
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(spies.onError).not.toHaveBeenCalled();
+
+    // Showing again restarts the window, like `@moq/net`'s own loop.
+    window.dispatchEvent(new Event("pageshow"));
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(spies.onError).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(spies.onError).toHaveBeenCalledTimes(1);
   });
 
   test("an outage that ended leaves nothing behind for the next one", async () => {
