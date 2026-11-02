@@ -891,7 +891,12 @@ export class MoqTransport extends Transport {
    *  that window anyway. So once an attempt has been abandoned, the window is
    *  kept here, from the start of the outage: the first dial, or losing the
    *  relay. Until then the connection's own window applies, and its give-up
-   *  carries the reasons the dials failed. */
+   *  carries the reasons the dials failed.
+   *
+   *  A page hidden away parks the reconnect loop in `@moq/net`, which
+   *  starts a fresh retry window when the page shows again. The window
+   *  kept here follows the same events, and a give-up timer that fires
+   *  overdue with window left on the clock re-arms with the remainder. */
   private _boundRelayAttempts(
     connection: Moq.Connection,
     retryTimeoutMs: number,
@@ -901,14 +906,41 @@ export class MoqTransport extends Transport {
 
     let outageSince: number | undefined = performance.now();
     let attemptMs = RELAY_ATTEMPT_TIMEOUT_MS;
+    let abandonedCount = 0;
     const abandoned = new Signal(false);
     const windowLeft = (since: number) =>
       Math.max(since + retryTimeoutMs - performance.now(), 0);
-    const giveUp = () =>
+    const giveUp = () => {
+      const dials =
+        abandonedCount === 0
+          ? ""
+          : `; ${abandonedCount} attempt${abandonedCount === 1 ? "" : "s"} got no answer`;
       this._giveUpOnRelay(
         connection,
-        new Error(`still unreachable after ${retryTimeoutMs / 1000} s`),
+        new Error(`still unreachable after ${retryTimeoutMs / 1000} s${dials}`),
       );
+    };
+
+    // `@moq/net` parks its reconnect loop while the page is hidden away
+    // (pagehide) and starts a fresh retry window when the page shows again
+    // (pageshow, or turning visible). The window kept here follows the
+    // same events.
+    const suspended = new Signal(false);
+    const resume = () => {
+      if (!suspended.peek()) return;
+      if (outageSince !== undefined) {
+        outageSince = performance.now();
+        attemptMs = RELAY_ATTEMPT_TIMEOUT_MS;
+      }
+      suspended.set(false);
+    };
+    if (typeof window !== "undefined" && typeof document !== "undefined") {
+      signals.event(window, "pagehide", () => suspended.set(true));
+      signals.event(window, "pageshow", resume);
+      signals.event(document, "visibilitychange", () => {
+        if (!document.hidden) resume();
+      });
+    }
 
     signals.run((eff) => {
       const status = eff.get(connection.status);
@@ -916,43 +948,54 @@ export class MoqTransport extends Transport {
         eff.timer(() => {
           outageSince = undefined;
           attemptMs = RELAY_ATTEMPT_TIMEOUT_MS;
+          abandonedCount = 0;
           abandoned.set(false);
         }, RELAY_HELD_MS);
         return;
       }
       const since = (outageSince ??= performance.now());
-      if (status !== "connecting") return;
+      if (status !== "connecting" || eff.get(suspended)) return;
       // No longer than the whole window, so a short window is not overrun.
       const ms = Math.min(attemptMs, retryTimeoutMs);
-      // Decided now rather than when the timer fires, which a browser may do
-      // a fraction of a millisecond early by `performance.now()`.
+      // Decided at arm time: a browser may fire the timer a fraction of a
+      // millisecond early by `performance.now()`.
       const last = windowLeft(since) <= ms;
       eff.timer(() => {
-        // Out of time: end the session rather than dialing again.
+        // Out of time: end the session.
         if (last) {
           giveUp();
           return;
         }
         attemptMs = Math.min(attemptMs * 2, RELAY_ATTEMPT_TIMEOUT_MAX_MS);
+        abandonedCount += 1;
         abandoned.set(true);
         this._abandonRelayAttempt(connection, ms);
       }, ms);
     });
 
-    // A window longer than a timer can wait is waited out in steps. A
-    // session that reaches the relay disarms it, and one that drops before
-    // it held re-arms it with whatever is left.
+    // A window longer than a timer can wait is waited out in steps, and a
+    // timer that fires with window left (overdue after a page suspension or
+    // a system sleep) re-arms with the remainder. A session that reaches
+    // the relay disarms it, and one that drops before it held re-arms it
+    // with whatever is left.
     const recheck = new Signal(0);
     signals.run((eff) => {
       eff.get(recheck);
+      if (eff.get(suspended)) return;
       if (eff.get(connection.status) === "connected") return;
       if (!eff.get(abandoned) || outageSince === undefined) return;
       const left = windowLeft(outageSince);
-      if (left > MAX_TIMER_MS) {
-        eff.timer(() => recheck.update((n) => n + 1), MAX_TIMER_MS);
-        return;
-      }
-      eff.timer(giveUp, left);
+      eff.timer(
+        () => {
+          const since = outageSince;
+          if (since !== undefined && windowLeft(since) > 0) {
+            recheck.update((n) => n + 1);
+            return;
+          }
+          giveUp();
+        },
+        Math.min(left, MAX_TIMER_MS),
+      );
     });
   }
 
