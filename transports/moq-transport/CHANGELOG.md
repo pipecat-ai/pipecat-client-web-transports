@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.3.2...moq-transport-v0.3.3) (2026-11-04)
 
-
 ### Bug Fixes
 
-* **moq-transport:** keep the kept retry window honest across page suspension ([d7a16c9](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/d7a16c9db9abb53d3a91f94759fc21e3ff8058d8))
-* **moq-transport:** redial a relay attempt that gets no answer ([c21561d](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c21561d3e1b95ac4fc56e3c86506a5264c8a2b17))
+* A relay reconnect no longer stalls for over a minute when a redial gets no answer. Each attempt to reach the relay now has a deadline, 5 seconds and doubling up to 20, after which it is dialed again. `relayRetryTimeoutMs` (60 seconds by default) still bounds the whole outage, and as before it starts afresh when a page comes back from the back/forward cache. ([#244](https://github.com/pipecat-ai/pipecat-client-web-transports/pull/244))
+* `disconnect()` before the session is ready now stops a connection that is between attempts, instead of leaving it dialing. ([#244](https://github.com/pipecat-ai/pipecat-client-web-transports/pull/244))
+* When the relay stays unreachable for the whole window, the error now says how many attempts got no answer, for example `still unreachable after 60 s; 3 attempts got no answer`. ([#244](https://github.com/pipecat-ai/pipecat-client-web-transports/pull/244))
 
 ## [0.3.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.3.1...moq-transport-v0.3.2) (2026-10-29)
 
