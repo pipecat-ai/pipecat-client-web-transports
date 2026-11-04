@@ -5,6 +5,14 @@ All notable changes to **Pipecat MoqTransport** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.3.2...moq-transport-v0.3.3) (2026-11-04)
+
+
+### Bug Fixes
+
+* **moq-transport:** keep the kept retry window honest across page suspension ([d7a16c9](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/d7a16c9db9abb53d3a91f94759fc21e3ff8058d8))
+* **moq-transport:** redial a relay attempt that gets no answer ([c21561d](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/c21561d3e1b95ac4fc56e3c86506a5264c8a2b17))
+
 ## [0.3.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.3.1...moq-transport-v0.3.2) (2026-10-29)
 
 ### Other
