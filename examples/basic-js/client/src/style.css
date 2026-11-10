@@ -1,0 +1,152 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0 auto;
+  max-width: 960px;
+  padding: 16px;
+  color: #222;
+}
+h1 {
+  font-size: 1.4rem;
+}
+h2 {
+  font-size: 1.1rem;
+  margin: 0 0 8px;
+}
+section {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+label:has(> input[type="checkbox"]) {
+  flex-direction: row;
+  align-items: center;
+}
+label.block {
+  display: flex;
+  margin-bottom: 8px;
+}
+textarea,
+input[type="text"] {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+select {
+  max-width: 260px;
+}
+button {
+  padding: 6px 12px;
+}
+.hint {
+  font-size: 0.85rem;
+  color: #666;
+}
+.state {
+  font-family: ui-monospace, monospace;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #eee;
+}
+.state[data-state="ready"],
+.state[data-state="connected"] {
+  background: #d8f5d8;
+}
+.state[data-state="error"] {
+  background: #f8d8d8;
+}
+.media video {
+  width: 320px;
+  height: 180px;
+  background: #000;
+  border-radius: 4px;
+}
+.media .label {
+  font-size: 0.85rem;
+  color: #666;
+}
+#transcript {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px;
+  height: 260px;
+  overflow: auto;
+  font-size: 0.9rem;
+}
+#transcript .entry {
+  margin: 0 0 6px;
+  display: flex;
+  gap: 8px;
+}
+#transcript .who {
+  flex: 0 0 3.5em;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: #666;
+  padding-top: 2px;
+}
+#transcript .entry.user .who {
+  color: #1565c0;
+}
+#transcript .entry.bot .who {
+  color: #2e7d32;
+}
+#transcript .segment .rest {
+  color: #888;
+}
+#transcript .segment.interrupted .spoken::after {
+  content: "…";
+  color: #c62828;
+}
+#transcript .segment.not-spoken {
+  font-style: italic;
+}
+#transcript .entry.user .interim {
+  color: #999;
+  font-style: italic;
+}
+.meters {
+  gap: 24px;
+}
+.meter {
+  width: 320px;
+}
+.meter .label {
+  font-size: 0.85rem;
+  color: #666;
+  display: flex;
+  justify-content: space-between;
+}
+.meter-source {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+.meter-bar {
+  height: 10px;
+  background: #eee;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.meter-fill {
+  height: 100%;
+  width: 0%;
+  background: #4caf50;
+  transition: width 60ms linear;
+}
+.meter.speaking .meter-bar {
+  box-shadow: 0 0 0 2px #4caf50;
+}

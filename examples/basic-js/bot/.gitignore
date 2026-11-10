@@ -1,0 +1,5 @@
+.venv
+.env
+uv.lock
+__pycache__/
+*.py[cod]

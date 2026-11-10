@@ -8,7 +8,8 @@
   "workspaces": [
     "lib",
     "transports/*",
-    "tests"
+    "tests",
+    "examples/*/client"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
@@ -31,5 +32,8 @@
   "peerDependencies": {
     "@daily-co/daily-js": "^0.94.0",
     "@pipecat-ai/client-js": "^1.16.0"
+  },
+  "@parcel/resolver-default": {
+    "packageExports": true
   }
 }

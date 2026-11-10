@@ -9,6 +9,24 @@ A mono-repo to house the various supported Transport options to be used with the
 
 Pipecat Transports are intended to be used in conjunction with a Pipecat web client. Please refer to the full Pipecat client documentation [here](https://docs.pipecat.ai/client/introduction) and an overview of the [Transport API here](https://docs.pipecat.ai/client/js/transports/transport)
 
+## Local development
+
+`examples/basic-js` is a bare-bones client page plus a matching bot for
+connecting a `PipecatClient` over any transport in this repo, with device
+selection, mute toggles, and an event log. The page compiles the transports
+straight from source, so it is a quick way to exercise a change manually:
+
+```bash
+# bot (see examples/basic-js/bot/env.example for the keys it needs)
+cd examples/basic-js/bot && uv sync && uv run bot.py
+
+# client, from the repo root
+npm install
+npm run dev -w @pipecat-ai-transports/example-basic-js
+```
+
+See [examples/basic-js/README.md](/examples/basic-js/README.md) for details.
+
 ## Current Transports
 
 ### [SmallWebRTCTransport](/transports/small-webrtc-transport/README.md)

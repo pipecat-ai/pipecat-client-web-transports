@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pipecat Transports Dev Page</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <h1>Pipecat Transports Dev Page</h1>
+    <p class="hint">
+      Dev/test harness only. <code>window.client</code> and
+      <code>window.transport</code> are set once a client is created, so you can
+      poke at them from the console.
+    </p>
+
+    <section>
+      <h2>1. Client</h2>
+      <div class="row">
+        <label>
+          Transport
+          <select id="transport-select"></select>
+        </label>
+        <label id="media-manager-label" hidden>
+          Media manager
+          <select id="media-manager-select"></select>
+        </label>
+        <label
+          ><input type="checkbox" id="enable-mic" checked /> enableMic</label
+        >
+        <label><input type="checkbox" id="enable-cam" /> enableCam</label>
+      </div>
+      <label class="block">
+        Transport constructor options (JSON)
+        <textarea id="ctor-options" rows="3" spellcheck="false"></textarea>
+      </label>
+      <div class="row">
+        <button id="create-client">Create client</button>
+        <button id="init-devices" disabled>Init devices</button>
+        <span id="transport-state" class="state">no client</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. Devices</h2>
+      <div class="row">
+        <label>
+          Mic
+          <select id="mic-select" disabled></select>
+        </label>
+        <label>
+          Cam
+          <select id="cam-select" disabled></select>
+        </label>
+        <label>
+          Speaker
+          <select id="speaker-select" disabled></select>
+        </label>
+      </div>
+      <div class="row">
+        <button id="toggle-mic" disabled>Mic: ?</button>
+        <button id="toggle-cam" disabled>Cam: ?</button>
+        <button id="toggle-screen" disabled>Screen share: off</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>3. Connect</h2>
+      <p class="hint">
+        If a start endpoint is given, <code>startBotAndConnect()</code> is used
+        and the JSON below is sent as <code>requestData</code>. Otherwise the
+        JSON below is passed straight to <code>connect()</code>.
+      </p>
+      <label class="block">
+        Start endpoint (optional)
+        <input
+          id="start-endpoint"
+          type="text"
+          placeholder="http://localhost:7860/start (clear to call connect() directly)"
+        />
+      </label>
+      <label class="block">
+        Connect params / request data (JSON)
+        <textarea id="connect-params" rows="4" spellcheck="false"></textarea>
+      </label>
+      <div class="row">
+        <button id="connect" disabled>Connect</button>
+        <button id="disconnect" disabled>Disconnect</button>
+      </div>
+      <div class="row">
+        <input
+          id="send-text"
+          type="text"
+          placeholder="Text to send to the bot"
+          disabled
+        />
+        <button id="send-text-btn" disabled>sendText</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>4. Media</h2>
+      <div class="row meters">
+        <div class="meter" id="meter-local">
+          <div class="label">Local <span class="meter-source"></span></div>
+          <div class="meter-bar"><div class="meter-fill"></div></div>
+        </div>
+        <div class="meter" id="meter-bot">
+          <div class="label">Bot <span class="meter-source"></span></div>
+          <div class="meter-bar"><div class="meter-fill"></div></div>
+        </div>
+      </div>
+      <div class="row media">
+        <div>
+          <div class="label">Local cam</div>
+          <video id="local-video" autoplay playsinline muted></video>
+        </div>
+        <div>
+          <div class="label">Bot video</div>
+          <video id="bot-video" autoplay playsinline></video>
+        </div>
+      </div>
+      <audio id="bot-audio" autoplay></audio>
+    </section>
+
+    <section>
+      <h2>5. Transcript</h2>
+      <p class="hint">
+        Built from the <code>userInput</code> and <code>botOutput</code>
+        events. Everything else is logged to the console at DEBUG level.
+      </p>
+      <div class="row">
+        <button id="clear-transcript">Clear</button>
+      </div>
+      <div id="transcript"></div>
+    </section>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
