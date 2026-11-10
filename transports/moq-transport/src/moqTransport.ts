@@ -18,6 +18,7 @@ import {
   Transport,
   type Tracks,
   type TransportState,
+  logger,
 } from "@pipecat-ai/client-js";
 
 const DEFAULT_NAMESPACE = "pipecat";
@@ -88,7 +89,7 @@ export interface TranscriptWatermark {
  */
 export function acceptTranscriptRecord(
   watermark: TranscriptWatermark,
-  record: TranscriptRecord,
+  record: TranscriptRecord
 ): RTVIMessage | null {
   const { seq, epoch, ...message } = record;
   if (typeof seq !== "number" || !Number.isInteger(seq)) return record;
@@ -234,11 +235,14 @@ interface ResolvedOptions {
 }
 
 function applyDefaults(opts: MoqTransportOptions): ResolvedOptions {
-  const relayRetryTimeoutMs = opts.relayRetryTimeoutMs ?? DEFAULT_RELAY_RETRY_TIMEOUT_MS;
+  const relayRetryTimeoutMs =
+    opts.relayRetryTimeoutMs ?? DEFAULT_RELAY_RETRY_TIMEOUT_MS;
   // @moq/net reads a window of zero (or less) as "retry forever", which
   // would leave a page reconnecting silently with nothing to end it.
   if (!Number.isFinite(relayRetryTimeoutMs) || relayRetryTimeoutMs <= 0) {
-    throw new RTVIError("MoqTransport `relayRetryTimeoutMs` must be a finite, positive number of milliseconds");
+    throw new RTVIError(
+      "MoqTransport `relayRetryTimeoutMs` must be a finite, positive number of milliseconds"
+    );
   }
   return {
     relayUrl: opts.relayUrl,
@@ -355,12 +359,19 @@ export class MoqTransport extends Transport {
   // Publish side (mic → bot).
   private _publishBroadcast: Publish.Broadcast | null = null;
   private _microphone: Publish.Source.Microphone | null = null;
+  // Effects that mirror the Microphone's outputs (local track, selected and
+  // available mics) into the RTVI callbacks. Lives as long as the Microphone.
+  private _micSignals: Effect | null = null;
+  // What we last told the app is live, diffed against the Microphone's
+  // current source to fire onTrackStarted / onTrackStopped only on change.
+  private _lastReportedMicTrack?: MediaStreamTrack;
+  private _lastReportedMicId?: string;
   private _capture: Publish.Audio.Capture | null = null;
   private _encoder: Publish.Audio.Encoder | null = null;
   // The reactive audio capture source, derived from the mic's `Media`
   // output (its `.audio` member). Fed to `Publish.Audio.Capture`.
   private _micAudioSource = new Signal<Publish.Audio.Source | undefined>(
-    undefined,
+    undefined
   );
   // RTVI JSON side-channel from client → bot, symmetric with the bot's
   // outbound `transcript` track. Published as a lossless `@moq/json`
@@ -376,12 +387,22 @@ export class MoqTransport extends Transport {
   private _transcriptEpoch: string | null = null;
   // Last record accepted from the bot. Kept across the bot's re-announces
   // within one connection, since each re-subscribe replays its whole log.
-  private _peerWatermark: TranscriptWatermark = { epoch: undefined, lastSeq: -1 };
+  private _peerWatermark: TranscriptWatermark = {
+    epoch: undefined,
+    lastSeq: -1,
+  };
   // Connection's enabled signal (the connection auto-reconnects on drops).
   private _reloadEnabled: Signal<boolean> | null = null;
+  // Live mic state, fed to the Microphone and Encoder. _micEnabledOnConnect
+  // is the connect-time flag: what the mic should be when a session starts.
+  // Outside a session enableMic() updates both; once connect() begins the
+  // flag is frozen and only the live state changes, so a mid-session mute
+  // does not leak into the next connect(). _disconnect() resets the live
+  // state to the flag.
   private _micEnabled = new Signal(true);
+  private _micEnabledOnConnect = true;
   private _micConstraints = new Signal<MediaTrackConstraints | undefined>(
-    undefined,
+    undefined
   );
   private _preferredMicId = new Signal<string | undefined>(undefined);
   // Encoder sample rate is wired into the catalog the bot reads. We
@@ -427,27 +448,103 @@ export class MoqTransport extends Transport {
 
   initialize(
     options: PipecatClientOptions,
-    messageHandler: (ev: RTVIMessage) => void,
+    messageHandler: (ev: RTVIMessage) => void
   ): void {
     this._options = options;
     this._callbacks = options.callbacks ?? ({} as RTVIEventCallbacks);
     this._onMessage = messageHandler;
+    this._micEnabledOnConnect = options.enableMic ?? true;
+    this._micEnabled.set(this._micEnabledOnConnect);
     this.state = "initialized";
   }
 
-  async initDevices(): Promise<void> {
-    // Spin up the Microphone with permission requested so labels are
-    // available for the picker before the user clicks Connect. Real
-    // capture constraints (incl. sample rate) get applied in `_connect`
-    // once we have the resolved options.
+  private get _inSession(): boolean {
+    return ["connecting", "connected", "ready", "disconnecting"].includes(
+      this.state
+    );
+  }
+
+  // The Microphone owns getUserMedia and device selection. It is created on
+  // first use (initDevices(), enableMic(true) or _connect()) and torn down
+  // by _disconnect(), so each session starts fresh.
+  private _ensureMicrophone(): Publish.Source.Microphone {
     if (!this._microphone) {
       this._microphone = new Publish.Source.Microphone({
         enabled: this._micEnabled,
         constraints: this._micConstraints,
         device: { preferred: this._preferredMicId },
       });
+      this._watchMicrophone(this._microphone);
     }
-    this._microphone.device.requestPermission();
+    return this._microphone;
+  }
+
+  // Report the Microphone's outputs through the RTVI callbacks, the way the
+  // other transports do: the local track as it comes and goes (enable /
+  // disable, a device switch, the re-capture when _connect() applies the
+  // real constraints), the mic in use, and the available mics.
+  private _watchMicrophone(microphone: Publish.Source.Microphone): void {
+    const signals = new Effect();
+    this._micSignals = signals;
+
+    signals.run((eff) => {
+      const mics = eff.get(microphone.device.out.available);
+      if (mics) this._callbacks?.onAvailableMicsUpdated?.(mics);
+    });
+
+    signals.run((eff) => {
+      const id = eff.get(microphone.device.out.active);
+      const mics = eff.get(microphone.device.out.available);
+      const mic = id ? mics?.find((d) => d.deviceId === id) : undefined;
+      if (!mic || mic.deviceId === this._lastReportedMicId) return;
+      this._lastReportedMicId = mic.deviceId;
+      this._callbacks?.onMicUpdated?.(mic);
+    });
+
+    signals.run((eff) => {
+      const track = this._audioSourceTrack(
+        eff.get(microphone.out.source)?.audio
+      );
+      this._reportMicTrack(track);
+    });
+  }
+
+  private _reportMicTrack(track: MediaStreamTrack | undefined): void {
+    if (track === this._lastReportedMicTrack) return;
+    const participant = { id: "local", name: "", local: true };
+    if (this._lastReportedMicTrack) {
+      this._callbacks?.onTrackStopped?.(
+        this._lastReportedMicTrack,
+        participant
+      );
+    }
+    if (track) this._callbacks?.onTrackStarted?.(track, participant);
+    this._lastReportedMicTrack = track;
+  }
+
+  // Spin up the Microphone so the device list is available for a picker
+  // before the user clicks Connect. With the mic on it captures right away,
+  // which is also what grants permission (so labels are populated); an app
+  // that starts with it off is not prompted. Real capture constraints (incl.
+  // sample rate) get applied in `_connect` once we have the resolved
+  // options. Safe to call any number of times outside a session.
+  async initDevices(): Promise<void> {
+    // Media is session-scoped once connect() runs (the Microphone is torn
+    // down by _disconnect()), so there is nothing for initDevices() to set
+    // up; enableMic() is the live control. PipecatClient.initDevices()
+    // already skips the call in a session; this guards direct callers the
+    // same way.
+    if (this._inSession) {
+      logger.warn(
+        `[Moq Transport] initDevices() ignored while ${this.state}. Use enableMic() during a session.`
+      );
+      return;
+    }
+
+    // A new Microphone captures on its own when the mic is on. An existing
+    // one is left alone: it retries a failed capture by itself, and
+    // enableMic(true) is the way to re-attempt one that gave up.
+    this._ensureMicrophone();
   }
 
   _validateConnectionParams(connectParams?: unknown): MoqTransportOptions {
@@ -464,7 +561,7 @@ export class MoqTransport extends Transport {
       const { moq } = connectParams;
       if (!moq) {
         throw new RTVIError(
-          "MoqTransport connect params did not include `moq` config (server may not be running with `-t moq`)",
+          "MoqTransport connect params did not include `moq` config (server may not be running with `-t moq`)"
         );
       }
       return {
@@ -479,7 +576,10 @@ export class MoqTransport extends Transport {
           : undefined,
       };
     }
-    return { ...this._optionsAsInput(), ...(connectParams as Partial<MoqTransportOptions>) };
+    return {
+      ...this._optionsAsInput(),
+      ...(connectParams as Partial<MoqTransportOptions>),
+    };
   }
 
   /** Return the resolved options re-shaped to the public input type
@@ -490,7 +590,10 @@ export class MoqTransport extends Transport {
 
   async _connect(connectParams?: MoqTransportOptions): Promise<void> {
     const merged = connectParams
-      ? { ...this._moqOptions, ...applyDefaults({ ...this._moqOptions, ...connectParams }) }
+      ? {
+          ...this._moqOptions,
+          ...applyDefaults({ ...this._moqOptions, ...connectParams }),
+        }
       : this._moqOptions;
     if (!merged.relayUrl) {
       throw new RTVIError("MoqTransport requires `relayUrl`");
@@ -508,7 +611,7 @@ export class MoqTransport extends Transport {
       throw new RTVIError(
         `MoqTransport invalid relayUrl ${JSON.stringify(merged.relayUrl)}: ${
           err instanceof Error ? err.message : String(err)
-        }`,
+        }`
       );
     }
 
@@ -519,7 +622,7 @@ export class MoqTransport extends Transport {
       ? {
           serverCertificateHashes: merged.serverCertificateHashes.flatMap(
             (h) =>
-              h.value ? [{ algorithm: "sha-256" as const, value: h.value }] : [],
+              h.value ? [{ algorithm: "sha-256" as const, value: h.value }] : []
           ),
         }
       : undefined;
@@ -581,14 +684,7 @@ export class MoqTransport extends Transport {
     });
     this._audioSampleRate.set(merged.audioSampleRate);
 
-    if (!this._microphone) {
-      this._microphone = new Publish.Source.Microphone({
-        enabled: this._micEnabled,
-        constraints: this._micConstraints,
-        device: { preferred: this._preferredMicId },
-      });
-    }
-    const microphone = this._microphone;
+    const microphone = this._ensureMicrophone();
 
     // Derive the audio capture source from the mic's `Media` output.
     this._signals.run((eff) => {
@@ -611,7 +707,9 @@ export class MoqTransport extends Transport {
     });
     this._encoder = new Publish.Audio.Encoder(CLIENT_AUDIO_TRACK, {
       enabled: this._micEnabled,
-      broadcast: new Signal<Publish.Broadcast | undefined>(this._publishBroadcast),
+      broadcast: new Signal<Publish.Broadcast | undefined>(
+        this._publishBroadcast
+      ),
       capture: new Signal<Publish.Audio.Capture | undefined>(this._capture),
       bandwidth: new Signal(undefined),
       codec: "opus",
@@ -657,7 +755,7 @@ export class MoqTransport extends Transport {
       console.log(
         `[MoqTransport] publish: requested=${merged.audioSampleRate}Hz, ` +
           `mic granted=${s.sampleRate}Hz, channels=${s.channelCount}, ` +
-          `deviceId=${s.deviceId}`,
+          `deviceId=${s.deviceId}`
       );
     });
 
@@ -696,9 +794,7 @@ export class MoqTransport extends Transport {
     const realTime = merged.audioBufferMaxMs === "real-time";
     this._sync = new Watch.Sync({
       probe: connection.probe,
-      delay: realTime
-        ? "instant"
-        : (merged.audioLatencyMs as Moq.Time.Milli),
+      delay: realTime ? "instant" : (merged.audioLatencyMs as Moq.Time.Milli),
       buffer: (realTime ? 0 : merged.audioBufferMaxMs) as Moq.Time.Milli,
     });
     this._audioSource = new Watch.Audio.Source({
@@ -755,7 +851,7 @@ export class MoqTransport extends Transport {
         `[MoqTransport] consume: catalog codec=${config?.codec}, ` +
           `catalog sampleRate=${config?.sampleRate}Hz, ` +
           `catalog channels=${config?.numberOfChannels}, ` +
-          `AudioContext rate=${ctx?.sampleRate}Hz`,
+          `AudioContext rate=${ctx?.sampleRate}Hz`
       );
     });
 
@@ -813,7 +909,7 @@ export class MoqTransport extends Transport {
   /** Get the underlying `MediaStreamTrack` from a publish audio source, if
    *  it is a capture track (vs a decoded/file source). */
   private _audioSourceTrack(
-    src: Publish.Audio.Source | undefined,
+    src: Publish.Audio.Source | undefined
   ): MediaStreamTrack | undefined {
     if (!src) return undefined;
     if (src instanceof MediaStreamTrack) return src;
@@ -867,8 +963,8 @@ export class MoqTransport extends Transport {
     this._callbacks?.onError?.(
       RTVIMessage.error(
         `MoqTransport could not connect to the relay: ${reason}`,
-        true,
-      ),
+        true
+      )
     );
   }
 
@@ -899,7 +995,7 @@ export class MoqTransport extends Transport {
    *  overdue with window left on the clock re-arms with the remainder. */
   private _boundRelayAttempts(
     connection: Moq.Connection,
-    retryTimeoutMs: number,
+    retryTimeoutMs: number
   ): void {
     const signals = this._signals;
     if (!signals) return;
@@ -917,7 +1013,7 @@ export class MoqTransport extends Transport {
           : `; ${abandonedCount} attempt${abandonedCount === 1 ? "" : "s"} got no answer`;
       this._giveUpOnRelay(
         connection,
-        new Error(`still unreachable after ${retryTimeoutMs / 1000} s${dials}`),
+        new Error(`still unreachable after ${retryTimeoutMs / 1000} s${dials}`)
       );
     };
 
@@ -994,7 +1090,7 @@ export class MoqTransport extends Transport {
           }
           giveUp();
         },
-        Math.min(left, MAX_TIMER_MS),
+        Math.min(left, MAX_TIMER_MS)
       );
     });
   }
@@ -1009,7 +1105,7 @@ export class MoqTransport extends Transport {
     const enabled = this._reloadEnabled;
     if (!enabled || !this._isLiveRelay(connection)) return;
     console.warn(
-      `[MoqTransport] no answer from the relay within ${ms / 1000} s; dialing again`,
+      `[MoqTransport] no answer from the relay within ${ms / 1000} s; dialing again`
     );
     enabled.set(false);
     setTimeout(() => {
@@ -1066,6 +1162,7 @@ export class MoqTransport extends Transport {
       this._encoder?.close();
       this._capture?.close();
       this._publishBroadcast?.close();
+      this._micSignals?.close();
       this._microphone?.close();
       this._signals?.close();
       this._connection?.close();
@@ -1082,10 +1179,16 @@ export class MoqTransport extends Transport {
       this._capture = null;
       this._publishBroadcast = null;
       this._microphone = null;
+      this._micSignals = null;
       this._signals = null;
+      // The Microphone is gone, and with it the track the app was told about.
+      this._reportMicTrack(undefined);
+      this._lastReportedMicId = undefined;
       this._connection = null;
       this._reloadEnabled = null;
       this._wasReady = false;
+      // The next session starts from the connect-time flag again.
+      this._micEnabled.set(this._micEnabledOnConnect);
       this.state = "disconnected";
       // Fire the SDK's disconnected callback. `state = "disconnected"`
       // above already triggers `onTransportStateChanged`, but the SDK
@@ -1216,7 +1319,21 @@ export class MoqTransport extends Transport {
   }
 
   enableMic(enable: boolean): void {
+    const wasOn = this._micEnabled.peek();
     this._micEnabled.set(enable);
+    if (this._inSession) return;
+    this._micEnabledOnConnect = enable;
+    if (!enable) return;
+    // Enabling before a session acquires the mic: the Microphone captures on
+    // its own once enabled. Disabling only records the preference.
+    const microphone = this._ensureMicrophone();
+    // Already on but not capturing: the Microphone retried and gave up
+    // (permission denied, device gone), and setting enabled again changes
+    // nothing. Requesting permission is the one lever that restarts it: a
+    // grant re-enumerates the devices, which makes the Microphone retry.
+    if (wasOn && !microphone.out.source.peek()) {
+      microphone.device.requestPermission();
+    }
   }
 
   enableCam(_enable: boolean): void {}
@@ -1254,7 +1371,7 @@ export class MoqTransport extends Transport {
     if (!this._appendTranscriptRecord(message)) {
       console.warn(
         "[MoqTransport] sendMessage called before connect; dropping",
-        message,
+        message
       );
     }
   }
@@ -1281,7 +1398,7 @@ export class MoqTransport extends Transport {
 
   tracks(): Tracks {
     const localAudio = this._audioSourceTrack(
-      this._microphone?.out.source.peek()?.audio,
+      this._microphone?.out.source.peek()?.audio
     );
     return {
       local: localAudio ? { audio: localAudio } : {},
@@ -1299,7 +1416,7 @@ export class MoqTransport extends Transport {
    *  SDK's connect promise when bot-ready arrives. */
   private async _drainTranscript(
     consumer: Json.Stream.Consumer<TranscriptRecord>,
-    signal: AbortSignal,
+    signal: AbortSignal
   ): Promise<void> {
     for (;;) {
       const record = await consumer.next();
@@ -1316,7 +1433,9 @@ export class MoqTransport extends Transport {
       const label = (message as { label?: string }).label;
       const type = (message as { type?: string }).type;
       if (label === "moq-transport" && type === "session-ending") {
-        console.log("[MoqTransport] bot signaled session-ending — closing cleanly");
+        console.log(
+          "[MoqTransport] bot signaled session-ending — closing cleanly"
+        );
         // Fire-and-forget; we're returning from the drain loop right
         // after, and _disconnect() aborts the consumer that owns us.
         void this._disconnect();

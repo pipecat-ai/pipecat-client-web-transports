@@ -68,17 +68,17 @@ describe("DailyTransport.initDevices() — characterization", () => {
     expect(spies.onSpeakerUpdated).toHaveBeenCalledTimes(1);
   });
 
-  test("repeated initDevices() calls re-invoke startCamera and re-emit state transitions", async () => {
-    // Today DailyTransport is NOT idempotent: a second call re-runs the full
-    // startCamera/enumerate flow. Step 2 introduces a MediaState gate that
-    // short-circuits repeat calls at the PipecatClient layer.
+  test("repeated initDevices() calls start media once and re-report devices", async () => {
+    // daily-js needs one startCamera() per session, so a second call only
+    // re-reports what is already running (the client relies on the report to
+    // refresh its device state).
     const { callbacks, recorder, spies } = buildSpyCallbacks();
     wireTransport(transport, callbacks);
 
     await transport.initDevices();
     await transport.initDevices();
 
-    expect(fakeDaily.startCameraCallCount).toBe(2);
+    expect(fakeDaily.startCameraCallCount).toBe(1);
     expect(transport.state).toBe("initialized");
     expect(recorder.states).toEqual([
       "initializing",
@@ -86,9 +86,37 @@ describe("DailyTransport.initDevices() — characterization", () => {
       "initializing",
       "initialized",
     ]);
-    // Device callbacks fire twice as well — consumers see duplicate updates.
     expect(spies.onMicUpdated).toHaveBeenCalledTimes(2);
     expect(spies.onCamUpdated).toHaveBeenCalledTimes(2);
+    expect(spies.onAvailableMicsUpdated).toHaveBeenCalledTimes(2);
+  });
+
+  test("initDevices() during a session is ignored", async () => {
+    const { spies, callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+
+    await transport._connect({ url: "https://x.daily.co/r" });
+    spies.onTransportStateChanged.mockClear();
+    fakeDaily.enumerateDevices.mockClear();
+
+    await transport.initDevices();
+
+    expect(transport.state).toBe("connected");
+    expect(spies.onTransportStateChanged).not.toHaveBeenCalled();
+    expect(fakeDaily.startCamera).not.toHaveBeenCalled();
+    expect(fakeDaily.enumerateDevices).not.toHaveBeenCalled();
+  });
+
+  test("after a session ends, initDevices() starts media again for the next one", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+
+    await transport.initDevices();
+    await transport._connect({ url: "https://x.daily.co/r" });
+    await transport._disconnect();
+    await transport.initDevices();
+
+    expect(fakeDaily.startCameraCallCount).toBe(2);
   });
 
   test("second initDevices() does NOT restart audio observers (partial internal idempotency)", async () => {

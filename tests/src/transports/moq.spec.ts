@@ -39,27 +39,65 @@ vi.mock("@moq/hang/container", () => ({
   Legacy: { Format: class {} },
 }));
 vi.mock("@moq/publish", async () => {
-  const { Signal } = await import("@moq/signals");
+  const { Effect, Signal } = await import("@moq/signals");
+  // Mirrors the real Microphone closely enough for the transport's wiring:
+  // it captures (one getUserMedia) whenever `enabled` is true, re-captures
+  // when the constraints change, releases the track when disabled or
+  // closed, publishes its source as `{ audio: { track, kind } }`, and
+  // tracks the available / active device. `requestPermission()` only
+  // grants permission (a getUserMedia whose tracks are stopped at once).
+  type MicSource = { audio: { track: MediaStreamTrack; kind: string } };
   class Microphone {
-    private _permissionRequested = false;
+    out = { source: new Signal<MicSource | undefined>(undefined) };
     device = {
+      out: {
+        available: new Signal<MediaDeviceInfo[] | undefined>(undefined),
+        active: new Signal<string | undefined>(undefined),
+        permission: new Signal(false),
+      },
       requestPermission: () => {
-        if (this._permissionRequested) return;
-        this._permissionRequested = true;
+        if (this.device.out.permission.peek()) return;
         navigator.mediaDevices
-          .getUserMedia({ audio: true })
+          ?.getUserMedia({ audio: true })
           .then((stream) => {
-            this.out.source.set({ audio: stream.getAudioTracks()[0] });
+            this.device.out.permission.set(true);
+            stream.getTracks().forEach((t) => t.stop());
           })
           .catch(() => {});
       },
     };
-    // 0.4 moved component outputs under `out`.
-    out = {
-      source: new Signal<{ audio: MediaStreamTrack } | undefined>(undefined),
-    };
-    constructor(_opts: unknown) {}
-    close() {}
+    private _effect = new Effect();
+    constructor(opts: {
+      enabled: Signal<boolean>;
+      constraints: Signal<unknown>;
+    }) {
+      navigator.mediaDevices
+        ?.enumerateDevices()
+        .then((all) => {
+          this.device.out.available.set(
+            all.filter((d) => d.kind === "audioinput")
+          );
+        })
+        .catch(() => {});
+      this._effect.run((eff) => {
+        if (!eff.get(opts.enabled)) return;
+        eff.get(opts.constraints);
+        eff.spawn(async () => {
+          const stream = await navigator.mediaDevices
+            ?.getUserMedia({ audio: true })
+            .catch(() => undefined);
+          if (eff.abort.aborted || !stream) return;
+          const track = stream.getAudioTracks()[0];
+          eff.cleanup(() => track.stop());
+          this.device.out.permission.set(true);
+          eff.set(this.device.out.active, track.getSettings().deviceId);
+          eff.set(this.out.source, { audio: { track, kind: "voice" } });
+        });
+      });
+    }
+    close() {
+      this._effect.close();
+    }
   }
   return {
     Broadcast: class {
@@ -242,9 +280,202 @@ describe("MoqTransport — characterization", () => {
 
     await transport.initDevices();
     await transport.initDevices();
+    await new Promise((r) => setTimeout(r, 0));
 
     expect(stub.getUserMedia).toHaveBeenCalledTimes(1);
     expect(transport.tracks().local.audio).toBeDefined();
+  });
+
+  test("initDevices() with the mic off sets up the device list but does not request permission", async () => {
+    const stub = stubMediaDevices();
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks, { enableMic: false });
+
+    await transport.initDevices();
+
+    expect(stub.getUserMedia).not.toHaveBeenCalled();
+    expect(transport.isMicEnabled).toBe(false);
+  });
+
+  test("initDevices() during a session is ignored", async () => {
+    const stub = stubMediaDevices();
+    const { callbacks, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    // Stand in for a session being under way.
+    (transport as unknown as { _state: string })._state = "connected";
+    recorder.states.length = 0;
+
+    await transport.initDevices();
+
+    expect(stub.getUserMedia).not.toHaveBeenCalled();
+    expect(transport.tracks().local.audio).toBeUndefined();
+    expect(transport.state).toBe("connected");
+    expect(recorder.states).toEqual([]);
+  });
+
+  test("enableMic(true) before a session acquires the mic on its own", async () => {
+    const stub = stubMediaDevices();
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks, { enableMic: false });
+
+    transport.enableMic(true);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(stub.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(transport.tracks().local.audio).toBeDefined();
+    expect(transport.isMicEnabled).toBe(true);
+  });
+
+  test("enableMic(false) before a session records the preference only", async () => {
+    const stub = stubMediaDevices();
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+
+    transport.enableMic(false);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(stub.getUserMedia).not.toHaveBeenCalled();
+    expect(transport.isMicEnabled).toBe(false);
+  });
+
+  test("enableMic(true) before a session reports the local track, the mic in use and the available mics", async () => {
+    stubMediaDevices();
+    const { callbacks, spies } = buildSpyCallbacks();
+    wireTransport(transport, callbacks, { enableMic: false });
+
+    transport.enableMic(true);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(spies.onTrackStarted).toHaveBeenCalledTimes(1);
+    expect(spies.onTrackStarted.mock.calls[0][0]).toBe(
+      transport.tracks().local.audio
+    );
+    expect(spies.onTrackStarted.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ local: true })
+    );
+    expect(spies.onAvailableMicsUpdated).toHaveBeenCalledWith([
+      expect.objectContaining({ deviceId: "mic-1" }),
+    ]);
+    expect(spies.onMicUpdated).toHaveBeenCalledTimes(1);
+    expect(spies.onMicUpdated).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceId: "mic-1" })
+    );
+  });
+
+  test("enableMic(false) after a pre-session enableMic(true) releases the mic and reports the track as stopped", async () => {
+    stubMediaDevices();
+    const { callbacks, spies } = buildSpyCallbacks();
+    wireTransport(transport, callbacks, { enableMic: false });
+    transport.enableMic(true);
+    await new Promise((r) => setTimeout(r, 0));
+    const track = spies.onTrackStarted.mock.calls[0][0];
+
+    transport.enableMic(false);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(spies.onTrackStopped).toHaveBeenCalledTimes(1);
+    expect(spies.onTrackStopped.mock.calls[0][0]).toBe(track);
+    expect(spies.onTrackStopped.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ local: true })
+    );
+    expect(transport.tracks().local.audio).toBeUndefined();
+  });
+
+  test("enableMic(true) on a mic that is on but not capturing requests permission so the Microphone retries", async () => {
+    const stub = stubMediaDevices({
+      getUserMedia: vi.fn(async () => {
+        throw new Error("permission denied");
+      }),
+    });
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    await transport.initDevices();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(stub.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(transport.tracks().local.audio).toBeUndefined();
+
+    transport.enableMic(true);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(stub.getUserMedia).toHaveBeenCalledTimes(2);
+  });
+
+  test("enableMic(true) on a mic that is already capturing does nothing", async () => {
+    const stub = stubMediaDevices();
+    const { callbacks, spies } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    await transport.initDevices();
+    await new Promise((r) => setTimeout(r, 0));
+    const track = transport.tracks().local.audio;
+
+    transport.enableMic(true);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(stub.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(transport.tracks().local.audio).toBe(track);
+    expect(spies.onTrackStarted).toHaveBeenCalledTimes(1);
+  });
+
+  test("turning the mic on with a Microphone already set up captures once, with no extra permission request", async () => {
+    const stub = stubMediaDevices();
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks, { enableMic: false });
+    await transport.initDevices();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(stub.getUserMedia).not.toHaveBeenCalled();
+
+    transport.enableMic(true);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(stub.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(transport.tracks().local.audio).toBeDefined();
+  });
+
+  test("_disconnect() reports the mic track as stopped", async () => {
+    stubMediaDevices();
+    const { callbacks, spies } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    await transport.initDevices();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(spies.onTrackStarted).toHaveBeenCalledTimes(1);
+    (transport as unknown as { _state: string })._state = "connected";
+
+    await transport._disconnect();
+
+    expect(spies.onTrackStopped).toHaveBeenCalledTimes(1);
+    expect(spies.onTrackStopped.mock.calls[0][0]).toBe(
+      spies.onTrackStarted.mock.calls[0][0]
+    );
+    expect(transport.tracks().local.audio).toBeUndefined();
+  });
+
+  test("a mid-session toggle is live only: _disconnect() resets the mic to the connect-time flag", async () => {
+    stubMediaDevices();
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    // Stand in for a session being under way.
+    (transport as unknown as { _state: string })._state = "connected";
+
+    transport.enableMic(false);
+    expect(transport.isMicEnabled).toBe(false);
+
+    await transport._disconnect();
+
+    expect(transport.isMicEnabled).toBe(true);
+  });
+
+  test("a toggle between sessions updates the connect-time flag", async () => {
+    stubMediaDevices();
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    (transport as unknown as { _state: string })._state = "connected";
+    await transport._disconnect();
+
+    transport.enableMic(false);
+    (transport as unknown as { _state: string })._state = "connected";
+    await transport._disconnect();
+
+    expect(transport.isMicEnabled).toBe(false);
   });
 
   test("initDevices() swallows permission failures (fire-and-forget requestPermission)", async () => {

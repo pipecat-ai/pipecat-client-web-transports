@@ -662,7 +662,7 @@ describe("LiveKitTransport — characterization", () => {
       expect(track.stop).toHaveBeenCalledTimes(1);
     });
 
-    test("_disconnect() reports mic/cam as stopped and flips isMicEnabled/isCamEnabled to false", async () => {
+    test("_disconnect() reports mic/cam as stopped and resets isMicEnabled/isCamEnabled to the connect-time flags", async () => {
       const { callbacks, spies } = buildSpyCallbacks();
       wireTransport(transport, callbacks, { enableMic: true, enableCam: true });
       await transport.initDevices();
@@ -679,11 +679,13 @@ describe("LiveKitTransport — characterization", () => {
         camTrack.mediaStreamTrack,
         expect.objectContaining({ local: true })
       );
-      expect(transport.isMicEnabled).toBe(false);
-      expect(transport.isCamEnabled).toBe(false);
+      // Both were enabled at construction, so that is what the next session
+      // starts from (and what a pre-session enable would act on).
+      expect(transport.isMicEnabled).toBe(true);
+      expect(transport.isCamEnabled).toBe(true);
     });
 
-    test("isMicEnabled/isCamEnabled already reflect false from inside disconnect's onTrackStopped callback", async () => {
+    test("isMicEnabled/isCamEnabled already reflect the reset from inside disconnect's onTrackStopped callback", async () => {
       const { callbacks, spies } = buildSpyCallbacks();
       wireTransport(transport, callbacks, { enableMic: true, enableCam: true });
       await transport.initDevices();
@@ -699,8 +701,72 @@ describe("LiveKitTransport — characterization", () => {
 
       await transport._disconnect();
 
-      expect(seenMic).toEqual([false]);
-      expect(seenCam).toEqual([false]);
+      expect(seenMic).toEqual([true]);
+      expect(seenCam).toEqual([true]);
+    });
+
+    test("a mid-session toggle is live only: disconnect resets to the connect-time flag and the next connect() acquires from it", async () => {
+      const { callbacks } = buildSpyCallbacks();
+      wireTransport(transport, callbacks, { enableMic: true, enableCam: false });
+      await connect(transport, { url: "wss://lk.example", token: "tok" });
+
+      await transport.enableMic(false);
+      expect(transport.isMicEnabled).toBe(false);
+
+      await transport._disconnect();
+      expect(transport.isMicEnabled).toBe(true);
+
+      (createLocalAudioTrack as Mock).mockClear();
+      await connect(transport, { url: "wss://lk.example", token: "tok" });
+
+      expect(createLocalAudioTrack).toHaveBeenCalledTimes(1);
+      expect(roomOf(transport).localParticipant.publishTrack).toHaveBeenCalledTimes(2);
+    });
+
+    test("a toggle between sessions updates the connect-time flag, so the next connect() does not acquire", async () => {
+      const { callbacks } = buildSpyCallbacks();
+      wireTransport(transport, callbacks, { enableMic: true, enableCam: false });
+      await connect(transport, { url: "wss://lk.example", token: "tok" });
+      await transport._disconnect();
+
+      await transport.enableMic(false);
+      expect(transport.isMicEnabled).toBe(false);
+
+      (createLocalAudioTrack as Mock).mockClear();
+      roomOf(transport).localParticipant.publishTrack.mockClear();
+      await connect(transport, { url: "wss://lk.example", token: "tok" });
+
+      expect(createLocalAudioTrack).not.toHaveBeenCalled();
+      expect(roomOf(transport).localParticipant.publishTrack).not.toHaveBeenCalled();
+      expect(transport.isMicEnabled).toBe(false);
+    });
+
+    test("initDevices() is idempotent: a second call leaves acquired tracks alone", async () => {
+      const { callbacks } = buildSpyCallbacks();
+      wireTransport(transport, callbacks, { enableMic: true, enableCam: true });
+
+      await transport.initDevices();
+      const audioTrack = localAudioTrackOf(transport);
+      const videoTrack = localVideoTrackOf(transport);
+      await transport.initDevices();
+
+      expect(createLocalTracks).toHaveBeenCalledTimes(1);
+      expect(createLocalAudioTrack).not.toHaveBeenCalled();
+      expect(createLocalVideoTrack).not.toHaveBeenCalled();
+      expect(localAudioTrackOf(transport)).toBe(audioTrack);
+      expect(localVideoTrackOf(transport)).toBe(videoTrack);
+    });
+
+    test("initDevices() acquires only what is still missing", async () => {
+      const { callbacks } = buildSpyCallbacks();
+      wireTransport(transport, callbacks, { enableMic: true, enableCam: true });
+
+      await transport.enableMic(true);
+      await transport.initDevices();
+
+      expect(createLocalTracks).not.toHaveBeenCalled();
+      expect(createLocalAudioTrack).toHaveBeenCalledTimes(1);
+      expect(createLocalVideoTrack).toHaveBeenCalledTimes(1);
     });
 
     test("_disconnect() is a no-op for onTrackStopped when nothing was ever live (mic/cam disabled)", async () => {
@@ -756,6 +822,26 @@ describe("LiveKitTransport — characterization", () => {
       expect(spies.onConnected).toHaveBeenCalledTimes(1);
     });
 
+    test("initDevices() during a session is ignored", async () => {
+      const { callbacks, spies } = buildSpyCallbacks();
+      wireTransport(transport, callbacks, {
+        enableMic: false,
+        enableCam: false,
+      });
+      await connect(transport, { url: "wss://lk.example", token: "tok" });
+      spies.onTransportStateChanged.mockClear();
+      mediaDevices.enumerateDevices.mockClear();
+
+      await transport.initDevices();
+
+      expect(transport.state).toBe("connected");
+      expect(spies.onTransportStateChanged).not.toHaveBeenCalled();
+      expect(createLocalAudioTrack).not.toHaveBeenCalled();
+      expect(createLocalVideoTrack).not.toHaveBeenCalled();
+      expect(createLocalTracks).not.toHaveBeenCalled();
+      expect(mediaDevices.enumerateDevices).not.toHaveBeenCalled();
+    });
+
     test("_connect() publishes tracks pre-warmed by initDevices(), alongside room.connect()", async () => {
       const { callbacks } = buildSpyCallbacks();
       wireTransport(transport, callbacks, { enableMic: true, enableCam: true });
@@ -774,12 +860,29 @@ describe("LiveKitTransport — characterization", () => {
       expect(roomOf(transport).connect).toHaveBeenCalled();
     });
 
-    test("_connect() publishes nothing when initDevices() was never called", async () => {
+    test("_connect() acquires per the connect-time flags when nothing was acquired, and publishes", async () => {
       const { callbacks } = buildSpyCallbacks();
       wireTransport(transport, callbacks, { enableMic: true, enableCam: false });
 
       await connect(transport, { url: "wss://lk.example", token: "tok" });
 
+      expect(createLocalAudioTrack).toHaveBeenCalledTimes(1);
+      expect(createLocalVideoTrack).not.toHaveBeenCalled();
+      expect(
+        roomOf(transport).localParticipant.publishTrack
+      ).toHaveBeenCalledWith(localAudioTrackOf(transport));
+      expect(
+        roomOf(transport).localParticipant.publishTrack
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    test("_connect() publishes nothing when both devices start off", async () => {
+      const { callbacks } = buildSpyCallbacks();
+      wireTransport(transport, callbacks, { enableMic: false, enableCam: false });
+
+      await connect(transport, { url: "wss://lk.example", token: "tok" });
+
+      expect(createLocalAudioTrack).not.toHaveBeenCalled();
       expect(
         roomOf(transport).localParticipant.publishTrack
       ).not.toHaveBeenCalled();

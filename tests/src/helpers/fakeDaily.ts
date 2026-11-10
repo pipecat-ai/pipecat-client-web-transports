@@ -26,6 +26,8 @@ export interface FakeDailyCallObject {
   localAudio: Mock;
   localVideo: Mock;
   setJoined: (joined: boolean) => void;
+  /** Dispatch a daily-js event to the handlers registered via on(). */
+  emit: (event: string, payload?: unknown) => void;
   startCameraCallCount: number;
   startCameraShouldThrow?: Error;
 }
@@ -57,9 +59,20 @@ export function createFakeDailyCallObject(): FakeDailyCallObject {
     join: vi.fn(async () => {
       joined = true;
     }),
+    // Real daily-js fires left-meeting as part of leave(); the transport
+    // moves to "disconnected" on that event, not on leave() resolving.
     leave: vi.fn(async () => {
       joined = false;
+      fake.emit("left-meeting", {});
     }),
+    emit: (event: string, payload?: unknown) => {
+      for (const [name, handler] of fake.on.mock.calls as [
+        string,
+        (ev: unknown) => void,
+      ][]) {
+        if (name === event) handler(payload);
+      }
+    },
     room: vi.fn(async () => ({})),
     participants: vi.fn(() => (joined ? { local: { id: "local-1" } } : {})),
     setLocalAudio: vi.fn((enable: boolean) => {

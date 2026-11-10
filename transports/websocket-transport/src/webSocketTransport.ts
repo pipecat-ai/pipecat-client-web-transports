@@ -53,8 +53,6 @@ export class WebSocketTransport extends Transport {
       new DailyMediaManager(
         true,
         true,
-        undefined,
-        undefined,
         512,
         this._recorderSampleRate,
         opts.playerSampleRate ?? WebSocketTransport.PLAYER_SAMPLE_RATE
@@ -79,6 +77,19 @@ export class WebSocketTransport extends Transport {
   }
 
   async initDevices(): Promise<void> {
+    // Media is session-scoped once connect() runs (the media manager starts
+    // it there and tears it down on disconnect), so there is nothing for
+    // initDevices() to set up; enableMic() is the live control.
+    // PipecatClient.initDevices() already skips the call in a session; this
+    // guards direct callers the same way.
+    if (
+      ["connecting", "connected", "ready", "disconnecting"].includes(this.state)
+    ) {
+      logger.warn(
+        `[WebSocket Transport] initDevices() ignored while ${this.state}. Use enableMic() during a session.`
+      );
+      return;
+    }
     this.state = "initializing";
     await this._mediaManager.initialize();
     this.state = "initialized";

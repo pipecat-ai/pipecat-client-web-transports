@@ -52,6 +52,19 @@ describe("WebSocketTransport.initDevices() — characterization", () => {
     ]);
   });
 
+  test("initDevices() during a session is ignored", async () => {
+    const { callbacks, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    transport.state = "connected";
+    recorder.states.length = 0;
+
+    await transport.initDevices();
+
+    expect(mediaManager.initializeCallCount).toBe(0);
+    expect(transport.state).toBe("connected");
+    expect(recorder.states).toEqual([]);
+  });
+
   test.each([
     [{ enableMic: true, enableCam: false }],
     [{ enableMic: false, enableCam: false }],

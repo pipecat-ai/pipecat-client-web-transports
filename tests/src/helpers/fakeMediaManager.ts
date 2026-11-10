@@ -30,6 +30,7 @@ export function createFakeMediaManager(): FakeMediaManager {
 
     setUserAudioCallback: vi.fn(),
     setClientOptions: vi.fn(),
+    registerTrackCallbacks: vi.fn(),
 
     initialize: vi.fn(async function (this: FakeMediaManager) {
       this.initializeCallCount += 1;

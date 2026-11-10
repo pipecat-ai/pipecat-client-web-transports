@@ -49,8 +49,16 @@ export class LiveKitTransport extends Transport {
   private _selectedCam: MediaDeviceInfo | Record<string, never> = {};
   private _selectedSpeaker: MediaDeviceInfo | Record<string, never> = {};
 
+  // Live state, what isMicEnabled / isCamEnabled report. The *OnConnect
+  // flags are the connect-time flags: the state each device should be in
+  // when a session starts. Outside a session enableMic() / enableCam()
+  // update both; once connect() begins the flags are frozen and only the
+  // live state changes, so a mid-session mute does not leak into the next
+  // connect(). Disconnecting resets the live state to the flags.
   private _micEnabled: boolean = false;
   private _camEnabled: boolean = false;
+  private _micEnabledOnConnect: boolean = true;
+  private _camEnabledOnConnect: boolean = false;
   private _listenersAttached: boolean = false;
   private _readyHandler: (() => void) | null = null;
   private _readyReject: ((reason?: unknown) => void) | null = null;
@@ -78,8 +86,10 @@ export class LiveKitTransport extends Transport {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
     this._onMessage = messageHandler;
-    this._micEnabled = options.enableMic ?? true;
-    this._camEnabled = options.enableCam ?? false;
+    this._micEnabledOnConnect = options.enableMic ?? true;
+    this._camEnabledOnConnect = options.enableCam ?? false;
+    this._micEnabled = this._micEnabledOnConnect;
+    this._camEnabled = this._camEnabledOnConnect;
 
     this.attachEventListeners();
 
@@ -98,10 +108,32 @@ export class LiveKitTransport extends Transport {
     this._callbacks.onTransportStateChanged?.(state);
   }
 
+  private get _inSession(): boolean {
+    return ["connecting", "connected", "ready", "disconnecting"].includes(
+      this.state
+    );
+  }
+
+  // Acquire whatever is enabled and not yet acquired, then enumerate. Safe
+  // to call any number of times: a device already acquired is left alone.
+  // Inside a session it leaves the transport state alone.
   async initDevices(): Promise<void> {
+    // Media is session-scoped once connect() runs: there is nothing for
+    // initDevices() to set up, and enableMic() / enableCam() are the live
+    // controls. PipecatClient.initDevices() already skips the call in a
+    // session; this guards direct callers the same way.
+    if (this._inSession) {
+      logger.warn(
+        `[LiveKit Transport] initDevices() ignored while ${this.state}. Use enableMic() / enableCam() during a session.`
+      );
+      return;
+    }
+
     this.state = "initializing";
 
-    if (this._micEnabled && this._camEnabled) {
+    const needMic = this._micEnabled && !this._localAudioTrack;
+    const needCam = this._camEnabled && !this._localVideoTrack;
+    if (needMic && needCam) {
       try {
         // createLocalTracks acquires both in one getUserMedia call, showing a
         // single combined permission prompt instead of two sequential ones.
@@ -117,11 +149,9 @@ export class LiveKitTransport extends Transport {
           video: { deviceId: "default" },
         });
         const audioTrack = tracks.find((t) => t.kind === Track.Kind.Audio) as
-          | LocalAudioTrack
-          | undefined;
+          LocalAudioTrack | undefined;
         const videoTrack = tracks.find((t) => t.kind === Track.Kind.Video) as
-          | LocalVideoTrack
-          | undefined;
+          LocalVideoTrack | undefined;
         if (audioTrack) await this._syncMicTrack(audioTrack);
         if (videoTrack) await this._syncCamTrack(videoTrack);
       } catch (e) {
@@ -136,8 +166,8 @@ export class LiveKitTransport extends Transport {
         await Promise.all([this._initMic(), this._initCam()]);
       }
     } else {
-      if (this._micEnabled) await this._initMic();
-      if (this._camEnabled) await this._initCam();
+      if (needMic) await this._initMic();
+      if (needCam) await this._initCam();
     }
 
     await this.updateAvailableDevices();
@@ -342,6 +372,19 @@ export class LiveKitTransport extends Transport {
       "devicechange",
       this._deviceChangeHandler
     );
+
+    // Acquire what the connect-time flags ask for that is not already
+    // acquired: nothing is after a disconnect, which releases the tracks. A
+    // device acquired before connect() is left as it is, muted or not.
+    const acquisitions: Promise<void>[] = [];
+    if (this._micEnabledOnConnect && !this._localAudioTrack) {
+      acquisitions.push(this._initMic());
+    }
+    if (this._camEnabledOnConnect && !this._localVideoTrack) {
+      acquisitions.push(this._initCam());
+    }
+    await Promise.all(acquisitions);
+    if (this._abortController?.signal.aborted) return;
 
     // Publish alongside connect(), not after it. publishTrack() only waits on
     // the signal (WebSocket) connection, not full ICE/PC negotiation — the
@@ -623,6 +666,7 @@ export class LiveKitTransport extends Transport {
   }
 
   async enableMic(enable: boolean): Promise<void> {
+    if (!this._inSession) this._micEnabledOnConnect = enable;
     try {
       const track = await this._setMicEnabled(enable);
       // _syncMicTrack() re-assigning _localAudioTrack to itself (the
@@ -675,6 +719,7 @@ export class LiveKitTransport extends Transport {
   }
 
   async enableCam(enable: boolean): Promise<void> {
+    if (!this._inSession) this._camEnabledOnConnect = enable;
     try {
       const track = await this._setCamEnabled(enable);
       if (track) await this._syncCamTrack(track);
@@ -1058,22 +1103,17 @@ export class LiveKitTransport extends Transport {
     this._localAudioTrack?.stop();
     this._localVideoTrack?.stop();
 
-    // Report this the same way enableMic(false)/enableCam(false) would,
-    // rather than just dropping the references below: fire onTrackStopped
-    // for whatever was last live, and flip _mic/camEnabled to false so
-    // isMicEnabled()/isCamEnabled() (and any mute/unmute toggle bound to
-    // them) reflect reality. Without this, disconnect leaves both saying
-    // "enabled" with no track behind them — silently wrong, and still wrong
-    // after a later connect() since nothing re-acquires unless the caller
-    // notices the mismatch and explicitly re-enables.
+    // Fire onTrackStopped for whatever was last live, and reset the live
+    // state to the connect-time flags: the next session starts from them
+    // (connect() acquires per the flags), and a pre-session enableMic(true)
+    // acquires too, so "enabled" with no track behind it means "will be on".
     //
     // Assign _mic/camEnabled *before* firing onTrackStopped below — same
     // ordering fix as enableMic()/enableCam(): anything reacting to that
     // event (e.g. client-react resyncing isMicEnabled) reads this same
-    // getter, and needs to see false already, not whatever it was pre-
-    // disconnect.
-    this._micEnabled = false;
-    this._camEnabled = false;
+    // getter, and needs to see the reset value already.
+    this._micEnabled = this._micEnabledOnConnect;
+    this._camEnabled = this._camEnabledOnConnect;
     const participant = { id: "local", name: "", local: true };
     if (this._lastReportedMicTrack) {
       this._callbacks.onTrackStopped?.(this._lastReportedMicTrack, participant);

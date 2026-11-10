@@ -17,7 +17,11 @@ import {
   TransportState,
   UnsupportedFeatureError,
 } from "@pipecat-ai/client-js";
-import { MediaManager, DailyMediaManager } from "@pipecat-ai/transport-lib";
+import {
+  DailyMediaManager,
+  LocalTrackType,
+  MediaManager,
+} from "@pipecat-ai/transport-lib";
 
 class TrackStatusMessage {
   type = "trackStatus";
@@ -147,33 +151,13 @@ export class SmallWebRTCTransport extends Transport {
     this._webrtcRequest = this._resolveRequestInfo(opts);
 
     this.mediaManager =
-      opts.mediaManager ||
-      new DailyMediaManager(
-        false,
-        false,
-        async (event) => {
-          if (!this.pc) {
-            return;
-          }
-          if (event.type == "audio") {
-            logger.info("SmallWebRTCMediaManager replacing audio track");
-            await this.getAudioTransceiver().sender.replaceTrack(event.track);
-          } else if (event.type == "video") {
-            logger.info("SmallWebRTCMediaManager replacing video track");
-            await this.getVideoTransceiver().sender.replaceTrack(event.track);
-          } else if (event.type == "screenVideo") {
-            logger.info("SmallWebRTCMediaManager replacing screen video track");
-            await this.getScreenVideoTransceiver().sender.replaceTrack(
-              event.track
-            );
-          } else if (event.type == "screenAudio") {
-            logger.info(
-              "SmallWebRTCMediaManager does not yet support screen audio. Track is ignored."
-            );
-          }
-        },
-        (event) => logger.debug("SmallWebRTCMediaManager Track stopped:", event)
-      );
+      opts.mediaManager || new DailyMediaManager(false, false);
+    // Whichever manager is in use, its local tracks have to reach the peer
+    // connection; addUserMedia() only sends the ones that exist at connect().
+    this.mediaManager.registerTrackCallbacks(
+      this._handleTrackStarted.bind(this),
+      this._handleTrackStopped.bind(this)
+    );
   }
 
   public initialize(
@@ -189,7 +173,58 @@ export class SmallWebRTCTransport extends Transport {
     logger.debug("[RTVI Transport] Initialized");
   }
 
+  private _handleTrackStarted(track: MediaStreamTrack, type: LocalTrackType) {
+    if (type === "screenAudio") {
+      logger.info(
+        "SmallWebRTCMediaManager does not yet support screen audio. Track is ignored."
+      );
+      return;
+    }
+    void this._attachLocalTrack(track, type);
+  }
+
+  private _handleTrackStopped(track: MediaStreamTrack, type: LocalTrackType) {
+    logger.debug("SmallWebRTCMediaManager track stopped:", type, track);
+  }
+
+  // Send a local track the media manager has just reported on the matching
+  // transceiver. Before connect() there is no peer connection and
+  // addUserMedia() picks the track up then.
+  private async _attachLocalTrack(
+    track: MediaStreamTrack,
+    type: Exclude<LocalTrackType, "screenAudio">
+  ): Promise<void> {
+    if (!this.pc) return;
+    let transceiver: RTCRtpTransceiver | undefined;
+    if (type === "audio") {
+      transceiver = this.getAudioTransceiver();
+    } else if (type === "video") {
+      transceiver = this.getVideoTransceiver();
+    } else if (this.mediaManager.supportsScreenShare) {
+      transceiver = this.getScreenVideoTransceiver();
+    }
+    if (!transceiver || transceiver.sender.track === track) return;
+    try {
+      await transceiver.sender.replaceTrack(track);
+    } catch (e) {
+      logger.error("[RTVI Transport] Failed to send local track", e);
+    }
+  }
+
   async initDevices() {
+    // Media is session-scoped once connect() runs (the media manager starts
+    // it there and tears it down on disconnect), so there is nothing for
+    // initDevices() to set up; enableMic() / enableCam() are the live
+    // controls. PipecatClient.initDevices() already skips the call in a
+    // session; this guards direct callers the same way.
+    if (
+      ["connecting", "connected", "ready", "disconnecting"].includes(this.state)
+    ) {
+      logger.warn(
+        `[RTVI Transport] initDevices() ignored while ${this.state}. Use enableMic() / enableCam() during a session.`
+      );
+      return;
+    }
     this.state = "initializing";
     await this.mediaManager.initialize();
     this.state = "initialized";

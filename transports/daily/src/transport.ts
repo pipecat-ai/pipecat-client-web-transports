@@ -81,7 +81,7 @@ class DailyCallWrapper {
               errMsg = `Calls to preAuth() are disabled. Please use Transport.preAuth()`;
               break;
             case "startCamera":
-              errMsg = `Calls to startCamera() are disabled. Please use PipecatClient.initDevices()`;
+              errMsg = `Calls to startCamera() are disabled. Please use PipecatClient.enableMic() / enableCam() or PipecatClient.initDevices()`;
               break;
             case "join":
               errMsg = `Calls to join() are disabled. Please use PipecatClient.connect()`;
@@ -145,8 +145,21 @@ export class DailyTransport extends Transport {
   // otherwise always observe the pre-toggle value. These fields are updated
   // synchronously in enableMic/enableCam and in handleTrackStarted/
   // handleTrackStopped, before those callbacks fire.
+  //
+  // While media is running they are the truth of the session. While nothing
+  // is running (before the first startCamera()/join(), and again after
+  // _disconnect()) they hold the connect-time flags, i.e. what the next
+  // connect() will do, so a fresh transport and a disconnected one read the
+  // same way.
   private _micEnabled: boolean = true;
   private _camEnabled: boolean = false;
+
+  // Whether daily-js has media running for this session: startCamera() or
+  // join() has resolved and leave() has not run since. daily-js needs one of
+  // those once per session before setLocalAudio() / setLocalVideo() do
+  // anything, so enabling a device with nothing running starts the camera.
+  private _cameraStarted = false;
+  private _startCameraPromise: Promise<void> | null = null;
 
   constructor(opts: DailyTransportConstructorOptions = {}) {
     super();
@@ -343,17 +356,24 @@ export class DailyTransport extends Transport {
     return this._selectedSpeaker;
   }
 
+  // The connect-time flags are _dailyFactoryOptions.startAudioOff /
+  // startVideoOff: the state the mic and cam should be in when a session
+  // starts. Outside a session enableMic() / enableCam() update them, so the
+  // next connect() lands on what the app last asked for. Once connect()
+  // begins they are frozen for that session and the calls are live toggles
+  // only, so a mid-session mute does not leak into the next connect().
+  private get _inSession(): boolean {
+    return ["connecting", "connected", "ready", "disconnecting"].includes(
+      this.state
+    );
+  }
+
   enableMic(enable: boolean) {
-    // Persist the caller's preference so a subsequent connect() picks it
-    // up via initDevices()'s startCamera({ startAudioOff }) call. Without
-    // this, pre-session toggles were silently lost. Apply live only when
-    // joined — pre-session, daily-js can't act on the request because the
-    // call object isn't part of a meeting yet.
-    this._dailyFactoryOptions.startAudioOff = !enable;
     this._micEnabled = enable;
-    if (this._daily.participants()?.local) {
-      this._daily.setLocalAudio(enable);
+    if (!this._inSession) {
+      this._dailyFactoryOptions.startAudioOff = !enable;
     }
+    this._applyEnable("mic", enable);
   }
 
   get isMicEnabled() {
@@ -361,11 +381,93 @@ export class DailyTransport extends Transport {
   }
 
   enableCam(enable: boolean) {
-    this._dailyFactoryOptions.startVideoOff = !enable;
     this._camEnabled = enable;
-    if (this._daily.participants()?.local) {
-      this._daily.setLocalVideo(enable);
+    if (!this._inSession) {
+      this._dailyFactoryOptions.startVideoOff = !enable;
     }
+    this._applyEnable("cam", enable);
+  }
+
+  // With media running this session, a toggle is a live setLocalAudio() /
+  // setLocalVideo(). With nothing running, enabling acquires: startCamera()
+  // with the connect-time flags. That is also what re-attempts a blocked
+  // device, and daily-js re-fires camera-error if it is still blocked.
+  // Disabling with nothing running only records the preference; it never
+  // prompts for a device the app has turned off. While join() is in flight
+  // there is nothing to apply to yet; _connect() applies the toggle once
+  // join() resolves.
+  private _applyEnable(kind: "mic" | "cam", enable: boolean) {
+    if (this._cameraStarted) {
+      if (kind === "mic") this._daily.setLocalAudio(enable);
+      else this._daily.setLocalVideo(enable);
+      return;
+    }
+    if (!enable || this._inSession) return;
+    this._startCamera().catch((e) => {
+      logger.error("[Daily Transport] Failed to start devices", e);
+      this._callbacks.onDeviceError?.(
+        new DeviceError(
+          [kind],
+          "unknown",
+          e instanceof Error ? e.message : String(e)
+        )
+      );
+    });
+  }
+
+  // The once-per-session startCamera() that must precede join() for live
+  // toggles to work. Shared across concurrent callers (enableMic() followed
+  // by enableCam() issues one call), and toggles that arrive while it is in
+  // flight are applied once it resolves. Reports the resulting device
+  // selection so the client learns what was acquired.
+  private _startCamera(): Promise<void> {
+    if (this._startCameraPromise) return this._startCameraPromise;
+    this._startCameraPromise = (async () => {
+      const requested = this._requestedState();
+      try {
+        const infos = await this._daily.startCamera(this._dailyFactoryOptions);
+        this._cameraStarted = true;
+        this._selectedCam = infos.camera;
+        this._selectedMic = infos.mic;
+        this._selectedSpeaker = infos.speaker;
+        this._applyTogglesSince(requested);
+        await this._reportDevices();
+      } finally {
+        this._startCameraPromise = null;
+      }
+    })();
+    return this._startCameraPromise;
+  }
+
+  private _requestedState(): { mic: boolean; cam: boolean } {
+    return { mic: this._micEnabled, cam: this._camEnabled };
+  }
+
+  // Toggles that arrived while startCamera() or join() was in flight had
+  // nothing to apply to; apply them now that media is running.
+  private _applyTogglesSince(requested: { mic: boolean; cam: boolean }) {
+    if (this._micEnabled !== requested.mic) {
+      this._daily.setLocalAudio(this._micEnabled);
+    }
+    if (this._camEnabled !== requested.cam) {
+      this._daily.setLocalVideo(this._camEnabled);
+    }
+  }
+
+  private async _reportDevices() {
+    const { devices } = await this._daily.enumerateDevices();
+    const cams = devices.filter((d) => d.kind === "videoinput");
+    const mics = devices.filter((d) => d.kind === "audioinput");
+    const speakers = devices.filter((d) => d.kind === "audiooutput");
+
+    this._callbacks.onAvailableCamsUpdated?.(cams);
+    this._callbacks.onAvailableMicsUpdated?.(mics);
+    this._callbacks.onAvailableSpeakersUpdated?.(speakers);
+    this._callbacks.onCamUpdated?.(this._selectedCam as MediaDeviceInfo);
+    this._callbacks.onMicUpdated?.(this._selectedMic as MediaDeviceInfo);
+    this._callbacks.onSpeakerUpdated?.(
+      this._selectedSpeaker as MediaDeviceInfo
+    );
   }
 
   get isCamEnabled() {
@@ -439,28 +541,32 @@ export class DailyTransport extends Transport {
     await this._daily.preAuth(dailyCallOptions);
   }
 
+  // Start media for this session per the connect-time flags and report the
+  // devices. Safe to call any number of times: with media already running it
+  // only re-reports. Inside a session it leaves the transport state alone.
   async initDevices() {
     if (!this._daily) {
       throw new RTVIError("Transport instance not initialized");
     }
 
+    // Media is session-scoped once join() runs: there is nothing for
+    // initDevices() to set up, and enableMic() / enableCam() are the live
+    // controls. PipecatClient.initDevices() already skips the call in a
+    // session; this guards direct callers the same way.
+    if (this._inSession) {
+      logger.warn(
+        `[Daily Transport] initDevices() ignored while ${this.state}. Use enableMic() / enableCam() during a session.`
+      );
+      return;
+    }
+
     this.state = "initializing";
 
-    const infos = await this._daily.startCamera(this._dailyFactoryOptions);
-    const { devices } = await this._daily.enumerateDevices();
-    const cams = devices.filter((d) => d.kind === "videoinput");
-    const mics = devices.filter((d) => d.kind === "audioinput");
-    const speakers = devices.filter((d) => d.kind === "audiooutput");
-    this._selectedCam = infos.camera;
-    this._selectedMic = infos.mic;
-    this._selectedSpeaker = infos.speaker;
-
-    this._callbacks.onAvailableCamsUpdated?.(cams);
-    this._callbacks.onAvailableMicsUpdated?.(mics);
-    this._callbacks.onAvailableSpeakersUpdated?.(speakers);
-    this._callbacks.onCamUpdated?.(infos.camera as MediaDeviceInfo);
-    this._callbacks.onMicUpdated?.(infos.mic as MediaDeviceInfo);
-    this._callbacks.onSpeakerUpdated?.(infos.speaker as MediaDeviceInfo);
+    if (this._cameraStarted) {
+      await this._reportDevices();
+    } else {
+      await this._startCamera();
+    }
 
     await this.startAudioLevelObservers();
 
@@ -525,9 +631,19 @@ export class DailyTransport extends Transport {
 
     this.state = "connecting";
 
+    // join() starts media per the connect-time flags when startCamera() has
+    // not already, and leaves media already running as it is. From here the
+    // flags are frozen for the session. Media counts as started from the
+    // moment join() begins: daily-js queues a setLocalAudio() /
+    // setLocalVideo() issued while join() is in flight and lands on it, so a
+    // toggle during join goes straight through rather than being replayed.
+    this._cameraStarted = true;
     try {
       await this._daily.join(this._dailyFactoryOptions);
     } catch (e) {
+      // No cleanup here: PipecatClient responds to a connect failure by
+      // calling disconnect(), and _disconnect() does the session teardown in
+      // one place.
       logger.error("Failed to join room", e);
       this.state = "error";
       throw new TransportStartError();
@@ -658,6 +774,13 @@ export class DailyTransport extends Transport {
     this.stopRecording();
 
     await this._daily.leave();
+
+    // leave() tears down daily-js media. Nothing is running now, so the live
+    // state goes back to the connect-time flags; see the note on _micEnabled
+    // / _camEnabled above.
+    this._cameraStarted = false;
+    this._micEnabled = !this._dailyFactoryOptions.startAudioOff;
+    this._camEnabled = !this._dailyFactoryOptions.startVideoOff;
   }
 
   public sendMessage(message: RTVIMessage) {
@@ -856,7 +979,9 @@ export class DailyTransport extends Transport {
           : undefined
       );
     } else {
-      if (ev.participant?.local) {
+      // Tracks also stop when leave() tears the session down; by then the
+      // live state has been reset to the connect-time flags, so leave it.
+      if (ev.participant?.local && this._cameraStarted) {
         if (ev.track.kind === "audio") {
           this._micEnabled = false;
         } else if (ev.track.kind === "video") {
