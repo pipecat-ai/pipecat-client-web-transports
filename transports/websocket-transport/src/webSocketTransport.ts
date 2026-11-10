@@ -108,13 +108,22 @@ export class WebSocketTransport extends Transport {
           );
         }
       } else if (camelKey === "token") {
+        // A start endpoint reports "no token" as null (the pipecat runner
+        // does this when it is not started with --ws-auth token).
+        if (val === null || val === undefined) {
+          continue;
+        }
         if (typeof val !== "string") {
           throw new RTVIError(
             `Invalid type for token: expected string, got ${typeof val}`
           );
         }
       } else {
-        throw new RTVIError(`Unrecognized connection parameter: ${key}.`);
+        // Start endpoints return more than this transport consumes
+        // (sessionId, fileUploadUrl, ...). Ignore the rest rather than
+        // failing the connect, as the other transports do.
+        logger.warn(`Unrecognized connection parameter: ${key}. Ignored.`);
+        continue;
       }
       fixedParams[camelKey as keyof WebSocketTransportOptions] = val;
     }
