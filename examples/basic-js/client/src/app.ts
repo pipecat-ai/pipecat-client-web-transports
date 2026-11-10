@@ -651,13 +651,17 @@ function markSelected(select: HTMLSelectElement, device: MaybeDevice) {
 async function refreshDevices() {
   if (!client) return;
   try {
+    // Skip device kinds the transport rules out; their getters may throw.
+    const support = client.mediaSupport;
+    const micOk = support.mic !== false;
+    const camOk = support.cam !== false;
     const [mics, cams, speakers] = await Promise.all([
-      client.getAllMics(),
-      client.getAllCams(),
+      micOk ? client.getAllMics() : Promise.resolve([] as MediaDeviceInfo[]),
+      camOk ? client.getAllCams() : Promise.resolve([] as MediaDeviceInfo[]),
       client.getAllSpeakers(),
     ]);
-    fillDeviceSelect(ui.micSelect, mics, client.selectedMic);
-    fillDeviceSelect(ui.camSelect, cams, client.selectedCam);
+    fillDeviceSelect(ui.micSelect, mics, micOk ? client.selectedMic : undefined);
+    fillDeviceSelect(ui.camSelect, cams, camOk ? client.selectedCam : undefined);
     fillDeviceSelect(ui.speakerSelect, speakers, client.selectedSpeaker);
   } catch (e) {
     logError("refreshDevices", e);

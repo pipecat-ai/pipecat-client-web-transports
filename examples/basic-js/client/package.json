@@ -5,12 +5,12 @@
   "description": "Bare-bones dev/test page for connecting a PipecatClient over any transport in this repo. Not published.",
   "source": "src/index.html",
   "scripts": {
-    "dev": "parcel serve src/index.html --dist-dir dist --port 1234",
+    "dev": "parcel serve src/index.html --dist-dir dist --port 1234 --no-cache",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist .parcel-cache"
   },
   "devDependencies": {
-    "@pipecat-ai/client-js": "file:../../../../client/client-js",
+    "@pipecat-ai/client-js": "~1.16.0",
     "@pipecat-ai/daily-transport": "file:../../../transports/daily",
     "@pipecat-ai/livekit-transport": "file:../../../transports/livekit-transport",
     "@pipecat-ai/moq-transport": "file:../../../transports/moq-transport",
