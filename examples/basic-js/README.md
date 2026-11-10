@@ -5,8 +5,8 @@ this repo. It exists purely for development and manual testing of the
 transports; nothing here is published and it is not a reference for how to
 build an app.
 
-- `client/` is a plain-JS page served by Parcel. It compiles the transports
-  straight from their `src/`, so transport edits hot-reload.
+- `client/` is a TypeScript page served by Parcel. It compiles the
+  transports straight from their `src/`, so transport edits hot-reload.
 - `bot/` is a minimal Pipecat bot that runs under the Pipecat development
   runner and exposes `POST /start` for all five transports.
 
@@ -45,6 +45,16 @@ npm run dev -w @pipecat-ai-transports/example-basic-js
 
 Then open http://localhost:1234, pick a transport, click **Create client**,
 then **Connect**.
+
+To type-check the page:
+
+```bash
+npm run typecheck -w @pipecat-ai-transports/example-basic-js
+```
+
+Parcel bundles the transports from `src/`, but the type check reads each
+package's built `dist/*.d.ts`, so run `npm run build` at the repo root once
+(and again after changing a transport's public types).
 
 What the page gives you:
 

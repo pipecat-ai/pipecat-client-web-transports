@@ -6,6 +6,7 @@
   "source": "src/index.html",
   "scripts": {
     "dev": "parcel serve src/index.html --dist-dir dist --port 1234",
+    "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist .parcel-cache"
   },
   "devDependencies": {

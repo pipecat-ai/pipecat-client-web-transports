@@ -2,14 +2,35 @@
 // this repo. Everything interesting is exposed on `window` so you can drive
 // it from the devtools console: `client`, `transport`, `RTVIEvent`, `LogLevel`.
 
-import { LogLevel, PipecatClient, RTVIEvent } from "@pipecat-ai/client-js";
-import { DailyTransport } from "@pipecat-ai/daily-transport";
-import { LiveKitTransport } from "@pipecat-ai/livekit-transport";
-import { MoqTransport } from "@pipecat-ai/moq-transport";
-import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
+import {
+  BotOutputData,
+  LogLevel,
+  MediaSupport,
+  Participant,
+  PipecatClient,
+  RTVIEvent,
+  RTVIMessage,
+  Transport,
+  TransportState,
+  UserInputData,
+} from "@pipecat-ai/client-js";
+import {
+  DailyTransport,
+  DailyTransportConstructorOptions,
+} from "@pipecat-ai/daily-transport";
+import {
+  LiveKitTransport,
+  LiveKitTransportConstructorOptions,
+} from "@pipecat-ai/livekit-transport";
+import { MoqTransport, MoqTransportOptions } from "@pipecat-ai/moq-transport";
+import {
+  SmallWebRTCTransport,
+  SmallWebRTCTransportConstructorOptions,
+} from "@pipecat-ai/small-webrtc-transport";
 import {
   WavMediaManager,
   WebSocketTransport,
+  WebSocketTransportConstructorOptions,
 } from "@pipecat-ai/websocket-transport";
 
 // ---------------------------------------------------------------------------
@@ -25,11 +46,32 @@ import {
 // ---------------------------------------------------------------------------
 const START_ENDPOINT = "http://localhost:7860/start";
 
-// Media manager choices for the transports that take one. Each entry is a
-// factory given the parsed constructor options; `null` means "leave it to the
-// transport", which picks DailyMediaManager.
+// What the JSON textareas can hold. Constructor options stay untyped until
+// handed to a specific transport's constructor; the /start request body is
+// whatever the bot accepts.
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+type JsonObject = { [key: string]: Json };
+type CtorOptions = Record<string, unknown>;
+
+// Media manager choices for the transports that take one. `create` is a
+// factory given the parsed constructor options; `null` means "leave it to
+// the transport", which picks DailyMediaManager.
+interface MediaManagerChoice {
+  label: string;
+  create: ((ctorOpts: CtorOptions) => WavMediaManager) | null;
+}
+
+interface TransportDef {
+  label: string;
+  create: (opts: CtorOptions) => Transport;
+  mediaManagers?: Record<string, MediaManagerChoice>;
+  ctorDefaults: CtorOptions;
+  startEndpoint: string;
+  requestDefaults: Record<string, unknown>;
+}
+
 const DEFAULT_MEDIA_MANAGER = "default";
-const WEBSOCKET_MEDIA_MANAGERS = {
+const WEBSOCKET_MEDIA_MANAGERS: Record<string, MediaManagerChoice> = {
   [DEFAULT_MEDIA_MANAGER]: {
     label: "DailyMediaManager (default)",
     create: null,
@@ -39,10 +81,15 @@ const WEBSOCKET_MEDIA_MANAGERS = {
     // Mirror the chunk size / sample rate the transport uses for its default
     // DailyMediaManager so the bot sees the same audio format either way.
     create: (ctorOpts) =>
-      new WavMediaManager(512, ctorOpts.recorderSampleRate ?? 16_000),
+      new WavMediaManager(
+        512,
+        typeof ctorOpts.recorderSampleRate === "number"
+          ? ctorOpts.recorderSampleRate
+          : 16_000
+      ),
   },
 };
-const SMALLWEBRTC_MEDIA_MANAGERS = {
+const SMALLWEBRTC_MEDIA_MANAGERS: Record<string, MediaManagerChoice> = {
   [DEFAULT_MEDIA_MANAGER]: {
     label: "DailyMediaManager (default)",
     create: null,
@@ -50,10 +97,11 @@ const SMALLWEBRTC_MEDIA_MANAGERS = {
   wav: { label: "WavMediaManager", create: () => new WavMediaManager() },
 };
 
-const TRANSPORTS = {
+const TRANSPORTS: Record<string, TransportDef> = {
   smallwebrtc: {
     label: "SmallWebRTCTransport",
-    create: (opts) => new SmallWebRTCTransport(opts),
+    create: (opts) =>
+      new SmallWebRTCTransport(opts as SmallWebRTCTransportConstructorOptions),
     mediaManagers: SMALLWEBRTC_MEDIA_MANAGERS,
     ctorDefaults: {},
     startEndpoint: START_ENDPOINT,
@@ -61,14 +109,16 @@ const TRANSPORTS = {
   },
   daily: {
     label: "DailyTransport",
-    create: (opts) => new DailyTransport(opts),
+    create: (opts) =>
+      new DailyTransport(opts as DailyTransportConstructorOptions),
     ctorDefaults: {},
     startEndpoint: START_ENDPOINT,
     requestDefaults: { transport: "daily", createDailyRoom: true },
   },
   websocket: {
     label: "WebSocketTransport",
-    create: (opts) => new WebSocketTransport(opts),
+    create: (opts) =>
+      new WebSocketTransport(opts as WebSocketTransportConstructorOptions),
     mediaManagers: WEBSOCKET_MEDIA_MANAGERS,
     ctorDefaults: {},
     startEndpoint: START_ENDPOINT,
@@ -76,14 +126,16 @@ const TRANSPORTS = {
   },
   livekit: {
     label: "LiveKitTransport",
-    create: (opts) => new LiveKitTransport(opts),
+    create: (opts) =>
+      new LiveKitTransport(opts as LiveKitTransportConstructorOptions),
     ctorDefaults: {},
     startEndpoint: START_ENDPOINT,
     requestDefaults: { transport: "livekit" },
   },
   moq: {
     label: "MoqTransport",
-    create: (opts) => new MoqTransport(opts),
+    // relayUrl is required by the type but comes from the JSON textarea.
+    create: (opts) => new MoqTransport(opts as unknown as MoqTransportOptions),
     // relayUrl is required by the constructor; /start overrides it.
     ctorDefaults: { relayUrl: "https://localhost:4443/moq" },
     startEndpoint: START_ENDPOINT,
@@ -94,46 +146,70 @@ const TRANSPORTS = {
 // ---------------------------------------------------------------------------
 // DOM
 // ---------------------------------------------------------------------------
-const $ = (id) => document.getElementById(id);
+function $<T extends HTMLElement>(id: string): T {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`Missing element #${id}`);
+  return el as T;
+}
+
 const ui = {
-  transportSelect: $("transport-select"),
-  mediaManagerLabel: $("media-manager-label"),
-  mediaManagerSelect: $("media-manager-select"),
-  enableMic: $("enable-mic"),
-  enableCam: $("enable-cam"),
-  ctorOptions: $("ctor-options"),
-  createClient: $("create-client"),
-  initDevices: $("init-devices"),
-  transportState: $("transport-state"),
-  micSelect: $("mic-select"),
-  camSelect: $("cam-select"),
-  speakerSelect: $("speaker-select"),
-  toggleMic: $("toggle-mic"),
-  toggleCam: $("toggle-cam"),
-  toggleScreen: $("toggle-screen"),
-  startEndpoint: $("start-endpoint"),
-  connectParams: $("connect-params"),
-  connect: $("connect"),
-  disconnect: $("disconnect"),
-  sendText: $("send-text"),
-  sendTextBtn: $("send-text-btn"),
-  meterLocal: $("meter-local"),
-  meterBot: $("meter-bot"),
-  localVideo: $("local-video"),
-  botVideo: $("bot-video"),
-  botAudio: $("bot-audio"),
-  clearTranscript: $("clear-transcript"),
-  transcript: $("transcript"),
+  transportSelect: $<HTMLSelectElement>("transport-select"),
+  mediaManagerLabel: $<HTMLLabelElement>("media-manager-label"),
+  mediaManagerSelect: $<HTMLSelectElement>("media-manager-select"),
+  enableMic: $<HTMLInputElement>("enable-mic"),
+  enableCam: $<HTMLInputElement>("enable-cam"),
+  ctorOptions: $<HTMLTextAreaElement>("ctor-options"),
+  createClient: $<HTMLButtonElement>("create-client"),
+  initDevices: $<HTMLButtonElement>("init-devices"),
+  transportState: $<HTMLSpanElement>("transport-state"),
+  micSelect: $<HTMLSelectElement>("mic-select"),
+  camSelect: $<HTMLSelectElement>("cam-select"),
+  speakerSelect: $<HTMLSelectElement>("speaker-select"),
+  toggleMic: $<HTMLButtonElement>("toggle-mic"),
+  toggleCam: $<HTMLButtonElement>("toggle-cam"),
+  toggleScreen: $<HTMLButtonElement>("toggle-screen"),
+  startEndpoint: $<HTMLInputElement>("start-endpoint"),
+  connectParams: $<HTMLTextAreaElement>("connect-params"),
+  connect: $<HTMLButtonElement>("connect"),
+  disconnect: $<HTMLButtonElement>("disconnect"),
+  sendText: $<HTMLInputElement>("send-text"),
+  sendTextBtn: $<HTMLButtonElement>("send-text-btn"),
+  meterLocal: $<HTMLDivElement>("meter-local"),
+  meterBot: $<HTMLDivElement>("meter-bot"),
+  localVideo: $<HTMLVideoElement>("local-video"),
+  botVideo: $<HTMLVideoElement>("bot-video"),
+  botAudio: $<HTMLAudioElement>("bot-audio"),
+  clearTranscript: $<HTMLButtonElement>("clear-transcript"),
+  transcript: $<HTMLDivElement>("transcript"),
 };
 
-let client = null;
-let transport = null;
+let client: PipecatClient | null = null;
+let transport: Transport | null = null;
 let screenShareOn = false;
+
+// Console handles for manual debugging.
+declare global {
+  interface Window {
+    client?: PipecatClient;
+    transport?: Transport;
+    mediaManager?: WavMediaManager;
+    RTVIEvent: typeof RTVIEvent;
+    LogLevel: typeof LogLevel;
+    PipecatClient: typeof PipecatClient;
+    transports: {
+      DailyTransport: typeof DailyTransport;
+      LiveKitTransport: typeof LiveKitTransport;
+      MoqTransport: typeof MoqTransport;
+      SmallWebRTCTransport: typeof SmallWebRTCTransport;
+      WebSocketTransport: typeof WebSocketTransport;
+    };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Logging
 // ---------------------------------------------------------------------------
-function fmt(value) {
+function fmt(value: unknown): string {
   if (value === undefined) return "";
   if (value instanceof MediaStreamTrack) {
     return `MediaStreamTrack(${value.kind}, ${value.id.slice(0, 8)}…)`;
@@ -148,11 +224,11 @@ function fmt(value) {
 
 // The page's own messages go to the console next to the client's DEBUG
 // output, so there is one place to watch.
-function log(tag, ...args) {
+function log(tag: string, ...args: unknown[]) {
   console.log(`[example:${tag}]`, ...args.map(fmt));
 }
 
-function logError(where, err) {
+function logError(where: string, err: unknown) {
   console.error(`[example:${where}]`, err);
 }
 
@@ -177,18 +253,47 @@ function logError(where, err) {
 // drop any pending segments between them. `bot-interrupted` does the same
 // for the segment being spoken and every pending segment after it.
 // ---------------------------------------------------------------------------
-// { el, finalsEl, interimEl, finals: string[] }
-let userTurn = null;
+interface UserTurn {
+  el: HTMLDivElement;
+  finalsEl: HTMLSpanElement;
+  interimEl: HTMLSpanElement;
+  finals: string[];
+}
+
+type SegmentStatus = "new" | "in-progress" | "completed" | "interrupted";
+
+interface Segment {
+  id: number;
+  el: HTMLSpanElement;
+  spokenEl: HTMLElement;
+  restEl: HTMLSpanElement;
+  text: string;
+  status: SegmentStatus;
+  turn: BotTurn;
+}
+
+interface BotTurn {
+  el: HTMLDivElement;
+  textEl: HTMLSpanElement;
+  order: Segment[];
+  active: Segment | null;
+}
+
+let userTurn: UserTurn | null = null;
 // The bot line new segments are appended to, or null when the next segment
-// should start a line: { el, textEl, order: seg[], active: seg | null }.
-let botTurn = null;
+// should start a line.
+let botTurn: BotTurn | null = null;
 // Every segment by id, across lines, so progress updates and interruptions
 // still find a line after a user turn has closed it for appends.
-const botSegments = new Map();
+const botSegments = new Map<number, Segment>();
 // The line holding the segment currently being spoken, if any.
-let speakingBotTurn = null;
+let speakingBotTurn: BotTurn | null = null;
 
-function addTranscriptEntry(who, text, cls = "") {
+function addTranscriptEntry(
+  who: "user" | "bot",
+  text: string,
+  cls = ""
+): HTMLDivElement {
   const entry = document.createElement("div");
   entry.className = `entry ${who} ${cls}`.trim();
   const whoEl = document.createElement("span");
@@ -203,10 +308,10 @@ function addTranscriptEntry(who, text, cls = "") {
   return entry;
 }
 
-function ensureUserTurn() {
+function ensureUserTurn(): UserTurn {
   if (userTurn) return userTurn;
   const el = addTranscriptEntry("user", "");
-  const textEl = el.querySelector(".text");
+  const textEl = el.querySelector<HTMLSpanElement>(".text")!;
   const finalsEl = document.createElement("span");
   finalsEl.className = "finals";
   const interimEl = document.createElement("span");
@@ -219,7 +324,7 @@ function ensureUserTurn() {
   return userTurn;
 }
 
-function handleUserInput(data) {
+function handleUserInput(data: UserInputData) {
   const text = (data.text ?? "").trim();
   const turn = ensureUserTurn();
   if (data.final === false) {
@@ -236,7 +341,7 @@ function handleUserInput(data) {
 function closeUserTurn() {
   if (!userTurn) return;
   // Promote a dangling interim rather than lose it.
-  const interim = userTurn.interimEl.textContent.trim();
+  const interim = (userTurn.interimEl.textContent ?? "").trim();
   if (interim) {
     userTurn.finals.push(interim);
     userTurn.finalsEl.textContent = userTurn.finals.join(" ");
@@ -245,12 +350,12 @@ function closeUserTurn() {
   userTurn = null;
 }
 
-function ensureBotTurn() {
+function ensureBotTurn(): BotTurn {
   if (botTurn) return botTurn;
   const el = addTranscriptEntry("bot", "");
   botTurn = {
     el,
-    textEl: el.querySelector(".text"),
+    textEl: el.querySelector<HTMLSpanElement>(".text")!,
     order: [],
     active: null,
   };
@@ -259,7 +364,7 @@ function ensureBotTurn() {
 
 // Find or create the segment, keyed by segment_id. A segment seen first as
 // "in-progress" (client created mid-utterance) is created on the fly.
-function getSegment(id, text) {
+function getSegment(id: number, text: string): Segment {
   let seg = botSegments.get(id);
   if (seg) return seg;
   const turn = ensureBotTurn();
@@ -280,7 +385,7 @@ function getSegment(id, text) {
   return seg;
 }
 
-function setSegmentProgress(seg, accumulated) {
+function setSegmentProgress(seg: Segment, accumulated: string) {
   // accumulated_text is a prefix of the segment text; split on its length so
   // the rendered text never drifts from what was announced as "new".
   const n = seg.text.startsWith(accumulated)
@@ -290,7 +395,7 @@ function setSegmentProgress(seg, accumulated) {
   seg.restEl.textContent = seg.text.slice(n);
 }
 
-function removeSegment(turn, seg) {
+function removeSegment(turn: BotTurn, seg: Segment) {
   const prev = seg.el.previousSibling;
   if (prev?.nodeType === Node.TEXT_NODE) prev.remove(); // the joining space
   seg.el.remove();
@@ -301,7 +406,7 @@ function removeSegment(turn, seg) {
 // The segment being spoken was cut off: keep only what was spoken, and drop
 // the pending segments after it up to (not including) `until`, or all of
 // them when `until` is null.
-function interruptSegments(turn, until = null) {
+function interruptSegments(turn: BotTurn, until: Segment | null = null) {
   const active = turn.active;
   if (active && active.status === "in-progress") {
     active.restEl.textContent = "";
@@ -316,7 +421,7 @@ function interruptSegments(turn, until = null) {
   turn.active = null;
 }
 
-function handleBotOutput(data) {
+function handleBotOutput(data: BotOutputData) {
   const text = data.text ?? "";
   const id = data.segment_id;
   // Older bots send plain text with no segment lifecycle: one line each.
@@ -383,15 +488,22 @@ function clearTranscript() {
 // ---------------------------------------------------------------------------
 // Form persistence (per transport) so you don't retype URLs every reload.
 // ---------------------------------------------------------------------------
-function storageKey(transportKey) {
+interface SavedForm {
+  mediaManager?: string;
+  ctorOptions?: string;
+  startEndpoint?: string;
+  connectParams?: string;
+}
+
+function storageKey(transportKey: string) {
   return `pipecat-transports-example:${transportKey}`;
 }
 
-function loadForm(transportKey) {
+function loadForm(transportKey: string) {
   const def = TRANSPORTS[transportKey];
-  let saved = null;
+  let saved: SavedForm | null = null;
   try {
-    saved = JSON.parse(localStorage.getItem(storageKey(transportKey)));
+    saved = JSON.parse(localStorage.getItem(storageKey(transportKey)) ?? "");
   } catch {
     /* ignore */
   }
@@ -403,7 +515,7 @@ function loadForm(transportKey) {
     saved?.connectParams ?? JSON.stringify(def.requestDefaults, null, 2);
 }
 
-function fillMediaManagerSelect(def, selected) {
+function fillMediaManagerSelect(def: TransportDef, selected?: string) {
   ui.mediaManagerSelect.innerHTML = "";
   if (!def.mediaManagers) {
     ui.mediaManagerLabel.hidden = true;
@@ -422,14 +534,15 @@ function fillMediaManagerSelect(def, selected) {
 
 function saveForm() {
   try {
+    const form: SavedForm = {
+      mediaManager: ui.mediaManagerSelect.value,
+      ctorOptions: ui.ctorOptions.value,
+      startEndpoint: ui.startEndpoint.value,
+      connectParams: ui.connectParams.value,
+    };
     localStorage.setItem(
       storageKey(ui.transportSelect.value),
-      JSON.stringify({
-        mediaManager: ui.mediaManagerSelect.value,
-        ctorOptions: ui.ctorOptions.value,
-        startEndpoint: ui.startEndpoint.value,
-        connectParams: ui.connectParams.value,
-      })
+      JSON.stringify(form)
     );
     localStorage.setItem(
       "pipecat-transports-example:transport",
@@ -440,34 +553,33 @@ function saveForm() {
   }
 }
 
-function parseJSON(text, label) {
+function parseJSON(text: string, label: string): JsonObject | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   try {
     return JSON.parse(trimmed);
   } catch (e) {
-    throw new Error(`${label} is not valid JSON: ${e.message}`);
+    throw new Error(`${label} is not valid JSON: ${(e as Error).message}`);
   }
 }
 
 // ---------------------------------------------------------------------------
 // UI state
 // ---------------------------------------------------------------------------
-function setState(state) {
+function setState(state: TransportState | "no client") {
   ui.transportState.textContent = state;
   ui.transportState.dataset.state = state;
 }
 
 function refreshButtons() {
   const haveClient = !!client;
-  const state = transport?.state ?? "disconnected";
-  const connected = ["connected", "ready"].includes(state);
-  const busy = [
-    "initializing",
-    "authenticating",
-    "connecting",
-    "disconnecting",
-  ].includes(state);
+  const state: TransportState = transport?.state ?? "disconnected";
+  const connected = state === "connected" || state === "ready";
+  const busy =
+    state === "initializing" ||
+    state === "authenticating" ||
+    state === "connecting" ||
+    state === "disconnecting";
 
   ui.initDevices.disabled = !haveClient || busy;
   ui.connect.disabled = !haveClient || connected || busy;
@@ -478,7 +590,7 @@ function refreshButtons() {
   // client.mediaSupport says what the transport / media manager can capture.
   // `false` rules a kind out; a missing key means "unknown", which is
   // treated as supported so the buttons stay usable while it settles.
-  const support = haveClient ? client.mediaSupport : {};
+  const support: MediaSupport = client ? client.mediaSupport : {};
   const micOk = support.mic !== false;
   const camOk = support.cam !== false;
   const screenOk = support.screenShare !== false;
@@ -490,8 +602,9 @@ function refreshButtons() {
   ui.toggleCam.disabled = !haveClient || !camOk;
   ui.toggleScreen.disabled = !connected || !screenOk;
 
-  const stateLabel = (ok, on) => (ok ? (on ? "on" : "off") : "unsupported");
-  if (haveClient) {
+  const stateLabel = (ok: boolean, on: boolean) =>
+    ok ? (on ? "on" : "off") : "unsupported";
+  if (client) {
     ui.toggleMic.textContent = `Mic: ${stateLabel(micOk, client.isMicEnabled)}`;
     ui.toggleCam.textContent = `Cam: ${stateLabel(camOk, client.isCamEnabled)}`;
   } else {
@@ -501,7 +614,14 @@ function refreshButtons() {
   ui.toggleScreen.textContent = `Screen share: ${stateLabel(screenOk, screenShareOn)}`;
 }
 
-function fillDeviceSelect(select, devices, selected) {
+// `selectedMic` & co. return `{}` when nothing is selected yet.
+type MaybeDevice = { deviceId?: string } | undefined;
+
+function fillDeviceSelect(
+  select: HTMLSelectElement,
+  devices: MediaDeviceInfo[],
+  selected: MaybeDevice
+) {
   select.innerHTML = "";
   if (!devices.length) {
     const opt = document.createElement("option");
@@ -519,7 +639,7 @@ function fillDeviceSelect(select, devices, selected) {
   if (selected?.deviceId) select.value = selected.deviceId;
 }
 
-function markSelected(select, device) {
+function markSelected(select: HTMLSelectElement, device: MaybeDevice) {
   if (
     device?.deviceId &&
     select.querySelector(`option[value="${device.deviceId}"]`)
@@ -547,17 +667,20 @@ async function refreshDevices() {
 // ---------------------------------------------------------------------------
 // Media elements
 // ---------------------------------------------------------------------------
-function attachTrack(el, track) {
+function attachTrack(el: HTMLMediaElement, track: MediaStreamTrack) {
   el.srcObject = new MediaStream([track]);
 }
 
-function detachTrack(el, track) {
+function detachTrack(el: HTMLMediaElement, track?: MediaStreamTrack) {
   const stream = el.srcObject;
-  if (!stream) return;
+  if (!(stream instanceof MediaStream)) return;
   if (!track || stream.getTracks().includes(track)) el.srcObject = null;
 }
 
-function handleTrackStarted(track, participant) {
+function handleTrackStarted(
+  track: MediaStreamTrack,
+  participant?: Participant
+) {
   const isLocal = !!participant?.local;
   if (isLocal) {
     if (track.kind === "video") attachTrack(ui.localVideo, track);
@@ -572,7 +695,10 @@ function handleTrackStarted(track, participant) {
   } else if (track.kind === "video") attachTrack(ui.botVideo, track);
 }
 
-function handleTrackStopped(track, participant) {
+function handleTrackStopped(
+  track: MediaStreamTrack,
+  participant?: Participant
+) {
   if (participant?.local) {
     if (track.kind === "video") detachTrack(ui.localVideo, track);
     else if (track.kind === "audio") detachMeter("local");
@@ -601,32 +727,52 @@ function clearMedia() {
 // websocket transport on its default media manager) only get the
 // bot-started/stopped-speaking outline.
 // ---------------------------------------------------------------------------
-const meters = {
+type MeterKey = "local" | "bot";
+
+interface Meter {
+  el: HTMLElement;
+  analyser: AnalyserNode | null;
+  srcNode: MediaStreamAudioSourceNode | null;
+  data: Float32Array<ArrayBuffer> | null;
+  level: number;
+  source: string;
+}
+
+const meters: Record<MeterKey, Meter> = {
   local: {
     el: ui.meterLocal,
     analyser: null,
     srcNode: null,
+    data: null,
     level: 0,
     source: "",
   },
-  bot: { el: ui.meterBot, analyser: null, srcNode: null, level: 0, source: "" },
+  bot: {
+    el: ui.meterBot,
+    analyser: null,
+    srcNode: null,
+    data: null,
+    level: 0,
+    source: "",
+  },
 };
-let audioCtx = null;
+let audioCtx: AudioContext | null = null;
 let meterRaf = 0;
 
-function setMeterSource(which, source) {
+function setMeterSource(which: MeterKey, source: string) {
   const m = meters[which];
   m.source = source;
-  m.el.querySelector(".meter-source").textContent = source;
+  m.el.querySelector(".meter-source")!.textContent = source;
 }
 
-function setMeterLevel(which, level) {
+function setMeterLevel(which: MeterKey, level: number) {
   const m = meters[which];
   m.level = Math.max(0, Math.min(1, level));
-  m.el.querySelector(".meter-fill").style.width = `${m.level * 100}%`;
+  m.el.querySelector<HTMLElement>(".meter-fill")!.style.width =
+    `${m.level * 100}%`;
 }
 
-function attachMeter(which, track) {
+function attachMeter(which: MeterKey, track: MediaStreamTrack | undefined) {
   if (!track || track.kind !== "audio") return;
   const m = meters[which];
   if (m.srcNode?.mediaStream.getTracks()[0] === track) return;
@@ -646,12 +792,13 @@ function attachMeter(which, track) {
   }
 }
 
-function detachMeter(which) {
+function detachMeter(which: MeterKey) {
   const m = meters[which];
   m.srcNode?.disconnect();
   m.analyser?.disconnect();
   m.srcNode = null;
   m.analyser = null;
+  m.data = null;
   setMeterSource(which, "");
   setMeterLevel(which, 0);
   m.el.classList.remove("speaking");
@@ -660,9 +807,9 @@ function detachMeter(which) {
 function tickMeters() {
   meterRaf = 0;
   let active = false;
-  for (const which of Object.keys(meters)) {
+  for (const which of Object.keys(meters) as MeterKey[]) {
     const m = meters[which];
-    if (!m.analyser) continue;
+    if (!m.analyser || !m.data) continue;
     active = true;
     // Event-fed meters keep the loop alive for the analyser teardown but
     // leave the bar to the events.
@@ -714,14 +861,14 @@ async function destroyClient() {
   refreshButtons();
 }
 
-function wireEvents(c) {
+function wireEvents(c: PipecatClient) {
   c.on(RTVIEvent.UserInput, handleUserInput);
   c.on(RTVIEvent.BotOutput, handleBotOutput);
   c.on(RTVIEvent.BotInterrupted, handleBotInterrupted);
   c.on(RTVIEvent.BotStartedSpeaking, closeUserTurn);
-  c.on(RTVIEvent.Error, (msg) => logError("rtvi error", msg));
+  c.on(RTVIEvent.Error, (msg: RTVIMessage) => logError("rtvi error", msg));
 
-  c.on(RTVIEvent.TransportStateChanged, (state) => {
+  c.on(RTVIEvent.TransportStateChanged, (state: TransportState) => {
     setState(state);
     refreshButtons();
   });
@@ -737,11 +884,11 @@ function wireEvents(c) {
 
   // Event-driven levels. These win over the analyser when both exist, since
   // they overwrite the same bar; the label notes which is feeding it.
-  c.on(RTVIEvent.LocalAudioLevel, (level) => {
+  c.on(RTVIEvent.LocalAudioLevel, (level: number) => {
     if (meters.local.source !== "event") setMeterSource("local", "event");
     setMeterLevel("local", level);
   });
-  c.on(RTVIEvent.RemoteAudioLevel, (level) => {
+  c.on(RTVIEvent.RemoteAudioLevel, (level: number) => {
     if (meters.bot.source !== "event") setMeterSource("bot", "event");
     setMeterLevel("bot", level);
   });
@@ -766,20 +913,26 @@ function wireEvents(c) {
     refreshButtons();
   });
 
-  c.on(RTVIEvent.AvailableMicsUpdated, (mics) =>
+  c.on(RTVIEvent.AvailableMicsUpdated, (mics: MediaDeviceInfo[]) =>
     fillDeviceSelect(ui.micSelect, mics, c.selectedMic)
   );
-  c.on(RTVIEvent.AvailableCamsUpdated, (cams) =>
+  c.on(RTVIEvent.AvailableCamsUpdated, (cams: MediaDeviceInfo[]) =>
     fillDeviceSelect(ui.camSelect, cams, c.selectedCam)
   );
-  c.on(RTVIEvent.AvailableSpeakersUpdated, (speakers) =>
+  c.on(RTVIEvent.AvailableSpeakersUpdated, (speakers: MediaDeviceInfo[]) =>
     fillDeviceSelect(ui.speakerSelect, speakers, c.selectedSpeaker)
   );
-  c.on(RTVIEvent.MicUpdated, (mic) => markSelected(ui.micSelect, mic));
-  c.on(RTVIEvent.CamUpdated, (cam) => markSelected(ui.camSelect, cam));
-  c.on(RTVIEvent.SpeakerUpdated, (spk) => markSelected(ui.speakerSelect, spk));
+  c.on(RTVIEvent.MicUpdated, (mic: MediaDeviceInfo) =>
+    markSelected(ui.micSelect, mic)
+  );
+  c.on(RTVIEvent.CamUpdated, (cam: MediaDeviceInfo) =>
+    markSelected(ui.camSelect, cam)
+  );
+  c.on(RTVIEvent.SpeakerUpdated, (spk: MediaDeviceInfo) =>
+    markSelected(ui.speakerSelect, spk)
+  );
   c.on(RTVIEvent.MediaStateUpdated, refreshButtons);
-  c.on(RTVIEvent.MediaSupportUpdated, (support) => {
+  c.on(RTVIEvent.MediaSupportUpdated, (support: MediaSupport) => {
     log("mediaSupport", support);
     refreshButtons();
   });
@@ -791,7 +944,7 @@ async function createClient() {
 
   const key = ui.transportSelect.value;
   const def = TRANSPORTS[key];
-  let ctorOpts;
+  let ctorOpts: CtorOptions;
   try {
     ctorOpts = parseJSON(ui.ctorOptions.value, "Constructor options") ?? {};
   } catch (e) {
@@ -799,22 +952,24 @@ async function createClient() {
     return;
   }
 
-  let mediaManager = null;
+  let mediaManager: WavMediaManager | null = null;
   const mmKey = def.mediaManagers ? ui.mediaManagerSelect.value : null;
+  const mmChoice = mmKey ? def.mediaManagers?.[mmKey] : undefined;
   try {
-    const mmFactory = def.mediaManagers?.[mmKey]?.create;
-    if (mmFactory) {
-      mediaManager = mmFactory(ctorOpts);
+    if (mmChoice?.create) {
+      mediaManager = mmChoice.create(ctorOpts);
       ctorOpts = { ...ctorOpts, mediaManager };
     }
-    transport = def.create(ctorOpts);
-    client = new PipecatClient({
-      transport,
+    const t = def.create(ctorOpts);
+    const c = new PipecatClient({
+      transport: t,
       enableMic: ui.enableMic.checked,
       enableCam: ui.enableCam.checked,
     });
-    client.setLogLevel(LogLevel.DEBUG);
-    wireEvents(client);
+    c.setLogLevel(LogLevel.DEBUG);
+    wireEvents(c);
+    transport = t;
+    client = c;
   } catch (e) {
     client = null;
     transport = null;
@@ -827,7 +982,7 @@ async function createClient() {
   window.mediaManager = mediaManager ?? undefined;
   log("example", `created ${def.label}`, {
     ctorOpts: { ...ctorOpts, mediaManager: undefined },
-    mediaManager: mmKey ? def.mediaManagers[mmKey].label : "n/a",
+    mediaManager: mmChoice ? mmChoice.label : "n/a",
     enableMic: ui.enableMic.checked,
     enableCam: ui.enableCam.checked,
   });
@@ -850,7 +1005,7 @@ async function initDevices() {
 async function connect() {
   if (!client) return;
   saveForm();
-  let params;
+  let params: JsonObject | undefined;
   try {
     params = parseJSON(ui.connectParams.value, "Connect params");
   } catch (e) {
@@ -858,6 +1013,8 @@ async function connect() {
     return;
   }
   const endpoint = ui.startEndpoint.value.trim();
+  // A new session starts a fresh transcript.
+  clearTranscript();
   try {
     if (endpoint) {
       log("example", "startBotAndConnect", { endpoint, requestData: params });
@@ -919,13 +1076,13 @@ for (const el of [ui.ctorOptions, ui.startEndpoint, ui.connectParams]) {
   el.addEventListener("change", saveForm);
 }
 
-ui.createClient.addEventListener("click", createClient);
-ui.initDevices.addEventListener("click", initDevices);
-ui.connect.addEventListener("click", connect);
-ui.disconnect.addEventListener("click", disconnect);
-ui.sendTextBtn.addEventListener("click", sendText);
+ui.createClient.addEventListener("click", () => void createClient());
+ui.initDevices.addEventListener("click", () => void initDevices());
+ui.connect.addEventListener("click", () => void connect());
+ui.disconnect.addEventListener("click", () => void disconnect());
+ui.sendTextBtn.addEventListener("click", () => void sendText());
 ui.sendText.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") sendText();
+  if (e.key === "Enter") void sendText();
 });
 ui.clearTranscript.addEventListener("click", clearTranscript);
 
