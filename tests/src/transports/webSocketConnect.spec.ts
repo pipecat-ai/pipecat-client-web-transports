@@ -4,8 +4,8 @@
  */
 
 import { WebSocketTransport } from "@pipecat-ai/websocket-transport";
-import { TransportStartError } from "@pipecat-ai/client-js";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { logger, TransportStartError } from "@pipecat-ai/client-js";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createFakeMediaManager } from "../helpers/fakeMediaManager";
 import { buildSpyCallbacks, wireTransport } from "../helpers/observeTransport";
@@ -26,6 +26,10 @@ describe("WebSocketTransport connect url", () => {
         return { connect: async () => {} } as never;
       }
     );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   test("uses only the current token on each connect", async () => {
@@ -51,12 +55,16 @@ describe("WebSocketTransport connect url", () => {
     // Exactly what `POST /start` returns for `{ transport: "websocket" }`
     // when the runner is not using token auth. Everything but wsUrl is
     // either null or not something this transport consumes.
+    const info = vi.spyOn(logger, "info");
+    const warn = vi.spyOn(logger, "warn");
     const params = transport._validateConnectionParams({
       wsUrl: "ws://localhost:7860/ws-client",
       sessionId: "0812c55d-5603-4c29-8060-508f807c62b1",
       token: null,
     });
     expect(params).toEqual({ wsUrl: "ws://localhost:7860/ws-client" });
+    expect(info).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
 
     await transport._connect(params);
 
@@ -78,6 +86,23 @@ describe("WebSocketTransport connect url", () => {
         token: 123,
       })
     ).toThrow(/Invalid type for token/);
+  });
+
+  test("logs a misnamed url key and falls back to the stored url", async () => {
+    await transport._connect({ wsUrl: "wss://bot.example/ws" });
+    const info = vi.spyOn(logger, "info");
+
+    const params = transport._validateConnectionParams({
+      url: "wss://other.example/ws",
+    });
+    expect(params).toEqual({});
+    expect(info).toHaveBeenCalledWith(
+      "Unrecognized connection parameter: url. Ignored."
+    );
+
+    await transport._connect(params);
+
+    expect(urls).toEqual(["wss://bot.example/ws", "wss://bot.example/ws"]);
   });
 
   test("throws TransportStartError when no url is set, even with a token", async () => {

@@ -284,7 +284,10 @@ export class SmallWebRTCTransport extends Transport {
         continue;
       }
       if (!supportedKeys.includes(camelKey)) {
-        logger.warn(`Unrecognized connection parameter: ${key}. Ignored.`);
+        // Start endpoints may return more than this transport consumes
+        // (fileUploadUrl, ...). Ignore the rest rather than failing the
+        // connect. This matches the behavior of other transports.
+        logger.info(`Unrecognized connection parameter: ${key}. Ignored.`);
         continue;
       }
       result[camelKey as keyof SmallWebRTCTransportConnectionOptions] =

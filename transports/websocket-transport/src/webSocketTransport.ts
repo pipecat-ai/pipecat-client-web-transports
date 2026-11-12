@@ -118,11 +118,14 @@ export class WebSocketTransport extends Transport {
             `Invalid type for token: expected string, got ${typeof val}`
           );
         }
+      } else if (camelKey === "sessionId") {
+        // Ignore pipecat runner fields that are expected but not used by this transport.
+        continue;
       } else {
         // Start endpoints return more than this transport consumes
-        // (sessionId, fileUploadUrl, ...). Ignore the rest rather than
-        // failing the connect, as the other transports do.
-        logger.warn(`Unrecognized connection parameter: ${key}. Ignored.`);
+        // (fileUploadUrl, ...). Ignore the rest rather than failing the
+        // connect. This matches the behavior of other transports.
+        logger.info(`Unrecognized connection parameter: ${key}. Ignored.`);
         continue;
       }
       fixedParams[camelKey as keyof WebSocketTransportOptions] = val;
