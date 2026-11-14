@@ -4,5 +4,5 @@
   "transports/livekit-transport": "1.1.2",
   "transports/moq-transport": "0.3.3",
   "transports/small-webrtc-transport": "1.11.2",
-  "transports/websocket-transport": "1.8.2"
+  "transports/websocket-transport": "1.8.3"
 }
