@@ -5,6 +5,13 @@ All notable changes to **Pipecat Small WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.11.2...small-webrtc-transport-v1.11.3) (2026-11-14)
+
+
+### Bug Fixes
+
+* **transports:** log unrecognized connection params at info level ([2f4a53c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/2f4a53cd75656b7bb6e636bdd7c6d8b28ae8d0a8))
+
 ## [1.11.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.11.1...small-webrtc-transport-v1.11.2) (2026-10-29)
 
 ### Other
