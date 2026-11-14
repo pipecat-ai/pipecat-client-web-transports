@@ -157,7 +157,10 @@ export class WavMediaManager extends MediaManager {
     return this._wavStreamPlayer.interrupt();
   }
 
-  bufferBotAudio(data: ArrayBuffer | Int16Array, id?: string): Int16Array {
+  bufferBotAudio(
+    data: ArrayBuffer | Int16Array,
+    id?: string
+  ): Int16Array | undefined {
     return this._wavStreamPlayer.add16BitPCM(data, id);
   }
 
