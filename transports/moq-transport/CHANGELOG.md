@@ -5,6 +5,13 @@ All notable changes to **Pipecat MoqTransport** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.3.3...moq-transport-v0.3.4) (2026-11-16)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump moq-transport libs patch versions ([f54a98c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/f54a98c8d2c517c8bffb783d4cc2f714d273db0e))
+
 ## [0.3.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.3.2...moq-transport-v0.3.3) (2026-11-04)
 
 ### Bug Fixes
