@@ -7,10 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.4](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.3.3...moq-transport-v0.3.4) (2026-11-16)
 
+### Changed
 
-### Miscellaneous Chores
-
-* **deps:** bump moq-transport libs patch versions ([f54a98c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/f54a98c8d2c517c8bffb783d4cc2f714d273db0e))
+* Raised the minimum versions of the Media-over-QUIC client libraries to their latest patch releases to pick up upstream bug fixes: `@moq/hang` `^0.5.4`, `@moq/net` `^0.4.7`, `@moq/publish` `^0.5.6`, and `@moq/watch` `^0.6.6`. ([98b7f73](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/98b7f732f8da96695d0d3dce951f220355bc741f))
 
 ## [0.3.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.3.2...moq-transport-v0.3.3) (2026-11-04)
 
