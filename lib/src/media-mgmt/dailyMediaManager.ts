@@ -26,9 +26,7 @@ export class DailyMediaManager extends MediaManager {
   private _mediaStreamRecorder: MediaStreamRecorder | undefined;
   private _wavStreamPlayer: WavStreamPlayer | undefined;
 
-  private _initialized: boolean;
   private _connected: boolean;
-  private _connectResolve: ((value: void | PromiseLike<void>) => void) | null;
 
   private _currentAudioTrack: MediaStreamTrack | null;
   private _selectedCam: MediaDeviceInfo | Record<string, never> = {};
@@ -36,6 +34,7 @@ export class DailyMediaManager extends MediaManager {
   private _selectedSpeaker: MediaDeviceInfo | Record<string, never> = {};
 
   private _remoteAudioLevelInterval: NodeJS.Timeout | null = null;
+  private _playerStarted: Promise<void> | null = null;
 
   private onTrackStartedCallback?: (event: DailyEventObjectTrack) => void;
   private onTrackStoppedCallback?: (event: DailyEventObjectTrack) => void;
@@ -52,10 +51,8 @@ export class DailyMediaManager extends MediaManager {
     playerSampleRate: number = 24000
   ) {
     super();
-    this._initialized = false;
     this._connected = false;
     this._currentAudioTrack = null;
-    this._connectResolve = null;
     this.onTrackStartedCallback = onTrackStartedCallback;
     this.onTrackStoppedCallback = onTrackStoppedCallback;
     this._recorderChunkSize = recorderChunkSize;
@@ -87,16 +84,34 @@ export class DailyMediaManager extends MediaManager {
     );
     this._daily.on("camera-error", this.handleDeviceError.bind(this));
     this._daily.on("local-audio-level", this._handleLocalAudioLevel.bind(this));
+    this._daily.on("loaded", this._handleLoaded.bind(this));
   }
 
-  async initialize(): Promise<void> {
-    if (this._initialized) {
-      console.warn("DailyMediaManager already initialized");
-      return;
-    }
+  /**
+   * Whether startCamera() has yet to run for this call, so setLocalAudio() /
+   * setLocalVideo() would do nothing.
+   */
+  private get _needsStartCamera(): boolean {
+    return ["new", "left-meeting", "error"].includes(
+      this._daily.meetingState()
+    );
+  }
+
+  /** Resolves on daily-js's next "loaded" event. */
+  private _nextLoaded(): Promise<void> {
+    return new Promise((resolve) =>
+      this._daily.once("loaded", () => resolve())
+    );
+  }
+
+  /**
+   * Start local media with the given devices on, report the devices, and get
+   * the bot-audio player ready.
+   */
+  private async _startCamera(on: { mic: boolean; cam: boolean }) {
     const infos = await this._daily.startCamera({
-      startVideoOff: !this._camEnabled,
-      startAudioOff: !this._micEnabled,
+      startVideoOff: !on.cam,
+      startAudioOff: !on.mic,
       dailyConfig: { useDevicePreferenceCookies: true },
     });
     const { devices } = await this._daily.enumerateDevices();
@@ -117,22 +132,69 @@ export class DailyMediaManager extends MediaManager {
     if (!this._daily.isLocalAudioLevelObserverRunning())
       await this._daily.startLocalAudioLevelObserver(100);
 
-    if (this._wavStreamPlayer) {
-      await this._wavStreamPlayer.connect();
-      if (!this._remoteAudioLevelInterval) {
-        this._remoteAudioLevelInterval = setInterval(() => {
-          const frequencies = this._wavStreamPlayer!.getFrequencies();
-          let aveVal = 0;
-          if (frequencies.values?.length) {
-            aveVal =
-              frequencies.values.reduce((a, c) => a + c, 0) /
-              frequencies.values.length;
-          }
-          this._handleRemoteAudioLevel(aveVal);
-        }, 100);
-      }
+    await this._startPlayer();
+  }
+
+  // setLocalAudio() / setLocalVideo() are ignored while daily-js is
+  // "loading", so a toggle made then is held here and applied on the
+  // "loaded" event. Only the last one counts.
+  private _whenLoaded: { mic?: boolean; cam?: boolean } = {};
+
+  private _handleLoaded() {
+    const { mic, cam } = this._whenLoaded;
+    this._whenLoaded = {};
+    if (mic !== undefined) {
+      this._micEnabled = mic;
+      this._setLocalAudio(mic);
     }
-    this._initialized = true;
+    if (cam !== undefined) {
+      this._camEnabled = cam;
+      this._daily.setLocalVideo(cam);
+    }
+  }
+
+  async initialize(): Promise<void> {
+    // PipecatClient only initializes the devices before anything has started
+    // local media in this session, so this shouldn't happen. If it does,
+    // leave the running devices as they are.
+    if (!this._needsStartCamera) return;
+
+    this._micEnabled = this._options?.enableMic ?? true;
+    this._camEnabled = this._options?.enableCam ?? false;
+    await this._startCamera({ mic: this._micEnabled, cam: this._camEnabled });
+  }
+
+  /**
+   * Get the bot-audio player ready, once per session. Local media starting
+   * does this, so it's usually done (or underway) before connect(); connect()
+   * calls it too, for when nothing started local media first, and every
+   * caller shares the one start.
+   */
+  private _startPlayer(): Promise<void> {
+    if (!this._playerStarted) {
+      const started = this._connectPlayer(
+        () => this._playerStarted === started
+      );
+      this._playerStarted = started;
+    }
+    return this._playerStarted;
+  }
+
+  private async _connectPlayer(isCurrent: () => boolean): Promise<void> {
+    if (!this._wavStreamPlayer) return;
+    await this._wavStreamPlayer.connect();
+    // disconnect() ran while the player was connecting.
+    if (!isCurrent()) return;
+    this._remoteAudioLevelInterval = setInterval(() => {
+      const frequencies = this._wavStreamPlayer!.getFrequencies();
+      let aveVal = 0;
+      if (frequencies.values?.length) {
+        aveVal =
+          frequencies.values.reduce((a, c) => a + c, 0) /
+          frequencies.values.length;
+      }
+      this._handleRemoteAudioLevel(aveVal);
+    }, 100);
   }
 
   async connect(): Promise<void> {
@@ -141,21 +203,26 @@ export class DailyMediaManager extends MediaManager {
       return;
     }
     this._connected = true;
-    if (!this._initialized) {
-      return new Promise((resolve) => {
-        (async () => {
-          this._connectResolve = resolve;
-          await this.initialize();
-          // Without a recorder, handleTrackStarted never fires to resolve this
-          // promise, so resolve here once initialization is complete.
-          if (this._connectResolve && !this._mediaStreamRecorder) {
-            this._connectResolve();
-            this._connectResolve = null;
-          }
-        })();
-      });
+
+    // Keep local media as it is if something already started it. If nothing
+    // did, start it with the devices as _micEnabled / _camEnabled have them:
+    // the flags if nothing changed them, otherwise whatever enableMic() /
+    // enableCam() or disconnect() left. (PipecatClient initializes the
+    // devices first when it wants the flags applied.)
+    if (this._daily.meetingState() === "loading") {
+      await this._nextLoaded();
+    } else if (this._needsStartCamera) {
+      await this._startCamera({ mic: this._micEnabled, cam: this._camEnabled });
     }
-    if (this._micEnabled) {
+
+    await this._startPlayer();
+
+    // A mic track that started before connect() is waiting in the recorder;
+    // one that starts later begins recording from handleTrackStarted.
+    if (
+      this._micEnabled &&
+      this._mediaStreamRecorder?.getStatus() === "paused"
+    ) {
       this._startRecording();
     }
   }
@@ -165,12 +232,18 @@ export class DailyMediaManager extends MediaManager {
       clearInterval(this._remoteAudioLevelInterval);
     }
     this._remoteAudioLevelInterval = null;
-    this._daily.leave();
-    this._currentAudioTrack = null;
-    await this._mediaStreamRecorder?.end();
-    this._wavStreamPlayer?.interrupt();
-    this._initialized = false;
+    this._playerStarted = null;
     this._connected = false;
+    this._whenLoaded = {};
+    await this._daily.leave();
+    // leave() turns the devices off without track-stopped events.
+    this._micEnabled = false;
+    this._camEnabled = false;
+    this._currentAudioTrack = null;
+    if (this._mediaStreamRecorder?.getStatus() !== "ended") {
+      await this._mediaStreamRecorder?.end();
+    }
+    this._wavStreamPlayer?.interrupt();
   }
 
   async interruptBotAudio(): Promise<unknown> {
@@ -260,7 +333,19 @@ export class DailyMediaManager extends MediaManager {
 
   async enableMic(enable: boolean): Promise<void> {
     this._micEnabled = enable;
-    if (!this._daily.participants()?.local) return;
+    if (this._daily.meetingState() === "loading") {
+      this._whenLoaded.mic = enable;
+    } else if (!this._needsStartCamera) {
+      this._setLocalAudio(enable);
+    } else {
+      // Nothing has started local media yet, so the cam is off too. Turning
+      // the mic on starts local media with just the mic.
+      this._camEnabled = false;
+      if (enable) void this._startCamera({ mic: true, cam: false });
+    }
+  }
+
+  private _setLocalAudio(enable: boolean): void {
     this._daily.setLocalAudio(enable);
     if (this._mediaStreamRecorder) {
       if (enable) {
@@ -276,7 +361,14 @@ export class DailyMediaManager extends MediaManager {
   }
   enableCam(enable: boolean): void {
     this._camEnabled = enable;
-    this._daily.setLocalVideo(enable);
+    if (this._daily.meetingState() === "loading") {
+      this._whenLoaded.cam = enable;
+    } else if (!this._needsStartCamera) {
+      this._daily.setLocalVideo(enable);
+    } else {
+      this._micEnabled = false;
+      if (enable) void this._startCamera({ mic: false, cam: true });
+    }
   }
   enableScreenShare(enable: boolean): void {
     if (enable) {
@@ -455,10 +547,6 @@ export class DailyMediaManager extends MediaManager {
               await this._mediaStreamRecorder.begin(event.track);
               if (this._connected) {
                 this._startRecording();
-                if (this._connectResolve) {
-                  this._connectResolve();
-                  this._connectResolve = null;
-                }
               }
             } catch (e) {
               // void. nothing to do.
