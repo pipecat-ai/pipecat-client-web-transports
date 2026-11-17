@@ -1333,8 +1333,11 @@ export class MoqTransport extends Transport {
     return false;
   }
 
+  // On as requested, unless the Microphone's capture has failed.
   get isMicEnabled(): boolean {
-    return this._micEnabled.peek();
+    return (
+      this._micEnabled.peek() && !this._microphone.peek()?.out.error.peek()
+    );
   }
 
   get isSharingScreen(): boolean {

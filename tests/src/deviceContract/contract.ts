@@ -1004,11 +1004,10 @@ export function describeDeviceContract(harness: DeviceHarness): void {
     });
 
     // -----------------------------------------------------------------------
-    describe("9. isMicEnabled / isCamEnabled report the requested state", () => {
-      // They keep their existing meaning: the flags until a device call
-      // changes them, then whatever was last asked for. They don't track
-      // the hardware (a blocked device or a disconnect() isn't reflected),
-      // so those cases aren't asserted here.
+    describe("9. isMicEnabled / isCamEnabled report whether the device is on", () => {
+      // Until the client's first device call or connect() they report the
+      // flags. After that they follow the device: a call sets them to what
+      // it asks for straight away, and a failure sets them back to false.
       function reported(c: PipecatClient): DeviceState {
         return {
           mic: c.isMicEnabled,
@@ -1030,11 +1029,22 @@ export function describeDeviceContract(harness: DeviceHarness): void {
         expect(reported(c)).toEqual({ mic: false, cam: false });
       });
 
-      test("after initDevices(), they report the flags", async () => {
-        const c = makeClient({ mic: true, cam: false });
+      camlessTest(
+        "before anything, with enableCam: true, the cam reports off",
+        async () => {
+          const c = makeClient({ mic: true, cam: true });
+          await settle();
+
+          expect(c.isCamEnabled).toBe(false);
+        }
+      );
+
+      test("after initDevices()", async () => {
+        const c = makeClient({ mic: true, cam: harness.supportsCam });
         await initDevices(c);
 
-        expect(reported(c)).toEqual({ mic: true, cam: false });
+        expect(reported(c)).toEqual(devices());
+        expect(reported(c)).toEqual({ mic: true, cam: harness.supportsCam });
       });
 
       test("after a pre-connect enableMic(false) against an enableMic: true flag", async () => {
@@ -1052,12 +1062,13 @@ export function describeDeviceContract(harness: DeviceHarness): void {
       });
 
       camTest(
-        "after a pre-connect enableCam(true) against an enableCam: false flag",
+        "after a pre-connect enableCam(true) alone: cam on, a flagged-on mic off",
         async () => {
           const c = makeClient({ mic: true, cam: false });
           await enable(c, "cam", true);
 
-          expect(c.isCamEnabled).toBe(true);
+          expect(reported(c)).toEqual(devices());
+          expect(reported(c)).toEqual({ mic: false, cam: true });
         }
       );
 
@@ -1083,6 +1094,77 @@ export function describeDeviceContract(harness: DeviceHarness): void {
 
         expect(reported(c)).toEqual({ mic: true, cam: false });
       });
+
+      test("after disconnect(), off, though the flags turn the mic on", async () => {
+        const c = makeClient({ mic: true, cam: harness.supportsCam });
+        await connect(c);
+        await disconnect(c);
+
+        expect(reported(c)).toEqual({ mic: false, cam: false });
+      });
+
+      test("right after enableMic(true), on before the mic has started", async () => {
+        const c = makeClient({ mic: false, cam: false });
+
+        c.enableMic(true);
+
+        expect(c.isMicEnabled).toBe(true);
+        await settle();
+      });
+
+      test("initDevices() with the mic blocked: on at once, then off when it fails", async () => {
+        inst.devices.blocked.mic = true;
+        const c = makeClient({ mic: true, cam: false });
+
+        const done = c.initDevices();
+        expect(c.isMicEnabled).toBe(true);
+        await within(done, "initDevices()");
+        await settle();
+
+        expect(c.isMicEnabled).toBe(false);
+      });
+
+      test("enableMic(true) with the mic blocked: on at once, then off when it fails", async () => {
+        inst.devices.blocked.mic = true;
+        const c = makeClient({ mic: false, cam: false });
+
+        c.enableMic(true);
+        expect(c.isMicEnabled).toBe(true);
+        await settle();
+
+        expect(c.isMicEnabled).toBe(false);
+      });
+
+      test("connect() by the flags with the mic blocked: off", async () => {
+        inst.devices.blocked.mic = true;
+        const c = makeClient({ mic: true, cam: false });
+        await connect(c);
+
+        expect(c.isMicEnabled).toBe(false);
+      });
+
+      test("enableMic(true) once unblocked: on", async () => {
+        inst.devices.blocked.mic = true;
+        const c = makeClient({ mic: true, cam: false });
+        await initDevices(c);
+        inst.devices.blocked.mic = false;
+        await enable(c, "mic", true);
+
+        expect(c.isMicEnabled).toBe(true);
+        expect(devices().mic).toBe(true);
+      });
+
+      camTest(
+        "initDevices() with the cam blocked: the mic on, the cam off",
+        async () => {
+          inst.devices.blocked.cam = true;
+          const c = makeClient({ mic: true, cam: true });
+          await initDevices(c);
+
+          expect(reported(c)).toEqual(devices());
+          expect(reported(c)).toEqual({ mic: true, cam: false });
+        }
+      );
     });
 
     // -----------------------------------------------------------------------

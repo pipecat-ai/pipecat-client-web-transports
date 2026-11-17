@@ -358,13 +358,13 @@ describe("LiveKitTransport — characterization", () => {
       [{ enableMic: true, enableCam: true }],
       [{ enableMic: false, enableCam: true }],
     ])(
-      "initialize(%j) stores enable flags on isMicEnabled/isCamEnabled",
+      "initialize(%j) reports both devices off until a device call (PipecatClient reports the flags)",
       (opts) => {
         const { callbacks } = buildSpyCallbacks();
         wireTransport(transport, callbacks, opts);
 
-        expect(transport.isMicEnabled).toBe(opts.enableMic);
-        expect(transport.isCamEnabled).toBe(opts.enableCam);
+        expect(transport.isMicEnabled).toBe(false);
+        expect(transport.isCamEnabled).toBe(false);
       }
     );
 
@@ -1069,7 +1069,7 @@ describe("LiveKitTransport — characterization", () => {
       ).not.toHaveBeenCalled();
     });
 
-    test("a failed enableMic(true) still reports the requested state", async () => {
+    test("a failed enableMic(true) leaves isMicEnabled reflecting reality, not the attempted state", async () => {
       const { callbacks } = buildSpyCallbacks();
       wireTransport(transport, callbacks, { enableMic: false });
       (createLocalAudioTrack as Mock).mockRejectedValueOnce(
@@ -1078,10 +1078,10 @@ describe("LiveKitTransport — characterization", () => {
 
       await transport.enableMic(true);
 
-      expect(transport.isMicEnabled).toBe(true);
+      expect(transport.isMicEnabled).toBe(false);
     });
 
-    test("a failed enableMic(false) still reports the requested state", async () => {
+    test("a failed enableMic(false) leaves isMicEnabled reflecting reality, not the attempted state", async () => {
       const { callbacks } = buildSpyCallbacks();
       wireTransport(transport, callbacks); // default enableMic: true
       await transport.initDevices();
@@ -1091,7 +1091,7 @@ describe("LiveKitTransport — characterization", () => {
 
       await transport.enableMic(false);
 
-      expect(transport.isMicEnabled).toBe(false);
+      expect(transport.isMicEnabled).toBe(true);
     });
 
     test("enableMic(true) with no existing track uses setMicrophoneEnabled() once already connected", async () => {

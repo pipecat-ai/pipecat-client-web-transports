@@ -301,7 +301,9 @@ export class WavMediaManager extends MediaManager {
         await this._micStarted;
         this._micErrorReported = false;
       } catch {
-        // void. begin() has already reported it through onDeviceError.
+        // begin() has already reported it through onDeviceError. The mic
+        // didn't start, so it's off whatever was asked for.
+        this._micEnabled = false;
       } finally {
         this._micStarted = null;
       }

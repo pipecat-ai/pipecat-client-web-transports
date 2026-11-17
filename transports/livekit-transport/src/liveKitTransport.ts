@@ -81,8 +81,10 @@ export class LiveKitTransport extends Transport {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
     this._onMessage = messageHandler;
-    this._micEnabled = options.enableMic ?? true;
-    this._camEnabled = options.enableCam ?? false;
+    // Nothing is on until a device call. (PipecatClient reports the enableMic
+    // / enableCam flags until then.)
+    this._micEnabled = false;
+    this._camEnabled = false;
 
     this.attachEventListeners();
 
@@ -203,6 +205,9 @@ export class LiveKitTransport extends Transport {
             );
           } catch (e) {
             logger.warn(`[LiveKit Transport] Could not initialize ${kind}`, e);
+            // It didn't start, so it's off whatever was asked for.
+            if (kind === "mic") this._micEnabled = false;
+            else this._camEnabled = false;
             this._callbacks.onDeviceError?.(
               new DeviceError(
                 [kind],
@@ -653,6 +658,11 @@ export class LiveKitTransport extends Transport {
       if (track) await this._syncTrack(kind, track);
     } catch (e) {
       logger.error(`Failed to toggle ${kind}`, e);
+      // The toggle failed, so report the device as it actually is.
+      const track = isMic ? this._localAudioTrack : this._localVideoTrack;
+      const on = !!track && !track.isMuted;
+      if (isMic) this._micEnabled = on;
+      else this._camEnabled = on;
       this._callbacks.onDeviceError?.(
         new DeviceError(
           [kind],
