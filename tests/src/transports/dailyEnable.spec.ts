@@ -1,11 +1,9 @@
 /**
- * Characterization tests for DailyTransport.enableMic / enableCam under
- * Plan B2: pre-session toggles are remembered for the next session, and
- * applied live only when the call is joined.
- *
- * Pre-fix, both methods called setLocalAudio / setLocalVideo
- * unconditionally — pre-session calls silently no-opped at the daily-js
- * layer AND nothing was stored, so the next connect() lost the change.
+ * Characterization tests for DailyTransport.enableMic / enableCam: before
+ * local media is running, turning a device on starts it (startCamera) with
+ * just that device, and turning one off does nothing; once it's running,
+ * changes are applied live. The enableMic / enableCam flags initDevices()
+ * uses never change.
  */
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
@@ -44,19 +42,14 @@ describe("DailyTransport.enableMic — characterization", () => {
     expect(fakeDaily.setLocalAudio).not.toHaveBeenCalled();
   });
 
-  test("pre-session enableMic(false) IS remembered for the next session via startCamera({ startAudioOff: true })", async () => {
+  test("pre-session enableMic(false) doesn't start local media", () => {
     transport.enableMic(false);
 
-    await transport.initDevices();
-
-    expect(fakeDaily.startCamera).toHaveBeenCalledWith(
-      expect.objectContaining({ startAudioOff: true })
-    );
+    expect(fakeDaily.startCamera).not.toHaveBeenCalled();
   });
 
-  test("pre-session enableMic(true) flips startAudioOff back to false on the next session", async () => {
+  test("pre-session enableMic(false) doesn't change what initDevices() turns on", async () => {
     transport.enableMic(false);
-    transport.enableMic(true);
 
     await transport.initDevices();
 
@@ -65,8 +58,17 @@ describe("DailyTransport.enableMic — characterization", () => {
     );
   });
 
-  test("post-join enableMic(false) IS applied live via setLocalAudio", () => {
-    fakeDaily.setJoined(true);
+  test("pre-session enableMic(true) starts local media with just the mic", () => {
+    transport.enableMic(true);
+
+    expect(fakeDaily.startCamera).toHaveBeenCalledTimes(1);
+    expect(fakeDaily.startCamera).toHaveBeenCalledWith(
+      expect.objectContaining({ startAudioOff: false, startVideoOff: true })
+    );
+  });
+
+  test("enableMic(false) once local media is running IS applied live via setLocalAudio", async () => {
+    await transport.initDevices();
 
     transport.enableMic(false);
 
@@ -93,18 +95,17 @@ describe("DailyTransport.enableCam — characterization", () => {
     expect(fakeDaily.setLocalVideo).not.toHaveBeenCalled();
   });
 
-  test("pre-session enableCam(true) IS remembered for the next session via startCamera({ startVideoOff: false })", async () => {
+  test("pre-session enableCam(true) starts local media with just the cam", () => {
     transport.enableCam(true);
 
-    await transport.initDevices();
-
+    expect(fakeDaily.startCamera).toHaveBeenCalledTimes(1);
     expect(fakeDaily.startCamera).toHaveBeenCalledWith(
-      expect.objectContaining({ startVideoOff: false })
+      expect.objectContaining({ startAudioOff: true, startVideoOff: false })
     );
   });
 
-  test("post-join enableCam(true) IS applied live via setLocalVideo", () => {
-    fakeDaily.setJoined(true);
+  test("enableCam(true) once local media is running IS applied live via setLocalVideo", async () => {
+    await transport.initDevices();
 
     transport.enableCam(true);
 

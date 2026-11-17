@@ -40,25 +40,30 @@ vi.mock("@moq/hang/container", () => ({
 }));
 vi.mock("@moq/publish", async () => {
   const { Signal } = await import("@moq/signals");
+  // Like the real 0.5 Microphone, captures as soon as it's created while
+  // `enabled` is on, and sets `out.error` when getUserMedia fails.
   class Microphone {
-    private _permissionRequested = false;
     device = {
-      requestPermission: () => {
-        if (this._permissionRequested) return;
-        this._permissionRequested = true;
-        navigator.mediaDevices
-          .getUserMedia({ audio: true })
-          .then((stream) => {
-            this.out.source.set({ audio: stream.getAudioTracks()[0] });
-          })
-          .catch(() => {});
+      requestPermission: () => {},
+      out: {
+        available: new Signal<MediaDeviceInfo[] | undefined>(undefined),
+        active: new Signal<string | undefined>(undefined),
       },
     };
     // 0.4 moved component outputs under `out`.
     out = {
       source: new Signal<{ audio: MediaStreamTrack } | undefined>(undefined),
+      error: new Signal<Error | undefined>(undefined),
     };
-    constructor(_opts: unknown) {}
+    constructor(opts: { enabled?: { peek(): boolean } }) {
+      if (opts.enabled?.peek() === false) return;
+      navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then((stream) => {
+          this.out.source.set({ audio: stream.getAudioTracks()[0] });
+        })
+        .catch((error) => this.out.error.set(error));
+    }
     close() {}
   }
   return {
@@ -235,7 +240,7 @@ describe("MoqTransport — characterization", () => {
     expect(recorder.states).toEqual(["ready"]);
   });
 
-  test("initDevices() probes navigator.mediaDevices once and is idempotent thereafter", async () => {
+  test("initDevices() acquires the mic once and is idempotent thereafter", async () => {
     const stub = stubMediaDevices();
     const { callbacks } = buildSpyCallbacks();
     wireTransport(transport, callbacks);
@@ -247,19 +252,23 @@ describe("MoqTransport — characterization", () => {
     expect(transport.tracks().local.audio).toBeDefined();
   });
 
-  test("initDevices() swallows permission failures (fire-and-forget requestPermission)", async () => {
-    // The transport delegates mic acquisition to Publish.Source.Microphone
-    // and does not `await` `device.requestPermission()`, so a getUserMedia
-    // rejection is not surfaced through initDevices(). Locks in that
-    // contract; revisit if the transport starts awaiting/wrapping.
+  test("initDevices() reports a failed capture as a DeviceError rather than throwing", async () => {
+    // Publish.Source.Microphone owns getUserMedia and only exposes a
+    // failure on its `out.error` signal; the transport reports it.
     stubMediaDevices({
       getUserMedia: vi.fn(async () => {
         throw new Error("permission denied");
       }),
     });
+    const onDeviceError = vi.fn();
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, { ...callbacks, onDeviceError });
 
     await expect(transport.initDevices()).resolves.toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     expect(transport.tracks().local.audio).toBeUndefined();
+    expect(onDeviceError).toHaveBeenCalledTimes(1);
   });
 
   test("sendMessage() before connect drops the message with a warning (no-op, not a throw)", () => {

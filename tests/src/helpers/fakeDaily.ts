@@ -25,6 +25,7 @@ export interface FakeDailyCallObject {
   setLocalVideo: Mock;
   localAudio: Mock;
   localVideo: Mock;
+  meetingState: Mock;
   setJoined: (joined: boolean) => void;
   startCameraCallCount: number;
   startCameraShouldThrow?: Error;
@@ -35,6 +36,8 @@ export function createFakeDailyCallObject(): FakeDailyCallObject {
   // tests can model the pre-session vs post-join boundary that
   // enableMic/enableCam now guards on.
   let joined = false;
+  // Whether startCamera() has started local media (meetingState "loaded").
+  let started = false;
   // Tracks last-applied audio/video state, mirrored by setLocalAudio /
   // setLocalVideo so localAudio() / localVideo() can return realistic
   // values once the call is joined.
@@ -59,7 +62,11 @@ export function createFakeDailyCallObject(): FakeDailyCallObject {
     }),
     leave: vi.fn(async () => {
       joined = false;
+      started = false;
     }),
+    meetingState: vi.fn(() =>
+      joined ? "joined-meeting" : started ? "loaded" : "new"
+    ),
     room: vi.fn(async () => ({})),
     participants: vi.fn(() => (joined ? { local: { id: "local-1" } } : {})),
     setLocalAudio: vi.fn((enable: boolean) => {
@@ -81,6 +88,7 @@ export function createFakeDailyCallObject(): FakeDailyCallObject {
   fake.startCamera.mockImplementation(async () => {
     fake.startCameraCallCount += 1;
     if (fake.startCameraShouldThrow) throw fake.startCameraShouldThrow;
+    started = true;
     return {
       camera: { deviceId: "cam-1", label: "Fake Cam", kind: "videoinput" },
       mic: { deviceId: "mic-1", label: "Fake Mic", kind: "audioinput" },
