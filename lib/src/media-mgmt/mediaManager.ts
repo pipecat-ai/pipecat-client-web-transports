@@ -12,10 +12,29 @@ import {
 /** The kinds of media a media manager can capture from the user. */
 export type CaptureSupport = Pick<MediaSupport, "mic" | "cam" | "screenShare">;
 
+/** Which of the user's tracks a media manager is reporting. */
+export type LocalTrackType = "audio" | "video" | "screenAudio" | "screenVideo";
+export type LocalTrackCallback = (
+  track: MediaStreamTrack,
+  type: LocalTrackType
+) => void;
+const LOCAL_TRACK_TYPES: readonly string[] = [
+  "audio",
+  "video",
+  "screenAudio",
+  "screenVideo",
+];
+export const isLocalTrackType = (type: string): type is LocalTrackType =>
+  LOCAL_TRACK_TYPES.includes(type);
+
 export abstract class MediaManager {
   declare protected _userAudioCallback: (data: ArrayBuffer) => void;
   declare protected _options: PipecatClientOptions;
   protected _callbacks: RTVIEventCallbacks = {};
+  // The transport's own track listeners, separate from the client callbacks
+  // above; both fire for every local track event.
+  protected _onTrackStarted?: LocalTrackCallback;
+  protected _onTrackStopped?: LocalTrackCallback;
 
   protected _micEnabled: boolean;
   protected _camEnabled: boolean;
@@ -37,6 +56,21 @@ export abstract class MediaManager {
     this._callbacks = options.callbacks ?? {};
     this._micEnabled = options.enableMic ?? true;
     this._camEnabled = options.enableCam ?? false;
+  }
+
+  /**
+   * Register the transport's listeners for the user's tracks. These are kept
+   * apart from the client callbacks given to setClientOptions(), and both
+   * fire. A transport that sends the tracks itself uses them to pick up a
+   * track acquired after connect(), e.g. enableMic(true) with the mic
+   * started off.
+   */
+  registerTrackCallbacks(
+    onTrackStarted?: LocalTrackCallback,
+    onTrackStopped?: LocalTrackCallback
+  ) {
+    this._onTrackStarted = onTrackStarted;
+    this._onTrackStopped = onTrackStopped;
   }
 
   abstract initialize(): Promise<void>;

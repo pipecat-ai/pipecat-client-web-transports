@@ -53,8 +53,6 @@ export class WebSocketTransport extends Transport {
       new DailyMediaManager(
         true,
         true,
-        undefined,
-        undefined,
         512,
         this._recorderSampleRate,
         opts.playerSampleRate ?? WebSocketTransport.PLAYER_SAMPLE_RATE

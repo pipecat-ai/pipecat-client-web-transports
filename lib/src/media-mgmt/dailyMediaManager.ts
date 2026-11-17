@@ -1,5 +1,5 @@
 import { browserSupportsScreenShare } from "./browserSupport";
-import { CaptureSupport, MediaManager } from "./mediaManager";
+import { CaptureSupport, isLocalTrackType, MediaManager } from "./mediaManager";
 import { MediaStreamRecorder, WavStreamPlayer } from "../wavtools";
 
 import Daily, {
@@ -36,16 +36,11 @@ export class DailyMediaManager extends MediaManager {
   private _remoteAudioLevelInterval: NodeJS.Timeout | null = null;
   private _playerStarted: Promise<void> | null = null;
 
-  private onTrackStartedCallback?: (event: DailyEventObjectTrack) => void;
-  private onTrackStoppedCallback?: (event: DailyEventObjectTrack) => void;
-
   private _recorderChunkSize: number | undefined = undefined;
 
   constructor(
     enablePlayer: boolean = true,
     enableRecording: boolean = true,
-    onTrackStartedCallback?: (event: DailyEventObjectTrack) => void,
-    onTrackStoppedCallback?: (event: DailyEventObjectTrack) => void,
     recorderChunkSize: number | undefined = undefined,
     recorderSampleRate: number = 24000,
     playerSampleRate: number = 24000
@@ -53,8 +48,6 @@ export class DailyMediaManager extends MediaManager {
     super();
     this._connected = false;
     this._currentAudioTrack = null;
-    this.onTrackStartedCallback = onTrackStartedCallback;
-    this.onTrackStoppedCallback = onTrackStoppedCallback;
     this._recorderChunkSize = recorderChunkSize;
 
     this._supportsScreenShare = browserSupportsScreenShare();
@@ -583,7 +576,9 @@ export class DailyMediaManager extends MediaManager {
         ? dailyParticipantToParticipant(event.participant)
         : undefined
     );
-    this.onTrackStartedCallback?.(event);
+    if (isLocalTrackType(event.type)) {
+      this._onTrackStarted?.(event.track, event.type);
+    }
   }
 
   protected handleTrackStopped(event: DailyEventObjectTrack) {
@@ -605,7 +600,9 @@ export class DailyMediaManager extends MediaManager {
         ? dailyParticipantToParticipant(event.participant)
         : undefined
     );
-    this.onTrackStoppedCallback?.(event);
+    if (isLocalTrackType(event.type)) {
+      this._onTrackStopped?.(event.track, event.type);
+    }
   }
 }
 
