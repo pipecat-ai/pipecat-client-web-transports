@@ -343,16 +343,57 @@ export class DailyTransport extends Transport {
     return this._selectedSpeaker;
   }
 
+  /**
+   * Whether startCamera() (or join()) has yet to run for this call, so
+   * setLocalAudio() / setLocalVideo() would do nothing.
+   */
+  private get _needsStartCamera(): boolean {
+    return ["new", "left-meeting", "error"].includes(this._daily.meetingState());
+  }
+
+  /**
+   * Start local media with just the given devices on, for an enableMic() /
+   * enableCam() that comes before anything else started it. The flags in
+   * _dailyFactoryOptions, which initDevices() uses, stay as they are.
+   */
+  private async _startCamera(on: { mic: boolean; cam: boolean }) {
+    const infos = await this._daily.startCamera({
+      ...this._dailyFactoryOptions,
+      startAudioOff: !on.mic,
+      startVideoOff: !on.cam,
+    });
+    await this._reportDevices(infos);
+  }
+
+  // setLocalAudio() / setLocalVideo() are ignored while daily-js is
+  // "loading" (startCamera() or join() from "new"), so a toggle made then is
+  // held here and applied on the "loaded" event. Only the last one counts.
+  private _whenLoaded: { mic?: boolean; cam?: boolean } = {};
+
+  private handleLoaded() {
+    const { mic, cam } = this._whenLoaded;
+    this._whenLoaded = {};
+    if (mic !== undefined) {
+      this._micEnabled = mic;
+      this._daily.setLocalAudio(mic);
+    }
+    if (cam !== undefined) {
+      this._camEnabled = cam;
+      this._daily.setLocalVideo(cam);
+    }
+  }
+
   enableMic(enable: boolean) {
-    // Persist the caller's preference so a subsequent connect() picks it
-    // up via initDevices()'s startCamera({ startAudioOff }) call. Without
-    // this, pre-session toggles were silently lost. Apply live only when
-    // joined — pre-session, daily-js can't act on the request because the
-    // call object isn't part of a meeting yet.
-    this._dailyFactoryOptions.startAudioOff = !enable;
     this._micEnabled = enable;
-    if (this._daily.participants()?.local) {
+    if (this._daily.meetingState() === "loading") {
+      this._whenLoaded.mic = enable;
+    } else if (!this._needsStartCamera) {
       this._daily.setLocalAudio(enable);
+    } else {
+      // Nothing has started local media yet, so the cam is off too. Turning
+      // the mic on starts local media with just the mic.
+      this._camEnabled = false;
+      if (enable) void this._startCamera({ mic: true, cam: false });
     }
   }
 
@@ -361,10 +402,14 @@ export class DailyTransport extends Transport {
   }
 
   enableCam(enable: boolean) {
-    this._dailyFactoryOptions.startVideoOff = !enable;
     this._camEnabled = enable;
-    if (this._daily.participants()?.local) {
+    if (this._daily.meetingState() === "loading") {
+      this._whenLoaded.cam = enable;
+    } else if (!this._needsStartCamera) {
       this._daily.setLocalVideo(enable);
+    } else {
+      this._micEnabled = false;
+      if (enable) void this._startCamera({ mic: false, cam: true });
     }
   }
 
@@ -444,9 +489,27 @@ export class DailyTransport extends Transport {
       throw new RTVIError("Transport instance not initialized");
     }
 
+    // PipecatClient only calls this before anything has started local media
+    // in this session, so this shouldn't happen. If it does, leave the
+    // running devices and the transport state as they are.
+    if (!this._needsStartCamera) return;
+
     this.state = "initializing";
 
+    this._micEnabled = !this._dailyFactoryOptions.startAudioOff;
+    this._camEnabled = !this._dailyFactoryOptions.startVideoOff;
     const infos = await this._daily.startCamera(this._dailyFactoryOptions);
+    await this._reportDevices(infos);
+
+    this.state = "initialized";
+  }
+
+  /** Report the device lists and the devices startCamera() selected. */
+  private async _reportDevices(infos: {
+    camera: MediaDeviceInfo | Record<string, never>;
+    mic: MediaDeviceInfo | Record<string, never>;
+    speaker: MediaDeviceInfo | Record<string, never>;
+  }) {
     const { devices } = await this._daily.enumerateDevices();
     const cams = devices.filter((d) => d.kind === "videoinput");
     const mics = devices.filter((d) => d.kind === "audioinput");
@@ -463,8 +526,6 @@ export class DailyTransport extends Transport {
     this._callbacks.onSpeakerUpdated?.(infos.speaker as MediaDeviceInfo);
 
     await this.startAudioLevelObservers();
-
-    this.state = "initialized";
   }
 
   private async startAudioLevelObservers() {
@@ -526,7 +587,17 @@ export class DailyTransport extends Transport {
     this.state = "connecting";
 
     try {
-      await this._daily.join(this._dailyFactoryOptions);
+      // join() keeps local media as it is if something already started it.
+      // If nothing did, join with the devices as _micEnabled / _camEnabled
+      // have them: the flags if nothing changed them, otherwise whatever
+      // enableMic() / enableCam() or disconnect() left. (PipecatClient runs
+      // initDevices() first when it wants the flags applied, so this matters
+      // when it's keeping the devices as they are.)
+      await this._daily.join({
+        ...this._dailyFactoryOptions,
+        startAudioOff: !this._micEnabled,
+        startVideoOff: !this._camEnabled,
+      });
     } catch (e) {
       logger.error("Failed to join room", e);
       this.state = "error";
@@ -643,6 +714,7 @@ export class DailyTransport extends Transport {
       this.handleRemoteAudioLevel.bind(this)
     );
     this._daily.on("app-message", this.handleAppMessage.bind(this));
+    this._daily.on("loaded", this.handleLoaded.bind(this));
     this._daily.on("left-meeting", this.handleLeftMeeting.bind(this));
     this._daily.on("error", this.handleFatalError.bind(this));
     this._daily.on("nonfatal-error", this.handleNonFatalError.bind(this));
@@ -658,6 +730,10 @@ export class DailyTransport extends Transport {
     this.stopRecording();
 
     await this._daily.leave();
+    this._whenLoaded = {};
+    // leave() turns the devices off without track-stopped events.
+    this._micEnabled = false;
+    this._camEnabled = false;
   }
 
   public sendMessage(message: RTVIMessage) {

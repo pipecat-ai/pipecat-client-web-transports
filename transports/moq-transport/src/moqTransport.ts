@@ -10,6 +10,8 @@ import * as Publish from "@moq/publish";
 import { Effect, Signal } from "@moq/signals";
 import * as Watch from "@moq/watch";
 import {
+  DeviceError,
+  type DeviceErrorType,
   type MediaSupport,
   type PipecatClientOptions,
   type RTVIEventCallbacks,
@@ -18,6 +20,7 @@ import {
   Transport,
   type Tracks,
   type TransportState,
+  UnsupportedFeatureError,
 } from "@pipecat-ai/client-js";
 
 const DEFAULT_NAMESPACE = "pipecat";
@@ -233,6 +236,22 @@ interface ResolvedOptions {
   relayRetryTimeoutMs: number;
 }
 
+/** The DeviceErrorType for a getUserMedia failure. */
+function deviceErrorType(error: Error): DeviceErrorType {
+  switch (error.name) {
+    case "NotAllowedError":
+      return "permissions";
+    case "NotFoundError":
+      return "not-found";
+    case "NotReadableError":
+      return "in-use";
+    case "OverconstrainedError":
+      return "constraints";
+    default:
+      return "unknown";
+  }
+}
+
 function applyDefaults(opts: MoqTransportOptions): ResolvedOptions {
   const relayRetryTimeoutMs = opts.relayRetryTimeoutMs ?? DEFAULT_RELAY_RETRY_TIMEOUT_MS;
   // @moq/net reads a window of zero (or less) as "retry forever", which
@@ -354,7 +373,17 @@ export class MoqTransport extends Transport {
 
   // Publish side (mic → bot).
   private _publishBroadcast: Publish.Broadcast | null = null;
-  private _microphone: Publish.Source.Microphone | null = null;
+  // The Microphone owns getUserMedia and device selection. It's held in a
+  // signal so the publish pipeline follows a replacement (see enableMic()).
+  private _microphone = new Signal<Publish.Source.Microphone | undefined>(
+    undefined,
+  );
+  // Effects that mirror the current Microphone's outputs (local track,
+  // selected and available mics, capture errors) into the RTVI callbacks.
+  private _micSignals: Effect | null = null;
+  // What we last told the app, so the callbacks fire only on a change.
+  private _lastReportedMicTrack?: MediaStreamTrack;
+  private _lastReportedMicId?: string;
   private _capture: Publish.Audio.Capture | null = null;
   private _encoder: Publish.Audio.Encoder | null = null;
   // The reactive audio capture source, derived from the mic's `Media`
@@ -432,22 +461,77 @@ export class MoqTransport extends Transport {
     this._options = options;
     this._callbacks = options.callbacks ?? ({} as RTVIEventCallbacks);
     this._onMessage = messageHandler;
+    this._micEnabled.set(options.enableMic ?? true);
     this.state = "initialized";
   }
 
+  // Start the Microphone by the enableMic flag, so the mic is live (and the
+  // device labels available for a picker) before the user clicks Connect.
+  // Real capture constraints (incl. sample rate) get applied in `_connect`
+  // once we have the resolved options.
   async initDevices(): Promise<void> {
-    // Spin up the Microphone with permission requested so labels are
-    // available for the picker before the user clicks Connect. Real
-    // capture constraints (incl. sample rate) get applied in `_connect`
-    // once we have the resolved options.
-    if (!this._microphone) {
-      this._microphone = new Publish.Source.Microphone({
-        enabled: this._micEnabled,
-        constraints: this._micConstraints,
-        device: { preferred: this._preferredMicId },
-      });
+    // PipecatClient only initializes the devices before anything has started
+    // them in this session, so this shouldn't happen. If it does, leave the
+    // running mic as it is.
+    if (!this._microphone.peek()) {
+      this._micEnabled.set(this._options.enableMic ?? true);
+      this._startMicrophone();
     }
-    this._microphone.device.requestPermission();
+    this._callbacks.onAvailableMicsUpdated?.(await this.getAllMics());
+  }
+
+  // Replace the Microphone (closing any current one) with a fresh one, which
+  // captures right away while the mic is enabled.
+  private _startMicrophone(): void {
+    this._micSignals?.close();
+    this._microphone.peek()?.close();
+    const microphone = new Publish.Source.Microphone({
+      enabled: this._micEnabled,
+      constraints: this._micConstraints,
+      device: { preferred: this._preferredMicId },
+    });
+    this._microphone.set(microphone);
+
+    // Report the Microphone's outputs through the RTVI callbacks, the way
+    // the other transports do.
+    const signals = new Effect();
+    this._micSignals = signals;
+    signals.run((eff) => {
+      const mics = eff.get(microphone.device.out.available);
+      if (mics) this._callbacks.onAvailableMicsUpdated?.(mics);
+    });
+    signals.run((eff) => {
+      const id = eff.get(microphone.device.out.active);
+      const mics = eff.get(microphone.device.out.available);
+      const mic = id ? mics?.find((d) => d.deviceId === id) : undefined;
+      if (!mic || mic.deviceId === this._lastReportedMicId) return;
+      this._lastReportedMicId = mic.deviceId;
+      this._callbacks.onMicUpdated?.(mic);
+    });
+    signals.run((eff) => {
+      this._reportMicTrack(
+        this._audioSourceTrack(eff.get(microphone.out.source)?.audio),
+      );
+    });
+    // Nothing else in the stack reports a failed capture (e.g. a blocked
+    // mic): the Microphone just stops trying until permission changes.
+    signals.run((eff) => {
+      const error = eff.get(microphone.out.error);
+      if (!error) return;
+      this._callbacks.onDeviceError?.(
+        new DeviceError(["mic"], deviceErrorType(error), error.message),
+      );
+    });
+  }
+
+  private _reportMicTrack(track: MediaStreamTrack | undefined): void {
+    if (track === this._lastReportedMicTrack) return;
+    const participant = { id: "local", name: "", local: true };
+    if (this._lastReportedMicTrack) {
+      this._callbacks.onTrackStopped?.(this._lastReportedMicTrack, participant);
+    }
+    if (track) this._callbacks.onTrackStarted?.(track, participant);
+    this._lastReportedMicTrack = track;
   }
 
   _validateConnectionParams(connectParams?: unknown): MoqTransportOptions {
@@ -581,18 +665,16 @@ export class MoqTransport extends Transport {
     });
     this._audioSampleRate.set(merged.audioSampleRate);
 
-    if (!this._microphone) {
-      this._microphone = new Publish.Source.Microphone({
-        enabled: this._micEnabled,
-        constraints: this._micConstraints,
-        device: { preferred: this._preferredMicId },
-      });
-    }
-    const microphone = this._microphone;
+    // Keep the mic as initDevices() / enableMic() left it; start one only if
+    // nothing has.
+    if (!this._microphone.peek()) this._startMicrophone();
 
     // Derive the audio capture source from the mic's `Media` output.
     this._signals.run((eff) => {
-      this._micAudioSource.set(eff.get(microphone.out.source)?.audio);
+      const microphone = eff.get(this._microphone);
+      this._micAudioSource.set(
+        microphone ? eff.get(microphone.out.source)?.audio : undefined,
+      );
     });
 
     // The broadcast is bound to the connection's shared origin, which
@@ -650,7 +732,8 @@ export class MoqTransport extends Transport {
     // when a UA ignores the constraint (e.g. macOS often pins 48k
     // regardless of `sampleRate.ideal`).
     this._signals.run((eff) => {
-      const src = eff.get(microphone.out.source)?.audio;
+      const microphone = eff.get(this._microphone);
+      const src = microphone ? eff.get(microphone.out.source)?.audio : undefined;
       const track = this._audioSourceTrack(src);
       if (!track) return;
       const s = track.getSettings();
@@ -1066,7 +1149,8 @@ export class MoqTransport extends Transport {
       this._encoder?.close();
       this._capture?.close();
       this._publishBroadcast?.close();
-      this._microphone?.close();
+      this._micSignals?.close();
+      this._microphone.peek()?.close();
       this._signals?.close();
       this._connection?.close();
     } finally {
@@ -1081,7 +1165,12 @@ export class MoqTransport extends Transport {
       this._encoder = null;
       this._capture = null;
       this._publishBroadcast = null;
-      this._microphone = null;
+      this._micSignals = null;
+      this._microphone.set(undefined);
+      // The Microphone is gone, and with it the track the app was told about.
+      this._micEnabled.set(false);
+      this._reportMicTrack(undefined);
+      this._lastReportedMicId = undefined;
       this._signals = null;
       this._connection = null;
       this._reloadEnabled = null;
@@ -1178,7 +1267,10 @@ export class MoqTransport extends Transport {
   // --------------------------------------------------------------------
 
   async getAllMics(): Promise<MediaDeviceInfo[]> {
-    return this._microphone?.device.out.available.peek() ?? [];
+    // enumerateDevices() rather than the Microphone's list, which doesn't
+    // exist before a device call (and is empty until permission is granted).
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices.filter((d) => d.kind === "audioinput");
   }
 
   async getAllCams(): Promise<MediaDeviceInfo[]> {
@@ -1198,10 +1290,11 @@ export class MoqTransport extends Transport {
   updateSpeaker(_speakerId: string): void {}
 
   get selectedMic(): MediaDeviceInfo | Record<string, never> {
-    const id = this._microphone?.device.out.active.peek();
+    const microphone = this._microphone.peek();
+    const id = microphone?.device.out.active.peek();
     if (!id) return {};
     return (
-      this._microphone?.device.out.available
+      microphone?.device.out.available
         .peek()
         ?.find((d) => d.deviceId === id) ?? {}
     );
@@ -1217,9 +1310,22 @@ export class MoqTransport extends Transport {
 
   enableMic(enable: boolean): void {
     this._micEnabled.set(enable);
+    if (!enable) return;
+    // With no Microphone yet, start one. One whose capture failed (e.g. a
+    // blocked mic) doesn't try again on its own until the browser's
+    // permission changes, so replace it: the new one captures again, and
+    // either gets the mic or reports the failure.
+    const microphone = this._microphone.peek();
+    if (!microphone || microphone.out.error.peek()) this._startMicrophone();
   }
 
-  enableCam(_enable: boolean): void {}
+  enableCam(_enable: boolean): void {
+    throw new UnsupportedFeatureError(
+      "enableCam",
+      "moqTransport",
+      "MoqTransport carries no video",
+    );
+  }
 
   enableScreenShare(_enable: boolean): void {}
 
@@ -1227,8 +1333,11 @@ export class MoqTransport extends Transport {
     return false;
   }
 
+  // On as requested, unless the Microphone's capture has failed.
   get isMicEnabled(): boolean {
-    return this._micEnabled.peek();
+    return (
+      this._micEnabled.peek() && !this._microphone.peek()?.out.error.peek()
+    );
   }
 
   get isSharingScreen(): boolean {
@@ -1281,7 +1390,7 @@ export class MoqTransport extends Transport {
 
   tracks(): Tracks {
     const localAudio = this._audioSourceTrack(
-      this._microphone?.out.source.peek()?.audio,
+      this._microphone.peek()?.out.source.peek()?.audio,
     );
     return {
       local: localAudio ? { audio: localAudio } : {},
