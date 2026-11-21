@@ -120,7 +120,7 @@ jobs:
           fi
 
       - name: Update documentation
-        uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
+        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
         env:
           DOCS_TOKEN: ${{ steps.app-token.outputs.token }}
         with:
