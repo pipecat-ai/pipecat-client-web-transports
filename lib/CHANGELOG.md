@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.2.2...transport-lib-v0.2.3) (2026-11-21)
+
+
+### Bug Fixes
+
+* **transport-lib:** keep bot audio playing after an interruption ([cedd761](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/cedd761e5cdfa7edb3d25a0769a607fbbbfe8e54))
+
 ## [0.2.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.2.1...transport-lib-v0.2.2) (2026-10-29)
 
 ### Other
