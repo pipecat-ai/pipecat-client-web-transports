@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.2.2...transport-lib-v0.2.3) (2026-11-21)
+
+### Bug Fixes
+
+* Fixed bot audio going silent for the rest of the session after the first interruption when using `WavStreamPlayer` with untagged audio, which is how `@pipecat-ai/websocket-transport` plays bot audio. Interrupting now only drops the remaining chunks of an explicitly tagged track (the `trackId` passed to `add16BitPCM()`); untagged audio added after `interrupt()` plays on a new stream. ([eff3569](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/eff356914e81ddb2d23726970639522c88a1e4bf))
+
 ## [0.2.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.2.1...transport-lib-v0.2.2) (2026-10-29)
 
 ### Other
