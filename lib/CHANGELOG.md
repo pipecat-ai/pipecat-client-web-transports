@@ -2,15 +2,13 @@
 
 ## [0.2.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.2.2...transport-lib-v0.2.3) (2026-11-23)
 
-
 ### Bug Fixes
 
-* **transport-lib:** keep bot audio playing after an interruption ([cedd761](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/cedd761e5cdfa7edb3d25a0769a607fbbbfe8e54))
+* Fixed bot audio going silent for the rest of the session after the first interruption when using `WavStreamPlayer` with untagged audio, which is how `@pipecat-ai/websocket-transport` plays bot audio. Interrupting now only drops the remaining chunks of an explicitly tagged track (the `trackId` passed to `add16BitPCM()`); untagged audio added after `interrupt()` plays on a new stream. ([eff3569](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/eff356914e81ddb2d23726970639522c88a1e4bf))
 
+### Other
 
-### Miscellaneous Chores
-
-* bump client-js dependency to latest 1.17.0 ([31a9dea](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/31a9deaf0a1975001bff449494ee23c27ec30058))
+* `@pipecat-ai/transport-lib` now requires `@pipecat-ai/client-js` `~1.17.0` as a peer dependency. Upgrade `@pipecat-ai/client-js` to 1.17.x alongside this release. ([9ac2741](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/9ac274142da27428c897e2a4e210412a2922257e))
 
 ## [0.2.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/transport-lib-v0.2.1...transport-lib-v0.2.2) (2026-10-29)
 
