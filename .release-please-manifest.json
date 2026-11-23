@@ -2,7 +2,7 @@
   "lib": "0.2.3",
   "transports/daily": "1.7.3",
   "transports/livekit-transport": "1.1.3",
-  "transports/moq-transport": "0.3.4",
+  "transports/moq-transport": "0.3.5",
   "transports/small-webrtc-transport": "1.11.3",
   "transports/websocket-transport": "1.8.3"
 }
