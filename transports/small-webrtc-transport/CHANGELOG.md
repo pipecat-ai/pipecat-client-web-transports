@@ -7,15 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.11.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.11.2...small-webrtc-transport-v1.11.3) (2026-11-23)
 
+### Changed
 
-### Bug Fixes
+* Unrecognized connection parameters are now logged at info level instead of as a warning. ([890e3d5](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/890e3d55fcae7b580a6ff67cc5e027c63ab20f5c))
 
-* **transports:** log unrecognized connection params at info level ([2f4a53c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/2f4a53cd75656b7bb6e636bdd7c6d8b28ae8d0a8))
+### Other
 
-
-### Miscellaneous Chores
-
-* bump client-js dependency to latest 1.17.0 ([31a9dea](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/31a9deaf0a1975001bff449494ee23c27ec30058))
+* `@pipecat-ai/small-webrtc-transport` now requires `@pipecat-ai/client-js` `~1.17.0` as a peer dependency. Upgrade `@pipecat-ai/client-js` to 1.17.x alongside this release. ([9ac2741](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/9ac274142da27428c897e2a4e210412a2922257e))
 
 ## [1.11.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/small-webrtc-transport-v1.11.1...small-webrtc-transport-v1.11.2) (2026-10-29)
 
