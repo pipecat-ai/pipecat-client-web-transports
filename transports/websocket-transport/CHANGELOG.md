@@ -7,16 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.8.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.8.2...websocket-transport-v1.8.3) (2026-11-23)
 
-
 ### Bug Fixes
 
-* **transports:** log unrecognized connection params at info level ([2f4a53c](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/2f4a53cd75656b7bb6e636bdd7c6d8b28ae8d0a8))
 * **websocket-transport:** accept a start endpoint's response as connect params ([8dbc1e2](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/8dbc1e2594b84050fb8c23f495746644c67e872f))
+* Fixed `PipecatClient.startBotAndConnect()` failing with `WebSocketTransport` when the start endpoint returns more than the transport uses, such as the Pipecat runner's `POST /start` response `{ wsUrl, sessionId, token: null }`. Unrecognized connection parameters are now ignored instead of throwing: `sessionId` silently, and others (for example `fileUploadUrl`) with an info-level log. A `null` or `undefined` `token` is treated as no token, and a `token` of any other non-string type still throws. ([2aff541](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/2aff5410972c5d07463bddb894e136a2d8c7f128), [890e3d5](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/890e3d55fcae7b580a6ff67cc5e027c63ab20f5c))
 
+### Other
 
-### Miscellaneous Chores
-
-* bump client-js dependency to latest 1.17.0 ([31a9dea](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/31a9deaf0a1975001bff449494ee23c27ec30058))
+* `@pipecat-ai/websocket-transport` now requires `@pipecat-ai/client-js` `~1.17.0` as a peer dependency. Upgrade `@pipecat-ai/client-js` to 1.17.x alongside this release. ([9ac2741](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/9ac274142da27428c897e2a4e210412a2922257e))
 
 ## [1.8.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/websocket-transport-v1.8.1...websocket-transport-v1.8.2) (2026-10-29)
 
