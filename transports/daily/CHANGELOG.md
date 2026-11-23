@@ -5,6 +5,13 @@ All notable changes to **Pipecat Daily WebRTC Transport** will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.3](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/daily-transport-v1.7.2...daily-transport-v1.7.3) (2026-11-23)
+
+
+### Miscellaneous Chores
+
+* bump client-js dependency to latest 1.17.0 ([31a9dea](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/31a9deaf0a1975001bff449494ee23c27ec30058))
+
 ## [1.7.2](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/daily-transport-v1.7.1...daily-transport-v1.7.2) (2026-10-29)
 
 ### Other
