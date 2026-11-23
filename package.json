@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "clean": "rm -rf .parcel-cache dist lib/.parcel-cache lib/dist transports/*/.parcel-cache transports/*/dist",
     "prepare": "husky",
     "test": "npm run test --workspace @pipecat-ai-transports/characterization-tests"
   },
@@ -31,7 +32,7 @@
   },
   "peerDependencies": {
     "@daily-co/daily-js": "^0.94.0",
-    "@pipecat-ai/client-js": "^1.16.0"
+    "@pipecat-ai/client-js": "^1.17.0"
   },
   "@parcel/resolver-default": {
     "packageExports": true
