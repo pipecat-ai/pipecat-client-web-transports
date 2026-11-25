@@ -53,8 +53,6 @@ export class WebSocketTransport extends Transport {
       new DailyMediaManager(
         true,
         true,
-        undefined,
-        undefined,
         512,
         this._recorderSampleRate,
         opts.playerSampleRate ?? WebSocketTransport.PLAYER_SAMPLE_RATE
@@ -74,7 +72,9 @@ export class WebSocketTransport extends Transport {
     this._options = options;
     this._callbacks = options.callbacks ?? {};
     this._onMessage = messageHandler;
-    this._mediaManager.setClientOptions(options);
+    // This transport carries no video, so the media manager never turns the
+    // cam on, whatever enableCam says.
+    this._mediaManager.setClientOptions({ ...options, enableCam: false });
     this.state = "disconnected";
   }
 

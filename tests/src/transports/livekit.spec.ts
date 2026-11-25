@@ -358,13 +358,13 @@ describe("LiveKitTransport — characterization", () => {
       [{ enableMic: true, enableCam: true }],
       [{ enableMic: false, enableCam: true }],
     ])(
-      "initialize(%j) stores enable flags on isMicEnabled/isCamEnabled",
+      "initialize(%j) reports both devices off until a device call (PipecatClient reports the flags)",
       (opts) => {
         const { callbacks } = buildSpyCallbacks();
         wireTransport(transport, callbacks, opts);
 
-        expect(transport.isMicEnabled).toBe(opts.enableMic);
-        expect(transport.isCamEnabled).toBe(opts.enableCam);
+        expect(transport.isMicEnabled).toBe(false);
+        expect(transport.isCamEnabled).toBe(false);
       }
     );
 
@@ -1125,7 +1125,7 @@ describe("LiveKitTransport — characterization", () => {
       // The real setMicrophoneEnabled() resolves to track.mute()/unmute()
       // internally when a publication already exists (that's the whole point
       // of this test); our bare mock doesn't simulate that side effect, so
-      // apply it directly to make _syncMicTrack()'s diff observable.
+      // apply it directly to make _syncTrack()'s diff observable.
       roomOf(transport).localParticipant.setMicrophoneEnabled.mockImplementation(
         async (enable: boolean) => {
           track.isMuted = !enable;
@@ -1293,7 +1293,7 @@ describe("LiveKitTransport — characterization", () => {
       expect(spies.onTrackStopped).not.toHaveBeenCalled();
     });
 
-    test("_syncCamTrack() doesn't re-fire onCamUpdated when re-synced to the same device", async () => {
+    test("_syncTrack() doesn't re-fire onCamUpdated when re-synced to the same device", async () => {
       const { callbacks, spies } = buildSpyCallbacks();
       wireTransport(transport, callbacks, { enableMic: false, enableCam: true });
       await transport.initDevices(); // selects cam-1, fires onCamUpdated once
@@ -1305,9 +1305,9 @@ describe("LiveKitTransport — characterization", () => {
       // lands back on the same device) should stay quiet.
       await (
         transport as unknown as {
-          _syncCamTrack(t: unknown): Promise<void>;
+          _syncTrack(kind: string, t: unknown): Promise<void>;
         }
-      )._syncCamTrack(track);
+      )._syncTrack("cam", track);
 
       expect(spies.onCamUpdated).not.toHaveBeenCalled();
     });

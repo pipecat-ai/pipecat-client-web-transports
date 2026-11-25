@@ -58,14 +58,14 @@ describe("WebSocketTransport.initDevices() — characterization", () => {
     [{ enableMic: true, enableCam: true }],
     [{ enableMic: false, enableCam: true }],
   ])(
-    "initialize(%j) forwards enableMic/enableCam through to mediaManager.setClientOptions",
+    "initialize(%j) forwards enableMic to mediaManager.setClientOptions, with the cam always off",
     (opts) => {
       const { callbacks } = buildSpyCallbacks();
       wireTransport(transport, callbacks, opts);
 
       expect(mediaManager.setClientOptions).toHaveBeenCalledTimes(1);
       expect(mediaManager.setClientOptions).toHaveBeenCalledWith(
-        expect.objectContaining(opts)
+        expect.objectContaining({ enableMic: opts.enableMic, enableCam: false })
       );
     }
   );

@@ -12,10 +12,29 @@ import {
 /** The kinds of media a media manager can capture from the user. */
 export type CaptureSupport = Pick<MediaSupport, "mic" | "cam" | "screenShare">;
 
+/** Which of the user's tracks a media manager is reporting. */
+export type LocalTrackType = "audio" | "video" | "screenAudio" | "screenVideo";
+export type LocalTrackCallback = (
+  track: MediaStreamTrack,
+  type: LocalTrackType
+) => void;
+const LOCAL_TRACK_TYPES: readonly string[] = [
+  "audio",
+  "video",
+  "screenAudio",
+  "screenVideo",
+];
+export const isLocalTrackType = (type: string): type is LocalTrackType =>
+  LOCAL_TRACK_TYPES.includes(type);
+
 export abstract class MediaManager {
   declare protected _userAudioCallback: (data: ArrayBuffer) => void;
   declare protected _options: PipecatClientOptions;
   protected _callbacks: RTVIEventCallbacks = {};
+  // The transport's own track listeners, separate from the client callbacks
+  // above; both fire for every local track event.
+  protected _onTrackStarted?: LocalTrackCallback;
+  protected _onTrackStopped?: LocalTrackCallback;
 
   protected _micEnabled: boolean;
   protected _camEnabled: boolean;
@@ -37,6 +56,21 @@ export abstract class MediaManager {
     this._callbacks = options.callbacks ?? {};
     this._micEnabled = options.enableMic ?? true;
     this._camEnabled = options.enableCam ?? false;
+  }
+
+  /**
+   * Register the transport's listeners for the user's tracks. These are kept
+   * apart from the client callbacks given to setClientOptions(), and both
+   * fire. A transport that sends the tracks itself uses them to pick up a
+   * track acquired after connect(), e.g. enableMic(true) with the mic
+   * started off.
+   */
+  registerTrackCallbacks(
+    onTrackStarted?: LocalTrackCallback,
+    onTrackStopped?: LocalTrackCallback
+  ) {
+    this._onTrackStarted = onTrackStarted;
+    this._onTrackStopped = onTrackStopped;
   }
 
   abstract initialize(): Promise<void>;
@@ -96,8 +130,18 @@ export class WavMediaManager extends MediaManager {
   private _wavRecorder;
   private _wavStreamPlayer;
 
-  private _initialized = false;
+  private _connected = false;
   private _recorderChunkSize: number | undefined = undefined;
+  private _listeningForDevices = false;
+  private _micStarted: Promise<unknown> | null = null;
+  private _playerStarted: Promise<void> | null = null;
+  // A blocked mic is reported both by begin() and by every device listing
+  // after it, so once it's reported, hold further mic errors until the next
+  // device call or until the mic starts.
+  private _micErrorReported = false;
+  // The mic track onTrackStarted was last fired for, so a new track (from
+  // begin()) or a re-enabled one fires it, and a disabled one onTrackStopped.
+  private _startedTrack: MediaStreamTrack | null = null;
 
   constructor(
     recorderChunkSize: number | undefined = undefined,
@@ -107,6 +151,7 @@ export class WavMediaManager extends MediaManager {
     this._recorderChunkSize = recorderChunkSize;
     this._wavRecorder = new WavRecorder({ sampleRate: recorderSampleRate });
     this._wavStreamPlayer = new WavStreamPlayer({ sampleRate: 24000 });
+    this._wavRecorder.listenForDeviceErrors(this._handleDeviceError.bind(this));
   }
 
   /** Captures the microphone only. */
@@ -115,42 +160,31 @@ export class WavMediaManager extends MediaManager {
   }
 
   async initialize(): Promise<void> {
-    try {
-      await this._wavRecorder.begin();
-    } catch (error) {
-      // void. swallow the error. we still want to set up
-      // the listeners and the player.
-    }
-    this._wavRecorder.listenForDeviceChange(null);
-    this._wavRecorder.listenForDeviceChange(
-      this._handleAvailableDevicesUpdated.bind(this)
-    );
-    this._wavRecorder.listenForDeviceErrors(null);
-    this._wavRecorder.listenForDeviceErrors(this._handleDeviceError.bind(this));
-    await this._wavStreamPlayer.connect();
-    this._initialized = true;
+    this._micErrorReported = false;
+    this._micEnabled = this._options?.enableMic ?? true;
+    this._listenForDevices();
+    await Promise.all([
+      this._micEnabled ? this._startMic() : undefined,
+      this._startPlayer(),
+    ]);
   }
 
   async connect(): Promise<void> {
-    if (!this._initialized) {
-      await this.initialize();
-    }
-    const isAlreadyRecording = this._wavRecorder.getStatus() == "recording";
-    if (this._micEnabled && !isAlreadyRecording) {
-      await this._startRecording();
-    }
-    if (this._camEnabled) {
-      console.warn("WavMediaManager does not support video input.");
-    }
+    this._connected = true;
+    // The mic stays as initialize() / enableMic() left it; connect() only
+    // starts recording it.
+    await this._startPlayer();
+    await this._syncMic();
   }
 
   async disconnect(): Promise<void> {
-    if (!this._initialized) {
-      return;
+    this._connected = false;
+    this._micEnabled = false;
+    this._playerStarted = null;
+    if (this._wavRecorder.getStatus() !== "ended") {
+      await this._wavRecorder.end();
     }
-    await this._wavRecorder.end();
     await this._wavStreamPlayer.interrupt();
-    this._initialized = false;
   }
 
   async interruptBotAudio(): Promise<unknown> {
@@ -164,8 +198,12 @@ export class WavMediaManager extends MediaManager {
     return this._wavStreamPlayer.add16BitPCM(data, id);
   }
 
-  getAllMics(): Promise<MediaDeviceInfo[]> {
-    return this._wavRecorder.listDevices();
+  async getAllMics(): Promise<MediaDeviceInfo[]> {
+    // Not the recorder's listDevices(): that asks for mic permission first,
+    // and listing devices shouldn't prompt. Until permission is granted the
+    // labels are blank, as with any enumerateDevices().
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices.filter((d) => d.kind === "audioinput");
   }
   getAllCams(): Promise<MediaDeviceInfo[]> {
     // TODO: Video not supported yet
@@ -177,15 +215,14 @@ export class WavMediaManager extends MediaManager {
   }
 
   async updateMic(micId: string): Promise<void> {
+    this._micErrorReported = false;
     const prevMic = this._wavRecorder.deviceSelection;
     if (this._wavRecorder.getStatus() !== "ended") {
       await this._wavRecorder.end();
     }
     try {
       await this._wavRecorder.begin(micId);
-      if (this._micEnabled) {
-        await this._startRecording();
-      }
+      await this._syncMic();
       const curMic = this._wavRecorder.deviceSelection;
       if (curMic && prevMic && prevMic.label !== curMic.label) {
         this._callbacks.onMicUpdated?.(curMic);
@@ -217,19 +254,12 @@ export class WavMediaManager extends MediaManager {
 
   async enableMic(enable: boolean): Promise<void> {
     this._micEnabled = enable;
-    if (!this._wavRecorder.stream) return;
-    this._wavRecorder.stream
-      .getAudioTracks()
-      .forEach((track: MediaStreamTrack) => {
-        track.enabled = enable;
-        if (!enable) {
-          this._callbacks.onTrackStopped?.(track, localParticipant());
-        }
-      });
     if (enable) {
-      await this._startRecording();
+      this._micErrorReported = false;
+      this._listenForDevices();
+      await this._startMic();
     } else {
-      await this._wavRecorder.pause();
+      await this._syncMic();
     }
   }
   enableCam(enable: boolean): void {
@@ -258,14 +288,68 @@ export class WavMediaManager extends MediaManager {
     return { local: tracks ? { audio: tracks } : {} };
   }
 
-  private async _startRecording() {
-    await this._wavRecorder.record((data) => {
-      this._userAudioCallback?.(data.mono);
-    }, this._recorderChunkSize);
-    const track = this._wavRecorder.stream?.getAudioTracks()[0];
-    if (track) {
-      this._callbacks.onTrackStarted?.(track, localParticipant());
+  /**
+   * Acquire the mic if it isn't already, then bring it in line with
+   * _micEnabled, which a call made while it was starting may have changed.
+   * Concurrent callers share the one begin(). A blocked mic has already been
+   * reported by the recorder, and stays off.
+   */
+  private async _startMic(): Promise<void> {
+    if (this._wavRecorder.getStatus() === "ended") {
+      this._micStarted ??= this._wavRecorder.begin();
+      try {
+        await this._micStarted;
+        this._micErrorReported = false;
+      } catch {
+        // begin() has already reported it through onDeviceError. The mic
+        // didn't start, so it's off whatever was asked for.
+        this._micEnabled = false;
+      } finally {
+        this._micStarted = null;
+      }
     }
+    await this._syncMic();
+  }
+
+  /**
+   * Make the mic track and the recorder match _micEnabled: the track enabled
+   * or not, and recording only while connected.
+   */
+  private async _syncMic(): Promise<void> {
+    const track = this._wavRecorder.stream?.getAudioTracks()[0];
+    if (!track) return;
+    track.enabled = this._micEnabled;
+    if (this._micEnabled && this._startedTrack !== track) {
+      this._startedTrack = track;
+      this._callbacks.onTrackStarted?.(track, localParticipant());
+      this._onTrackStarted?.(track, "audio");
+    } else if (!this._micEnabled && this._startedTrack === track) {
+      this._startedTrack = null;
+      this._callbacks.onTrackStopped?.(track, localParticipant());
+      this._onTrackStopped?.(track, "audio");
+    }
+    const status = this._wavRecorder.getStatus();
+    if (this._micEnabled && this._connected && status === "paused") {
+      await this._wavRecorder.record((data) => {
+        this._userAudioCallback?.(data.mono);
+      }, this._recorderChunkSize);
+    } else if (!this._micEnabled && status === "recording") {
+      await this._wavRecorder.pause();
+    }
+  }
+
+  /** Get the bot-audio player ready, once per session. */
+  private _startPlayer(): Promise<void> {
+    this._playerStarted ??= this._wavStreamPlayer.connect().then(() => {});
+    return this._playerStarted;
+  }
+
+  private _listenForDevices() {
+    if (this._listeningForDevices) return;
+    this._listeningForDevices = true;
+    this._wavRecorder.listenForDeviceChange(
+      this._handleAvailableDevicesUpdated.bind(this)
+    );
   }
 
   private _handleAvailableDevicesUpdated(devices: MediaDeviceInfo[]) {
@@ -298,6 +382,10 @@ export class WavMediaManager extends MediaManager {
     type: DeviceErrorType;
     error?: Error;
   }) {
+    if (devices.length === 1 && devices[0] === "mic") {
+      if (this._micErrorReported) return;
+      this._micErrorReported = true;
+    }
     const deviceError = new DeviceError(
       devices,
       type,

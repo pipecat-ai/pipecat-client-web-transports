@@ -68,34 +68,48 @@ describe("DailyTransport.initDevices() — characterization", () => {
     expect(spies.onSpeakerUpdated).toHaveBeenCalledTimes(1);
   });
 
-  test("repeated initDevices() calls re-invoke startCamera and re-emit state transitions", async () => {
-    // Today DailyTransport is NOT idempotent: a second call re-runs the full
-    // startCamera/enumerate flow. Step 2 introduces a MediaState gate that
-    // short-circuits repeat calls at the PipecatClient layer.
+  test("a repeated initDevices() leaves the running local media and state alone", async () => {
+    // PipecatClient doesn't make repeat calls; this is the transport's own
+    // guard.
     const { callbacks, recorder, spies } = buildSpyCallbacks();
     wireTransport(transport, callbacks);
 
     await transport.initDevices();
     await transport.initDevices();
 
-    expect(fakeDaily.startCameraCallCount).toBe(2);
+    expect(fakeDaily.startCameraCallCount).toBe(1);
     expect(transport.state).toBe("initialized");
-    expect(recorder.states).toEqual([
-      "initializing",
-      "initialized",
-      "initializing",
-      "initialized",
-    ]);
-    // Device callbacks fire twice as well — consumers see duplicate updates.
-    expect(spies.onMicUpdated).toHaveBeenCalledTimes(2);
-    expect(spies.onCamUpdated).toHaveBeenCalledTimes(2);
+    expect(recorder.states).toEqual(["initializing", "initialized"]);
+    expect(spies.onMicUpdated).toHaveBeenCalledTimes(1);
+    expect(spies.onCamUpdated).toHaveBeenCalledTimes(1);
+  });
+
+  test("initDevices() after a mute doesn't turn the mic back on or report it on", async () => {
+    const { callbacks } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    await transport.initDevices();
+    transport.enableMic(false);
+
+    await transport.initDevices();
+
+    expect(fakeDaily.setLocalAudio).toHaveBeenLastCalledWith(false);
+    expect(transport.isMicEnabled).toBe(false);
+  });
+
+  test("initDevices() once joined doesn't call startCamera or change the state", async () => {
+    const { callbacks, recorder } = buildSpyCallbacks();
+    wireTransport(transport, callbacks);
+    fakeDaily.setJoined(true);
+
+    await transport.initDevices();
+
+    expect(fakeDaily.startCamera).not.toHaveBeenCalled();
+    expect(recorder.states).toEqual([]);
   });
 
   test("second initDevices() does NOT restart audio observers (partial internal idempotency)", async () => {
-    // The one place DailyTransport guards against repeats is the audio-level
-    // observers: it checks isLocalAudioLevelObserverRunning() before starting
-    // them. This partial idempotency is what step 2 should preserve when it
-    // short-circuits repeat initDevices calls.
+    // The audio-level observers are guarded too: they're only started when
+    // not already running.
     const { callbacks } = buildSpyCallbacks();
     wireTransport(transport, callbacks);
 
