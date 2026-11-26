@@ -7,10 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.6](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.3.5...moq-transport-v0.3.6) (2026-11-26)
 
+### Other
 
-### Miscellaneous Chores
-
-* bump client-js dependency to latest 1.18.0 ([b8c0ac1](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/b8c0ac13aaf3b49dcf00b5fddb0ef279d382a5cd))
+* `@pipecat-ai/moq-transport` now requires `@pipecat-ai/client-js` `~1.18.0` as a peer dependency. Upgrade `@pipecat-ai/client-js` to 1.18.x alongside this release. ([856af9f](https://github.com/pipecat-ai/pipecat-client-web-transports/commit/856af9f9eb692dc1d1f3fa28ee126445776778f0))
 
 ## [0.3.5](https://github.com/pipecat-ai/pipecat-client-web-transports/compare/moq-transport-v0.3.4...moq-transport-v0.3.5) (2026-11-23)
 
